@@ -27,7 +27,7 @@ Do not use Git submodules for this workspace. The root repo ignores child repo d
 New developers clone this root meta repo first:
 
 ```bash
-git clone git@github.com:c12-ai/BIC.git
+git clone git@github.com:c12-ai/BIC-meta.git BIC
 cd BIC
 ```
 
@@ -112,6 +112,21 @@ When a change affects product behavior:
 4. Link implementation PRs back to the PRD PR or commit.
 
 Documentation-only PRD changes can be root-only.
+
+## Wiki
+
+Wiki-source pages are tracked in this repo under:
+
+```text
+docs/wiki/
+```
+
+Start from `docs/wiki/Home.md`.
+
+GitHub Wiki is enabled for `BIC-meta`, but GitHub only creates the backing
+`BIC-meta.wiki.git` repository after the first page is saved through the web UI.
+After that one-time initialization, these pages can be pushed to the GitHub Wiki
+remote directly.
 
 ## Trellis Tracking
 
