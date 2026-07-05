@@ -1,0 +1,29 @@
+.playwright-mcp
+.DS_Store
+.ruff_cache/
+.vscode/
+.e2e-logs/
+CLAUDE.local.md
+
+# Local AI-tool runtime/config overrides.
+.claude/.DS_Store
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Project-owned PRD skill. Other synced personal/plugin skills are local noise.
+/.claude/skills/*
+!/.claude/skills/prd/
+!/.claude/skills/prd/SKILL.md
+/.agents/skills/*
+!/.agents/skills/prd
+
+# Child repositories are cloned into this workspace but remain independently
+# managed Git repositories. The root meta repo tracks only workspace docs,
+# Trellis artifacts, scripts, and onboarding files.
+/BIC-agent-portal/
+/BIC-agent-service/
+/BIC-lab-service/
+/BIC-shared-types/
+/mars_interface_mock/
+/tech_design/
+/tlc-op-builder/
