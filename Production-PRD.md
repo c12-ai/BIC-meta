@@ -196,7 +196,9 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - Material classification has exactly two tiers: specific (`有特殊性`) and non-specific (`无特殊性`). "Unique" is the retired earlier name for specific; no third tier exists.
    - The configuration source must identify which materials are experiment-specific and which are generic/non-specific.
    - The configuration source must also identify which task requires each material and whether that material is manual/specific or robot auto-pick.
-   - The configuration source must cover the TLC bench dispatch box slots (see rule 7); a physical surface the product dispatches from must not exist outside the reviewed source.
+   - The configuration source covers the chemist-facing shelf regions (see rule 7). Robot-internal
+     parking slots (the robot bench the carry ops target) are owned by the robot protocol and lab
+     execution state, and are deliberately excluded from the chemist-facing configuration source.
 
 6. **TLC physical inventory integrity**
    - Lab Service is the authority for TLC physical inventory and must persist a meaningful physical
@@ -315,7 +317,8 @@ For the TLC Lab Logistic panel:
   (2026-07-05): see rules 8 and 9 under Experiment Item Management Rules.
 - Pending external follow-up: the Feishu interaction document and 实验室信息维护配置表 must be
   corrected at source — the `1 or 2` tube quantity and click-empty-slot assignment statements are
-  superseded, and the 配置表 needs a row for the TLC bench dispatch box slots.
+  superseded, and a note should record that the robot fetches the sample-tube box from the shelf
+  with system-resolved coordinates (no new 配置表 row needed; bench parking is robot-internal).
 
 ## Related Project PRDs
 
@@ -324,6 +327,8 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
+- 2026-07-05: Consistency pass after implementation — config source scope excludes robot-internal
+  parking slots; the 配置表 follow-up no longer asks for a bench-box row.
 - 2026-07-05: Added requirement 8 (AI-engine backed intelligence): ChemEngine (Algo
   Team) as the authority for parameter recommendation / result analysis, presigned-URL
   image transfer with dual AWS-S3/MinIO store support, Mars (Robot Team) ownership of RE
