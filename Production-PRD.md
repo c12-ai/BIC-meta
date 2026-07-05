@@ -72,6 +72,29 @@ Core scenarios:
    - Portal, Agent Service, and Lab Service must agree on workflow/session/task identifiers required to connect planning, execution, and result review.
    - Cross-service product behavior belongs in this Production PRD; repo-owned implementation behavior belongs in child Project PRDs or engineering specs.
 
+8. **AI-engine backed intelligence**
+   - ChemEngine (the model service maintained by the Algo Team, "Mind") is the product
+     authority for AI-generated experiment intelligence: objective parsing (reaction
+     material parse, goal confirmation), parameter recommendation (TLC solvent system,
+     CC column choice, RE parameters), and vision-based result analysis (TLC plate
+     recognition, CC result analysis).
+   - Agent Service must obtain this intelligence from ChemEngine rather than fabricating
+     it; when the ChemEngine integration is unavailable or fails, the failure must
+     surface to the product flow loudly instead of being silently substituted.
+   - Exception: RE realtime result analysis is owned by the Robot Team's Mars system,
+     not ChemEngine.
+   - Images that ChemEngine must analyze (TLC plate photos, CC result pictures) are
+     transferred as presigned URLs from the product's S3-compatible object store.
+     Both AWS S3 and MinIO are supported stores; deployments must ensure ChemEngine
+     can reach the store network (client deployments co-locate ChemEngine and MinIO
+     on the same network).
+
+9. **Material preparation and maintenance separation**
+   - Material Preparation is the dispatch-time workflow for experiment-specific items that require human assignment or identity tracking.
+   - Consumable Maintenance is the inventory upkeep workflow for non-specific items that the robot can auto-pick.
+   - The product must not let a Material Preparation surface become a generic consumables editor, and must not let Consumable Maintenance assign experiment-specific items for a task.
+   - A robot dispatch attempt must validate the current task's material state. If validation fails, the user must be guided back to Material Preparation to complete missing or invalid assignments before dispatch.
+
 ## Core Concepts
 
 1. **Experiment Objective**
@@ -158,6 +181,75 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - For TLC, the user must select the sample tubes used by the current experiment.
    - For CC, the user must select the sample column used by the current experiment.
 
+4. **Material Preparation page responsibilities**
+   - The Material Preparation surface contains task-level material cards.
+   - Each task card separates:
+     - manual/specific items, whose exact item or slot must be assigned by the chemist; and
+     - robot auto-pick items, whose matching prepared stock must be present and confirmed.
+   - Manual/specific item assignment must provide assign, view, and update flows so the chemist can record or change the exact physical item/location used by the task.
+   - Robot auto-pick items must show available stock against capacity, such as `3/6`.
+   - The product must block the "confirm all auto-pick" action when any required auto-pick item has zero available stock.
+   - Confirming auto-pick items records that the user accepted the current non-specific stock state for dispatch readiness.
+
+5. **Lab material configuration source**
+   - Lab rack layout, material type (`有特殊性` / `无特殊性`), material areas, slot counts, and task material requirements must be driven by a reviewed lab material configuration source.
+   - Material classification has exactly two tiers: specific (`有特殊性`) and non-specific (`无特殊性`). "Unique" is the retired earlier name for specific; no third tier exists.
+   - The configuration source must identify which materials are experiment-specific and which are generic/non-specific.
+   - The configuration source must also identify which task requires each material and whether that material is manual/specific or robot auto-pick.
+   - The configuration source must cover the TLC bench dispatch box slots (see rule 7); a physical surface the product dispatches from must not exist outside the reviewed source.
+
+6. **TLC physical inventory integrity**
+   - Lab Service is the authority for TLC physical inventory and must persist a meaningful physical
+     layout for every TLC inventory item.
+   - A TLC inventory record is valid only when it has at least one of:
+     - a concrete `location_id`, meaning the object is located at a specific lab slot; or
+     - a `parent_object_id`, meaning the object is contained inside another physical object, such as
+       a sample tube inside a tube box.
+   - A TLC inventory record with both `location_id` and `parent_object_id` missing is invalid because
+     it does not describe any meaningful lab state.
+   - TLC readiness must be based on real physical inventory records and must not be satisfied by
+     placeless placeholder rows.
+   - There is no TLC "staining jar" concept. TLC uses developing tanks. Product, service, and
+     readiness logic must not expose or require a staining-jar item.
+   - `eluent_tube_pair_50ml` is not a separate TLC physical inventory object and must not be required
+     as a readiness item.
+   - Waste-tip bins are real TLC physical objects and must have a concrete persisted location.
+   - Tip boxes are real TLC physical inventory. They must exist in the initial or maintained lab
+     inventory with concrete locations before execution. Allocation may choose an existing tip-box ID
+     for a task, but must not create tip-box inventory rows during allocation.
+
+7. **TLC sample-tube inventory model: shelf is the chemist surface; the robot carries**
+   (decided 2026-07-05; revised same day per the robot protocol — supersedes the earlier
+   bench-selection wording)
+   - The supply-shelf sample-tube boxes (two layers) are the chemist's surface for BOTH
+     maintenance and selection: the chemist prepares tubes in a shelf box and selects that box's
+     tubes for the experiment.
+   - At execution start (first round only) the robot itself carries the required boxes from the
+     supply shelf to its bench: the selected 2ml sample box, the 50ml solvent box, and both tip
+     boxes. The bench slots are robot-internal parking, not a chemist surface.
+   - The system must resolve the carry coordinates (layer/side/column) from each box's actual
+     recorded inventory placement — the chemist's selected box determines where the robot picks.
+     Fixed example coordinates from protocol documents must never be dispatched when placement is
+     known.
+   - The Consumable Maintenance page shows shelf sample-tube stock read-only; specific items are
+     never editable there (rule 1 vs rule 2 separation).
+   - The product surface must explain that the robot fetches the box from the shelf itself, so
+     the chemist never hand-stocks the robot bench.
+
+8. **Assignment semantics: maintain-then-select** (decided 2026-07-05, applies to CC and TLC uniformly)
+   - Assigning a manual/specific item to a task means SELECTING an already-maintained physical
+     item; selection must never create inventory.
+   - Empty slots or cells are filled and cleared only in maintenance mode.
+   - This supersedes the external interaction document's description of assignment as clicking an
+     empty slot; the Feishu document must be corrected at source.
+
+9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05)
+   - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row,
+     contiguous columns, starting at column 1 (the shape rule applies within the box the robot
+     carries).
+   - The external interaction document's `1 or 2` quantity (and one-location demo note) is stale
+     and must be corrected at source; no 1-tube dispatch support is planned.
+
 ## UI Interaction Requirements
 
 For the TLC Lab Logistic panel:
@@ -177,10 +269,35 @@ For the TLC Lab Logistic panel:
 - Generic consumables can be configured through Consumable Maintenance by entering maintenance mode from the upper-right button, clicking slot icons, and exiting edit mode to persist changes.
 - The special item maintenance module is available from the Parameter Design stage and can maintain experiment-specific lab items while also selecting the items required by the current experiment.
 - Exiting special item maintenance/edit mode persists item additions/removals to the database.
+- Dispatch material validation can route the user back to Material Preparation when task material state is incomplete or invalid.
+- Material Preparation task cards separate manual/specific items from robot auto-pick items.
+- Robot auto-pick materials show available stock against capacity and cannot be confirmed when required stock is unavailable.
 - TLC experiment design lets the user select sample tubes for the current experiment.
 - CC experiment design lets the user select the sample column for the current experiment.
 - The TLC Lab Logistic panel shows empty sample tube positions for TLC-relevant slots.
+- TLC inventory state has no records with both `location_id` and `parent_object_id` missing.
+- The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
+  boxes; the robot bench is robot-internal parking and is not chemist-maintained.
+- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row,
+  contiguous columns, starting at column 1.
+- A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
+  those items' recorded inventory placements.
+- The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
+  is read-only there.
+- Selecting an item for a task never creates inventory; empty slots/cells change only in
+  maintenance mode.
+- TLC readiness does not depend on placeless placeholder records such as staining jar or
+  eluent tube pair.
+- TLC tip boxes exist as physical inventory with concrete locations before execution, and execution
+  allocation selects existing tip-box IDs rather than creating inventory rows.
+- TLC waste-tip bins exist as physical inventory with concrete locations.
 - Robot-executed steps are dispatched through Lab Service / Nexus.
+- AI parameter recommendations and result analyses consumed by the product come from
+  ChemEngine; ChemEngine failures surface as visible errors, never as silently
+  substituted results.
+- Image evidence sent to ChemEngine is transferred via presigned URLs that ChemEngine
+  can reach in the target deployment.
+- RE realtime result analysis comes from the Robot Team's Mars system, not ChemEngine.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
@@ -194,13 +311,33 @@ For the TLC Lab Logistic panel:
 ## Dependencies / Open Questions
 
 - Detailed production acceptance criteria for each chemistry stage should be expanded as product decisions are finalized.
+- The former open questions on TLC tube quantity and slot-assignment semantics are RESOLVED
+  (2026-07-05): see rules 8 and 9 under Experiment Item Management Rules.
+- Pending external follow-up: the Feishu interaction document and 实验室信息维护配置表 must be
+  corrected at source — the `1 or 2` tube quantity and click-empty-slot assignment statements are
+  superseded, and the 配置表 needs a row for the TLC bench dispatch box slots.
 
 ## Related Project PRDs
 
 - Agent Service Project PRD: `BIC-agent-service/docs/project-prd.md`
+- Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
 
+- 2026-07-05: Added requirement 8 (AI-engine backed intelligence): ChemEngine (Algo
+  Team) as the authority for parameter recommendation / result analysis, presigned-URL
+  image transfer with dual AWS-S3/MinIO store support, Mars (Robot Team) ownership of RE
+  realtime analysis, and matching acceptance criteria. Backend transport behavior
+  (mock/real switch) is refined in the Agent Service Project PRD.
+- 2026-07-05: Revised rule 7 per the robot protocol (mars_doc tlc-api-reference): the chemist
+  maintains AND selects sample tubes on the supply shelf; the robot carries the 2ml/50ml/tip
+  boxes shelf→bench itself with coordinates resolved from inventory placement; bench = robot
+  parking. Acceptance criteria updated to match.
+- 2026-07-05: Closed the tube-quantity (2–4 confirmed) and assignment-semantics
+  (maintain-then-select) open questions; added the TLC shelf-stock / bench-dispatch-box inventory
+  model, two-tier specificity terminology, and matching acceptance criteria.
+- 2026-07-05: Added material preparation/consumable maintenance separation, task material card responsibilities, auto-pick confirmation rules, and open questions from the Feishu interaction document.
+- 2026-07-05: Added TLC physical inventory integrity rules for location/containment validity, tip boxes, waste-tip bins, developing tanks, and removal of invalid readiness placeholders.
 - 2026-07-05: Expanded generic consumable and experiment-specific lab item maintenance rules.
 - 2026-07-05: Added core experiment concepts, TLC execution flow, item management rules, and TLC Lab Logistic UI requirements.
 - 2026-07-05: Reframed this file as the business Production PRD and moved PRD-governance guidance to the `prd` skill.
