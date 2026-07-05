@@ -1,0 +1,32 @@
+{
+  "id": "robot-execution-log",
+  "name": "robot-execution-log",
+  "title": "Detailed robot execution log (robot to FE)",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-06-30",
+  "completedAt": "2026-06-30",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-30-execlog-shared-contract",
+    "06-30-execlog-lab-publish",
+    "06-30-execlog-agent-persist",
+    "06-30-execlog-fe-timeline",
+    "06-30-execlog-lab-readapi"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

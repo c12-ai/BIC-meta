@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/06-09-unify-spec-param-phases-into-single-params-phase/prd.md", "reason": "Acceptance criteria checklist (phase/state, data model, tools, DB, events, FE, cross-layer, specs, tests) is the check contract; the 'End-to-end check criteria' section (Drake 2026-06-12) is the live-stack manual gate: extract->recommend (stubbed Mind), missing-field ask, chat-driven re-recommend, manual override, dispatch->analyze->confirm->CC-to-RE handoff"}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "Verify cross-layer contract doc was updated in the same change set (Rule 10 - incomplete without it)"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/specialist_tools.md", "reason": "Verify tool registry Table A matches the implemented 5-tool surface; no stale spec-phase tool rows"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/events.md", "reason": "Verify reduction table matches code _FORM_CONFIRM_PHASE_ADVANCE; confirm_kind literal consistent"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/persistence.md", "reason": "Verify trials schema doc matches migration (params column, dropped spec/param, phase default)"}
+{"file": "BIC-agent-portal/.trellis/spec/backend-contract.md", "reason": "Verify FE contract mirror agrees with BE: confirm_kind=params, task_params_set event, form payload shape"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/quality-guidelines.md", "reason": "FE quality bar for the reworked workspace components and store"}

@@ -1,0 +1,17 @@
+{"file": ".trellis/spec/BIC-agent-service/backend/quality-guidelines.md", "reason": "BE quality bar — type-first, no untyped dict manipulation, test intent encoding (Rules 7+11)."}
+{"file": ".trellis/spec/BIC-agent-service/backend/L3/runtime.md", "reason": "Translator contract — reviewer verifies R4/R5 changes match §6 and any new spec lines land in the same PR."}
+{"file": ".trellis/spec/BIC-agent-service/backend/L3/events.md", "reason": "I-E-E rule — reviewer verifies ReasoningDeltaEvent + NodeCompletedEvent carve-out matches the emit-only set."}
+{"file": ".trellis/spec/BIC-agent-service/backend/L3/graphs.md", "reason": "Subgraph node contracts — reviewer verifies every cc/re/plan node uses chat_model_reasoning per PRD R3."}
+{"file": ".trellis/spec/BIC-agent-service/backend/L4/clients.md", "reason": "LLMClient contract — reviewer verifies two-instance topology + extra_body wiring + ChatDeepSeek migration is reflected here."}
+{"file": ".trellis/spec/BIC-agent-service/backend/L2/orchestrator.md", "reason": "Reviewer verifies orchestrator carve-out matches spec (TextDelta + ReasoningDelta + NodeCompleted all emit-only with session_seq=None)."}
+{"file": ".trellis/spec/BIC-agent-service/backend/error-handling.md", "reason": "Failure-mode coverage — provider swap may surface new error types (DashScope quota, enable_thinking rejection on non-hybrid models)."}
+{"file": ".trellis/spec/BIC-agent-service/backend/logging-guidelines.md", "reason": "Old PPIO-named log lines must be renamed (PRD R7 purge); reviewer enforces consistent log naming for DashScope."}
+{"file": ".trellis/spec/BIC-agent-service/backend/database-guidelines.md", "reason": "Reviewer verifies no orphan session_events rows from misclassified ReasoningDeltaEvent (the latent bug PRD R6 fixes)."}
+{"file": ".trellis/spec/BIC-agent-service/backend/contracts.md", "reason": "Cross-layer contract index — reviewer verifies Rule 10 (contract changes require spec updates) is satisfied for runtime/events/clients."}
+{"file": ".trellis/spec/BIC-agent-service/ci/index.md", "reason": "CI guardrails — reviewer verifies new ChatDeepSeek dep, removed langchain-openai dep, and any new env-var requirements are reflected in CI config."}
+{"file": ".trellis/spec/bic-agent-portal/backend-contract.md", "reason": "FE↔BE contract — reviewer verifies the reasoning_delta SSE shape hasn't changed and FE wiring still matches."}
+{"file": ".trellis/spec/bic-agent-portal/frontend/quality-guidelines.md", "reason": "FE quality bar — for any FE tweaks if AC1 Playwright test requires component changes."}
+{"file": ".trellis/spec/bic-agent-portal/frontend/type-safety.md", "reason": "FE type-safety — reviewer verifies any FE-side changes preserve the ReasoningDeltaEvent shape."}
+{"file": ".trellis/tasks/06-03-provider-swap-to-qwen-via-chatdeepseek-and-surface-reasoning-to-sse/research/qwen-wrapper-probe.md", "reason": "Reviewer uses this as the source-of-truth for what reasoning_content arrives in additional_kwargs and validates the emitter extension against the recorded shape."}
+{"file": ".trellis/tasks/06-03-provider-swap-to-qwen-via-chatdeepseek-and-surface-reasoning-to-sse/research/ppio-deepseek-r1-probe.md", "reason": "Reviewer cross-checks the PPIO purge: no leftover references to deepseek-r1 / ppio / pa/gpt-5-* (PRD R7 + AC5)."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared guides for code-reuse + cross-layer review (multi-layer change spans L2/L3/L4)."}

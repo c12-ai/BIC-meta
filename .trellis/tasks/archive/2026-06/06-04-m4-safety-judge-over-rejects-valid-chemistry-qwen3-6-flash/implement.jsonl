@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/06-04-m4-safety-judge-over-rejects-valid-chemistry-qwen3-6-flash/prd.md", "reason": "Task PRD: Phase 1 design locked (conditional logger.info on reject only, structured-kwargs form, no event schema change, no Pydantic change)"}
+{"file": ".trellis/tasks/06-04-m4-safety-judge-over-rejects-valid-chemistry-qwen3-6-flash/research/baseline-rejection-sample-2026-06-04.md", "reason": "Phase 2 seed sample (Draft a CC Spec for me — reject on qwen3.6-flash, pass on pa/gpt-5-mini); canonical example the new logger must capture"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/graphs.md", "reason": "Admittance node contract authority (§1.3); verify the canonical contract in PRD reflects spec accurately and review if any §1.3 clarification is warranted"}

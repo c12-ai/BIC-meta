@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/BIC-agent-service/backend/index.md", "reason": "Primary backend development guidelines for lifecycle/schema/event changes in BIC-agent-service."}
+{"file": ".trellis/spec/BIC-agent-service/ci/index.md", "reason": "CI and verification expectations for BIC-agent-service changes."}
+{"file": ".trellis/spec/BIC-agent-portal/frontend/index.md", "reason": "Portal snapshot hydration and stage UI will likely need to consume the new lifecycle contract."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared cross-layer thinking guide for backend snapshot, portal hydration, and lab dispatch boundaries."}
+{"file": ".trellis/tasks/06-21-align-l1-l2-experiment-workflow-lifecycle/research/current-backend-lifecycle-audit.md", "reason": "Code audit and gap analysis that defines the implementation boundaries for L1/L2 lifecycle alignment."}

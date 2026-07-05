@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/06-04-qwen3-6-flash-plan-and-spec-form-drift-versus-pa-gpt-5-mini-baseline/prd.md", "reason": "Task PRD with locked decisions; check spec-code alignment claims"}
+{"file": ".trellis/tasks/06-04-qwen3-6-flash-plan-and-spec-form-drift-versus-pa-gpt-5-mini-baseline/research/be-log-evidence-2026-06-04.md", "reason": "Evidence baseline for verifying the fix targets the actual root cause"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/orchestrator.md", "reason": "Verify loader code matches the updated spec example"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/domain-types.md", "reason": "Verify SessionContext type table reflects the deleted CurrentFocus"}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "Verify D17 row rescinded"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/state.md", "reason": "Verify rehydrate snapshot-SystemMessage references are pruned"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/graphs.md", "reason": "Verify rehydrate_specialist_state description matches slimmed code"}

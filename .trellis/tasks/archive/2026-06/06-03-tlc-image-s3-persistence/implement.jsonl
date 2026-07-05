@@ -1,0 +1,5 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/clients.md", "reason": "S3/MinIO client conventions — confirms boto3 wrapper is the right place to swap endpoint/credentials"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/facade.md", "reason": "SessionService presign Facade contract — verify session-prefix gate stays intact during config swap"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L1/http-routes.md", "reason": "Presign HTTP route shape — confirm no request/response schema change is required"}
+{"file": "BIC-agent-portal/.trellis/spec/backend-contract.md", "reason": "FE↔BE presign contract — confirm FE upload flow stays compatible after AWS S3 swap"}
+{"file": "BIC-agent-service/.trellis/spec/backend/index.md", "reason": "Layer overview — needed for any backend infra change to understand which layer owns S3 config"}

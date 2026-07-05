@@ -1,0 +1,13 @@
+{"file": ".trellis/tasks/06-09-unify-spec-param-phases-into-single-params-phase/prd.md", "reason": "Canonical PRD: 3-sub-model form design, tool surface, phase machine collapse, decided trade-offs (ADR-lite), implementation plan PR1-PR5"}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "Cross-layer contract authority; must be updated when FormConfirmedEvent confirm_kind and form payloads change (Rule 10)"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/state.md", "reason": "Defines SpecialistPhase literal and SpecialistState drafts (spec_draft/params_draft/user_input_draft) being collapsed"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/specialist_tools.md", "reason": "Canonical tool registry Table A + phase-tool bindings; the 9 old tools collapse to 5 per specialist"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/events.md", "reason": "Authority for _FORM_CONFIRM_PHASE_ADVANCE reduction table and event roster (TaskSpecSetEvent removal, TaskParamsSetEvent)"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/mind.md", "reason": "Mind recommend contract + D16 failure handling; D16 soft-fallback superseded by hard TurnFailedEvent for recommend path"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/persistence.md", "reason": "trials table schema authority; spec+param JSONB columns merge to params, phase server_default change"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/domain-types.md", "reason": "L4 domain type definitions referencing CCUserParams/CCUserInput being deleted"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/events.md", "reason": "L4 event write-through contracts for trials.spec/param columns"}
+{"file": "BIC-agent-portal/.trellis/spec/backend-contract.md", "reason": "FE-side mirror of BE contract; confirm_kind, SSE event kinds, and form payload shapes all change"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/state-management.md", "reason": "Store conventions for workspaceStore changes (spec/param -> params, confirmed flags)"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/component-guidelines.md", "reason": "Component conventions for the merged CcParamsForm/ReParamsForm and SectionShell changes"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/type-safety.md", "reason": "Hand-port conventions for specialist-forms.ts rewrite (no codegen this task)"}

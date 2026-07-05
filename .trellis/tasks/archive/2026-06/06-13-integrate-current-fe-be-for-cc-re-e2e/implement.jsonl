@@ -1,0 +1,10 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/mind-agent-contract-call-chain.md", "reason": "The CC param stub lives in MindClient; this spec defines the Agent<->Mind contract call chain — authority for whether a stub change or new param needs a shared-types stub fn."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/specialist_tools.md", "reason": "submit_l4_execution + recommend/validate ladder for CC/RE specialists — the core execution tools the CC->RE flow drives through."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/graphs.md", "reason": "plan_subgraph + specialist_dispatcher routing (cc->cc_subgraph / re->re_subgraph) + _pick_next_planned_step cursor advance — the RE auto-dispatch boundary."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/events.md", "reason": "TaskCreatedEvent / FormRequestedEvent / PlanProposedEvent shapes the spec asserts on (execByJobId, form_requested(params) counts)."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/clients.md", "reason": "LabClient.submit_task -> POST /tasks/ contract; the Agent->Lab boundary verified benign across the v1.0.5/v1.1.2a1 pin."}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "Cross-layer contract rules (Rule 10) — any contract touched during a fix must update spec in the same change set."}
+{"file": ".trellis/spec/BIC-shared-types/backend/directory-structure.md", "reason": "Where stub functions + types must live if a new/different MindClient param is needed — types from shared-types, no new Req/Resp bodies."}
+{"file": "bic-agent-portal/.trellis/spec/ui/L3/sse-contract.md", "reason": "FE SSE event-dispatcher contract (I-UI-1); the spec gates on form_requested/task_created/task_progress/form_confirmed kinds."}
+{"file": "bic-agent-portal/.trellis/spec/ui/L3/workspace.md", "reason": "Workspace state machine: plan->params->dispatch->monitor->result lifecycle the cc-re spec walks (duo-panel, params-confirm CTA)."}
+{"file": "bic-agent-portal/.trellis/spec/backend-contract.md", "reason": "FE<->BE REST/SSE contract (submitFormConfirm payload, decision_id/task_id duo-panel) — the confirm boundary the 4ms-race fix guards."}

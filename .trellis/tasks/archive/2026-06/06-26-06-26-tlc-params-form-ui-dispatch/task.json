@@ -1,0 +1,32 @@
+{
+  "id": "06-26-tlc-params-form-ui-dispatch",
+  "name": "06-26-tlc-params-form-ui-dispatch",
+  "title": "TLC params form drives UI-to-lab dispatch like CC",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-06-26",
+  "completedAt": "2026-06-29",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-26-st-objectlocation",
+    "06-26-lab-tube-placement",
+    "06-26-be-passthrough",
+    "06-26-fe-tlc-form",
+    "06-27-lab-bench-box-selector"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

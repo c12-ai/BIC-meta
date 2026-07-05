@@ -1,0 +1,5 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/fast-path-handlers.md", "reason": "Verify the placeholder-emit behavior is documented here so the docstring update aligns with spec; surface any spec drift"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/index.md", "reason": "Layer overview — confirm L2 conventions are matched when editing the handler docstring"}
+{"file": "BIC-agent-service/.trellis/spec/backend/quality-guidelines.md", "reason": "Standard BE quality bar — ruff/pyright/pytest expectations for test-only changes"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/quality-guidelines.md", "reason": "FE quality bar — confirm Playwright conventions and test-file lint expectations"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/index.md", "reason": "FE layer overview — establish testing-file conventions to follow"}

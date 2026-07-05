@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/BIC-agent-service/backend/index.md", "reason": "Check backend schema, repository, event, and snapshot changes against service guidelines."}
+{"file": ".trellis/spec/BIC-agent-service/ci/index.md", "reason": "Check verification commands and CI expectations for backend changes."}
+{"file": ".trellis/spec/BIC-agent-portal/frontend/index.md", "reason": "Check portal snapshot/live parity and frontend contract consumption if portal changes are included."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Check cross-layer consistency across backend events, snapshot DTOs, portal state, and Nexus dispatch gates."}
+{"file": ".trellis/tasks/06-21-align-l1-l2-experiment-workflow-lifecycle/research/current-backend-lifecycle-audit.md", "reason": "Review implementation against the original lifecycle gap analysis."}

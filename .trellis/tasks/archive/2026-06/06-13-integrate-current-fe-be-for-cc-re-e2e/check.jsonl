@@ -1,0 +1,7 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/failure.md", "reason": "The 7 known LLM-abandon shapes + deterministic backstops — the failure-class taxonomy the runner must distinguish (re-run vs fix vs gate)."}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "Rule 10 verification: confirm any contract touched during a fix has a matching spec update before calling the task done."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/lifecycle.md", "reason": "Trial/decision lifecycle — verify the decision-trial binding holds (no duplicate trial from the 4ms confirm-vs-message race)."}
+{"file": "BIC-agent-service/.trellis/spec/backend/quality-guidelines.md", "reason": "BE quality bar (fail-loud, no silent skips — Rule 9) the final per-leg verdict must satisfy."}
+{"file": "bic-agent-portal/.trellis/spec/ui/L3/sse-contract.md", "reason": "Verify FE event handling matches the wire kinds the spec gates on; SSE-stall fallback is replay-correct by design."}
+{"file": "bic-agent-portal/.trellis/spec/frontend/quality-guidelines.md", "reason": "FE quality bar for any surgical test/wiring fix (no dead identifiers, type-only imports, biome check)."}
+{"file": "BIC-agent-service/.trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer (L1<->L4, FE<->BE, Agent<->Lab) reasoning for diagnosing which boundary a red leg actually broke at."}

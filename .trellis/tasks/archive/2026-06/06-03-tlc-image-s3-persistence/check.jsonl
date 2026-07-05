@@ -1,0 +1,5 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/clients.md", "reason": "Verify S3 client wrapper still matches the convention after env swap"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/facade.md", "reason": "Verify presign Facade behavior + session-prefix gate unchanged"}
+{"file": "BIC-agent-service/.trellis/spec/backend/quality-guidelines.md", "reason": "Standard BE quality bar — typecheck, lint, no skipped tests"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L1/http-routes.md", "reason": "Verify /sessions/{id}/presign route contract is untouched"}
+{"file": "BIC-agent-portal/.trellis/spec/backend-contract.md", "reason": "Cross-layer contract check — FE↔BE presign + recognize unchanged"}

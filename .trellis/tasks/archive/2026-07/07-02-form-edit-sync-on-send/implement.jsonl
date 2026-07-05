@@ -1,0 +1,13 @@
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/research/session-context-pattern.md", "reason": "End-to-end SessionContext → dynamic_prompts path with file:line anchors; the 3 touch points for leg 2"}
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/research/user-message-submission-path.md", "reason": "FE→BE /messages path, extra=forbid hops, FE dirty-registry gap — Steps 1 and 4"}
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/research/overwrite-policy-surface.md", "reason": "task_params_set emit sites + phase-conditional apply precedent — Step 2 guard"}
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/research/objective-draft-precedent.md", "reason": "Lenient draft precedent + its BE→LLM gap (what NOT to copy)"}
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/research/spec-docs-to-update.md", "reason": "Rule-10 map of authoritative contract docs (root spec dirs are symlinks)"}
+{"file": ".trellis/spec/BIC-agent-service/backend/contracts.md", "reason": "§3a /messages contract of record — must be updated with the form_draft field"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L4/events.md", "reason": "Event apply semantics (UserMessageSubmittedEvent noop → trials.params write; defensive-apply convention)"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L4/domain-types.md", "reason": "SessionContext field roster + turn_schemas payload shapes — both gain fields"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L2/facade.md", "reason": "submit_user_message contract row — payload gains form_draft"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L2/orchestrator.md", "reason": "Loader section — SessionContext gains chemist_form_draft"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L3/graphs.md", "reason": "§2.1 dynamic-prompt ownership — chemist-draft block joins the roster"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L3/state.md", "reason": "GraphState/SpecialistState field rosters + params_draft seeding order §1/§2"}
+{"file": ".trellis/spec/BIC-agent-portal/backend-contract.md", "reason": "FE contract of record — /messages row :51 and replace-merge wording :392"}
