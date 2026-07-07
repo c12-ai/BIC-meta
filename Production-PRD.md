@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-05
+- Last updated: 2026-07-07
 
 ## Scope
 
@@ -252,7 +252,75 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - The external interaction document's `1 or 2` quantity (and one-location demo note) is stale
      and must be corrected at source; no 1-tube dispatch support is planned.
 
+10. **Per-experiment task material sets** (confirmed 2026-07-05, from the reviewed 配置表
+    任务物料准备清单 plus decisions D3/D4)
+    - Each experiment's Material Preparation card contains exactly these user-facing materials:
+
+      | Experiment | Manual / specific (user assigns) | Robot auto-pick (user confirms stock) |
+      |---|---|---|
+      | TLC | 样品管 sample tubes ×2–4 (rule 9) | 点板枪头盒 spotting tip box ×1 · 配液枪头盒 dispensing tip box ×1 · 展开剂组 developing solvent group ×1 |
+      | CC (过柱) | 样品柱 sample column ×1 | 硅胶柱 silica column ×1 · 润柱废液桶 equilibration waste drum ×2 · 过柱用试管架 column tube rack ×1 |
+      | FP (组分收集) | — | 馏分收集废液桶 fraction waste drum ×2 |
+      | RE (旋蒸) | 茄形瓶 round-bottom flask ×1 | — |
+
+    - Workspace-resident TLC execution items (silica plate, developing tank, waste-tip bin) start
+      on the robot bench (配置表: 先自行准备). They are not user-assigned per task, but readiness
+      may verify their stock as real inventory (rule 6).
+    - RE's material card is defined here for product completeness; its Lab Logistics module
+      surface remains out of scope until its execution parameters are finalized.
+    - FP's execution parameters are finalized and implemented (2026-07-07, rule 11). FP has NO
+      separate Lab Logistics module surface: its Material Preparation card is auto-pick-only
+      (fraction waste drum ×2), and its execution configuration happens in the FP Parameter
+      Design panel.
+
+11. **FP (fraction preparation) execution rules** (decided 2026-07-06, implemented 2026-07-07)
+    - **Container parameter model.** FP execution params are a container list; each container is
+      a flask or the waste container, with a display name (≤5 characters) and its assigned tubes.
+      Defaults: one flask 烧瓶1 + one waste 废液瓶. The user may add flasks; the waste container
+      is fixed. A tube belongs to at most one container; dispatch requires at least one flask
+      holding at least one tube.
+    - **Recommendation basis is upstream, verbatim.** The FP form's read-only context is the
+      confirmed CC result analysis exactly as produced (peak rows with per-row status and the
+      per-well rack map — multiple product ranges are possible). FP has no independent
+      recommendation-basis field. Pre-fill: product wells → 烧瓶1, suspect + waste wells →
+      废液瓶, idle wells unassigned; the user can re-assign any well.
+    - **No AI engine in the FP loop.** FP parameter pre-fill and FP result synthesis are
+      deterministic derivations from the confirmed CC result, owned by Agent Service (refines
+      requirement 8: ChemEngine has no FP endpoint; the robot reports no structured fraction
+      result).
+    - **Dispatch contract.** The dispatch payload is an ordered flask list plus a per-tube
+      disposition array covering the WHOLE collection rack (one element per rack tube, in rack
+      order): 0 = discard, N ≥ 1 = collect into the N-th flask. Flask volume defaults to 500 ml.
+      Multi-flask is supported by the model; operationally a single flask is configured until
+      the robot team confirms multi-flask capability (BIC-lab-service issue #81).
+    - **Result rules.** The FP result is a container → tube mapping table with peak
+      classification (主峰 / 边缘峰 / 杂质 / 混合). Volume math: 1 tube = 15 ml (5 tubes
+      collected = 75 ml, 3 discarded = 45 ml); the result shows collected vs discarded totals
+      and the solvent system. The confirmed FP result auto-fills the downstream RE
+      recommendation basis (volume + solvents/ratio parsed from the solvent system; unknown
+      solvents leave the fields empty rather than fabricating).
+
 ## UI Interaction Requirements
+
+Right-panel consistency across jobs (2026-07-05):
+
+- For every job's Material Preparation surface, the right panel shows the SAME physical surfaces
+  in the original (selection) view and in the "after entering maintenance" view. Entering
+  maintenance changes editability, not the surface set.
+- This selection-vs-maintenance display logic is uniform across jobs: what TLC does with its
+  shelf sample-tube boxes, CC does with its sample-column rack area, and future RE/FP surfaces
+  must follow the same pattern. A job must not show one surface for selection and a different
+  surface set in maintenance mode.
+
+For the FP Parameter Design panel (2026-07-07):
+
+- Upper panel: read-only display of the upstream CC task analysis (peak/fraction table and rack
+  map with per-well status).
+- Lower panel: container configuration — the user selects the active container, then clicks
+  well circles in the tube-rack grid (96-well or custom layout) to add/remove that tube from
+  the active container; idle wells are not clickable. The currently selected tube list and
+  total count update live.
+- After execution, a dedicated FP result card appears under the task result, like other steps.
 
 For the TLC Lab Logistic panel:
 
@@ -288,6 +356,11 @@ For the TLC Lab Logistic panel:
   is read-only there.
 - Selecting an item for a task never creates inventory; empty slots/cells change only in
   maintenance mode.
+- Each experiment's Material Preparation card shows exactly the rule-10 material set, with manual
+  and auto-pick items separated; readiness quantity gates match the rule-10 counts (TLC sample
+  tubes 2–4).
+- For each job, the right panel's selection view and maintenance view show the same physical
+  surfaces; only editability changes.
 - TLC readiness does not depend on placeless placeholder records such as staining jar or
   eluent tube pair.
 - TLC tip boxes exist as physical inventory with concrete locations before execution, and execution
@@ -300,6 +373,16 @@ For the TLC Lab Logistic panel:
 - Image evidence sent to ChemEngine is transferred via presigned URLs that ChemEngine
   can reach in the target deployment.
 - RE realtime result analysis comes from the Robot Team's Mars system, not ChemEngine.
+- A robot-typed FP step runs as a real stage: the FP Parameter Design panel shows the upstream
+  CC analysis (upper) and the container/rack-grid assignment (lower) pre-filled by well status;
+  the user confirms before dispatch; no ChemEngine call occurs anywhere in the FP loop.
+- The FP dispatch payload's per-tube disposition array covers the whole collection rack (one
+  element per rack tube; 0 = discard, N = flask ordinal) and matches the user-confirmed
+  container assignment.
+- The FP result card shows the container → tube mapping with peak classification and 15 ml/tube
+  volume math (collected vs discarded totals) plus the solvent system; confirming it auto-fills
+  the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
+- The RE parameter form no longer collects flask/collect configuration (moved to FP).
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
@@ -319,6 +402,14 @@ For the TLC Lab Logistic panel:
   corrected at source — the `1 or 2` tube quantity and click-empty-slot assignment statements are
   superseded, and a note should record that the robot fetches the sample-tube box from the shelf
   with system-resolved coordinates (no new 配置表 row needed; bench parking is robot-internal).
+- 展开剂组 (developing solvent group) is part of the confirmed TLC auto-pick material set
+  (rule 10) but is not yet tracked as a lab-service readiness item — the solvent-group stock
+  model needs a lab-service decision before the readiness card can show its availability.
+- FP multi-flask capability (BIC-lab-service issue #81): the dispatch contract supports N
+  flasks, but the robot team has not yet confirmed the physical flask cap or the dispatch-time
+  validation. Non-blocking — the operating convention is a single flask until answered
+  (rule 11). The collect_config indexing definition follows the shared-types contract example
+  (Drake ruling, 2026-07-06).
 
 ## Related Project PRDs
 
@@ -327,6 +418,14 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
+- 2026-07-07: Added rule 11 (FP execution rules: container model, verbatim-upstream
+  recommendation basis, no-AI-engine loop, whole-rack dispatch contract, 15 ml/tube result
+  math with RE basis auto-fill), the FP Parameter Design panel UI requirements, matching
+  acceptance criteria, and the #81 multi-flask open question; closed rule 10's FP deferral
+  (RE's remains). FP is implemented across Agent Service and Portal.
+- 2026-07-05: Added rule 10 (per-experiment task material sets from the reviewed 配置表 清单) and
+  the right-panel selection-vs-maintenance consistency requirement; flagged the missing
+  solvent-group readiness tracking as an open question.
 - 2026-07-05: Consistency pass after implementation — config source scope excludes robot-internal
   parking slots; the 配置表 follow-up no longer asks for a bench-box row.
 - 2026-07-05: Added requirement 8 (AI-engine backed intelligence): ChemEngine (Algo

@@ -1,0 +1,30 @@
+{
+  "id": "fp-agent-program",
+  "name": "fp-agent-program",
+  "title": "FP agent end-to-end: agent specialist + portal surfaces + e2e",
+  "description": "Parent: implement the FP (fraction preparation) step across agent-service, portal, and e2e. Lab service is dispatch-ready; agent side is a stub; portal form is a placeholder. Owns requirement set, task map, cross-child AC.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-07-06",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-06-fp-agent-specialist",
+    "07-06-fp-portal-surfaces",
+    "07-06-fp-e2e-docs"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

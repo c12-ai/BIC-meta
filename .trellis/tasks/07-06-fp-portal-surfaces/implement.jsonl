@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/BIC-agent-portal/frontend/index.md", "reason": "Portal frontend layer conventions"}
+{"file": ".trellis/tasks/07-06-fp-agent-program/design.md", "reason": "Program design: DTO shapes (section 2), data flow (section 6)"}
+{"file": ".trellis/tasks/07-06-fp-portal-surfaces/prd.md", "reason": "Child requirements incl. verified chokepoint list"}
+{"file": ".trellis/tasks/07-06-fp-portal-surfaces/design.md", "reason": "Child design: wire contract to mirror + stage boundaries"}
