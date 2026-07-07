@@ -584,3 +584,36 @@ Reviewed the user-facing TLC flow; Drake corrected 3 false gaps from an unverifi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Dependabot CI unblock + flow-bot dependabot exemption
+
+**Date**: 2026-07-07
+**Task**: Dependabot CI unblock + flow-bot dependabot exemption
+**Branch**: `main`
+
+### Summary
+
+Diagnosed all-red CI on dependabot PRs #38/#30 (BIC-agent-service): dependabot-triggered workflows cannot read Actions secrets and the Dependabot secrets store was empty, so create-github-app-token failed on REPO_READ_APP_ID/READ_REPO_APP_PRIVATE_KEY. Values not on local machine; drafted+sent Feishu mail to wangwenlong, who configured org-level Dependabot secrets -> ci+test green. Shipped flow-bot dependabot exemption (job-level if: skip by PR author / dependabot/ branch prefix) as PR #48, merged to BIC-agent-service main as bf72548; #38 and #30 merged after. Learned: flow-bot fires only on pull_request_review (check_suite never triggers, anti-recursion) and is not enforced (no branch protection on main). Side fix: .env.test lacked S3 keys and inherited real AWS keys from .env -> 403 vs local MinIO; appended minioadmin creds to .env.test.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bf72548` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
