@@ -617,3 +617,34 @@ Diagnosed all-red CI on dependabot PRs #38/#30 (BIC-agent-service): dependabot-t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: GitHub label cleanup for BIC-agent-service
+
+**Date**: 2026-07-07
+**Task**: GitHub label cleanup for BIC-agent-service
+**Branch**: `main`
+
+### Summary
+
+Trimmed BIC-agent-service repo labels from 11 to 6: deleted 6 unused GitHub defaults (documentation, duplicate, good first issue, help wanted, invalid, wontfix). Added 'urgent' (dark red, serious blocking bug) and redefined 'bug' as 'Any issue, non-blocking'. Kept enhancement, question, forced-merge, GTH (all in use). No code changes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

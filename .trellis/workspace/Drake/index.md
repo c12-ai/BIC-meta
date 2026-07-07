@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-07-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~619 | Active |
+| `journal-1.md` | ~650 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-07 | GitHub label cleanup for BIC-agent-service | - | `main` |
 | 17 | 2026-07-07 | Dependabot CI unblock + flow-bot dependabot exemption | `bf72548` | `main` |
 | 16 | 2026-07-05 | TLC flow review: corrected step ownership, verified Rf loop + tube gate | `4b9117d` | `main` |
 | 15 | 2026-07-03 | 07-02 form-edit sync on send: shipped across 4 repos + instruction-wins principle | `b1acf7e`, `9ce7889`, `3e8748d`, `b457106`, `6079ca0`, `d37ab5c`, `28c5465`, `1668d76`, `61d29c9` | `-` |
