@@ -76,3 +76,8 @@ step: <剧本第几步/什么操作>
 - 每个测试场景用**新注册用户 + 新会话**；不碰别人的会话。
 - 浏览器一律 Playwright（node 脚本放 scratchpad，chromium headless）；每步截图。
 - BE 处于 no-reload 冻结态：你测的是当前运行版；已修未生效清单见 root 通知，发现疑似已知问题照记，S1 负责去重。
+
+## 通知降噪（2026-07-08 追加）
+例行协议通知（reset 前后/round 边界/心跳）写 `.dispatch/runs/default/status-<agent>.log`（带时间戳追加），
+不 dispatch send。仅阻断/P0-P1 发现/需决策/最终摘要才 send —— daemon 对忙碌 pane 会重复投递，
+高频 send 会刷爆 root。
