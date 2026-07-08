@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-07
+- Last updated: 2026-07-08
 
 ## Scope
 
@@ -94,6 +94,22 @@ Core scenarios:
    - Consumable Maintenance is the inventory upkeep workflow for non-specific items that the robot can auto-pick.
    - The product must not let a Material Preparation surface become a generic consumables editor, and must not let Consumable Maintenance assign experiment-specific items for a task.
    - A robot dispatch attempt must validate the current task's material state. If validation fails, the user must be guided back to Material Preparation to complete missing or invalid assignments before dispatch.
+
+10. **ELN report export**
+   - After every result of an experiment is confirmed, the chemist can export an ELN
+     Word report of that experiment from the portal's result-confirmation surface.
+   - The export is gated on all-results-confirmed: the portal disables the download
+     until confirmation completes, and the Agent Service re-checks the gate on every
+     request and refuses (conflict) when results are still open.
+   - The report is available in Chinese and English; the chemist picks the language at
+     download time.
+   - Any session member who can view the session can download the report (read-level
+     action, no execute authority required).
+   - Report enrichment data the system cannot obtain (e.g. reactant molecular weights
+     when the chemistry calculator service is unavailable) is omitted from the report,
+     never fabricated.
+   - The report content is a deterministic aggregation of the experiment's confirmed
+     data; no AI engine is involved in producing it.
 
 ## Core Concepts
 
@@ -383,6 +399,11 @@ For the TLC Lab Logistic panel:
   volume math (collected vs discarded totals) plus the solvent system; confirming it auto-fills
   the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
 - The RE parameter form no longer collects flask/collect configuration (moved to FP).
+- After all results of an experiment are confirmed, the chemist can download the ELN Word
+  report (zh or en) from the result-confirmation surface; before that, the download is
+  disabled in the portal and refused by the Agent Service.
+- An ELN report never contains fabricated enrichment values: fields the system cannot
+  resolve (e.g. molecular weights without the chemistry calculator service) are absent.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
@@ -411,12 +432,22 @@ For the TLC Lab Logistic panel:
   (rule 11). The collect_config indexing definition follows the shared-types contract example
   (Drake ruling, 2026-07-06).
 
+- BIC-chem-service (stateless RDKit molecular-weight calculator consumed by the ELN
+  report) is not stood up yet. Until it exists and is configured, ELN reports render
+  with FW/moles omitted (the designed degrade). Tracked in BIC-agent-service issue #54.
+
 ## Related Project PRDs
 
 - Agent Service Project PRD: `BIC-agent-service/docs/project-prd.md`
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-08: Added requirement 10 (ELN report export: all-results-confirmed gate,
+  zh/en Word report, view-level access, omit-never-fabricate enrichment, no AI engine
+  in the loop) with matching acceptance criteria and the BIC-chem-service open
+  dependency. BE landed in BIC-agent-service #35; portal download button in
+  BIC-agent-portal #4.
 
 - 2026-07-07: Added rule 11 (FP execution rules: container model, verbatim-upstream
   recommendation basis, no-AI-engine loop, whole-rack dispatch contract, 15 ml/tube result
