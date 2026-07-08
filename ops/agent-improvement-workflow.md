@@ -100,3 +100,21 @@ session_id: xxx；关键 seq/事件；DB 查询结果；报错原文
 ## 补充（2026-07-08 事故追加）
 
 - **⚠️ BE dev 模式带 auto-reload**（`main.py: reload=settings.debug`）：S3 编辑 BE 源码会触发运行中服务热重载；若用户页面挂着 SSE，优雅关闭会 wedge（`Waiting for connections to close`，需 kill -KILL）。**S3 实现期间 BE 必须以 no-reload 方式跑**（`uv run uvicorn app.main:app --host 0.0.0.0 --port 8800 --log-level info`），改动在链尾统一验证窗口重启生效；链结束后恢复 `make dev`。
+
+## 外部 PR 对账（2026-07-08 追加，强制）
+
+同事（尤其 Drake）会在**同一批 issue 上独立并行提 PR**。为避免双改冲突/重复劳动：
+
+- **S2 与 S3 开工前，必须先扫对应 repo 的 open PR**：
+  ```bash
+  gh pr list --repo c12-ai/BIC-agent-service --state open --json number,title,headRefName,author
+  gh pr list --repo c12-ai/BIC-agent-portal  --state open --json number,title,headRefName,author
+  gh pr list --repo c12-ai/BIC-lab-service   --state open --json number,title,headRefName,author
+  ```
+  命中疑似同域 PR → `gh pr diff <N> --repo <r> --name-only` 比对将改文件集。
+- **判定与处置**：
+  - **重复**（同一 bug 的两份实现）：撤我们的改动（revert），issue 标注"由 <repo>#<PR> 解决"、指向该 PR，**不重复实现**。
+  - **文件冲突但不同 bug**：以对方将合入 main 的版本为基准 rebase 心态实现，comment 注明"基于/规避 <repo>#<PR>"。
+  - **同子系统、语义相关**（如 lab TLC planner 大改）：动手前读对方 diff 的相关语义，对齐后再改。
+- **本地 bench 适配文件的覆盖风险**：外部 PR 若改了 `tests/helpers.ts` 等我们"本地保留不提交"的文件，其合入 main 后会覆盖本机 bench 适配（如 DB 5433 指向、dev/dev 登录）→ 合入后需手动重打本地适配，先例见 portal#14。
+- **编号巧合**：各子 repo 的 issue 编号与 `BIC-meta` 台账编号是**两套独立命名空间**，语义不同（如 portal#12 ≠ BIC-meta#12）。引用时一律带 `owner/repo#N` 全名。
