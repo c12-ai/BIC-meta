@@ -96,3 +96,7 @@ session_id: xxx；关键 seq/事件；DB 查询结果；报错原文
   方案再动手。
 - 测试必须编码意图（改行为必须同步改断言旧行为的测试，写明 WHY）。
 - 报告一律数据先行：PASS/FAIL 在前，解释在后；跳过 = 失败。
+
+## 补充（2026-07-08 事故追加）
+
+- **⚠️ BE dev 模式带 auto-reload**（`main.py: reload=settings.debug`）：S3 编辑 BE 源码会触发运行中服务热重载；若用户页面挂着 SSE，优雅关闭会 wedge（`Waiting for connections to close`，需 kill -KILL）。**S3 实现期间 BE 必须以 no-reload 方式跑**（`uv run uvicorn app.main:app --host 0.0.0.0 --port 8800 --log-level info`），改动在链尾统一验证窗口重启生效；链结束后恢复 `make dev`。
