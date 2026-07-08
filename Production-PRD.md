@@ -105,9 +105,15 @@ Core scenarios:
      download time.
    - Any session member who can view the session can download the report (read-level
      action, no execute authority required).
-   - Report enrichment data the system cannot obtain (e.g. reactant molecular weights
-     when the chemistry calculator service is unavailable) is omitted from the report,
-     never fabricated.
+   - Report enrichment data the system cannot obtain is omitted from the report, never
+     fabricated. Reactant molecular weights come from BIC-chem-service (a stateless
+     RDKit chemistry calculator); any enrichment failure — service not configured,
+     unreachable, or unable to parse a molecule — leaves the affected fields absent
+     and never blocks the report download.
+   - Chem-service enrichment is optional by design, so its failures degrade silently
+     to absent fields. This is a deliberate exception to requirement 8's fail-loud
+     rule, which governs ChemEngine experiment intelligence, not optional report
+     enrichment.
    - The report content is a deterministic aggregation of the experiment's confirmed
      data; no AI engine is involved in producing it.
 
@@ -404,6 +410,9 @@ For the TLC Lab Logistic panel:
   disabled in the portal and refused by the Agent Service.
 - An ELN report never contains fabricated enrichment values: fields the system cannot
   resolve (e.g. molecular weights without the chemistry calculator service) are absent.
+- A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
+  molecule) does not block the ELN report download; only the affected enrichment fields
+  are absent, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
@@ -442,6 +451,12 @@ For the TLC Lab Logistic panel:
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-08: Refined requirement 10 per BIC-agent-service #55: named BIC-chem-service
+  as the molecular-weight enrichment source, covered all its failure modes
+  (unconfigured / unreachable / unparseable molecule), and made the degrade contract
+  explicit — non-blocking, silent-to-absent, a deliberate exception to requirement 8's
+  fail-loud ChemEngine rule. Matching acceptance criterion added.
 
 - 2026-07-08: Added requirement 10 (ELN report export: all-results-confirmed gate,
   zh/en Word report, view-level access, omit-never-fabricate enrichment, no AI engine
