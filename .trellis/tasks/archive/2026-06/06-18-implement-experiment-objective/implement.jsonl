@@ -1,0 +1,25 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Root cross-repo data-flow checklist for shared-types -> backend -> portal implementation."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/prd.md", "reason": "Authoritative cross-repo requirements, ownership matrix, and implementation plan."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/research/feishu-objective-spec.md", "reason": "Feishu product requirements and embedded five-status sheet."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/research/shared-types-experiment-protocol.md", "reason": "BIC-shared-types experiment protocol and dependency implications."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/research/current-code-audit.md", "reason": "Current portal/backend gaps and likely implementation touchpoints."}
+{"file": "BIC-agent-service/.trellis/spec/backend/index.md", "reason": "Backend package entrypoint and quality commands for service implementation."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L1/http-routes.md", "reason": "HTTP route conventions for any portal-facing objective API."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L1/sse-handler.md", "reason": "SSE semantics if objective/status changes emit live updates."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/facade.md", "reason": "Service/facade boundary for user-facing mutations and persistence."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/clients.md", "reason": "MindClient conventions and external client ownership."}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/persistence.md", "reason": "Experiment/plan/job/trial persistence shape and repository contract."}
+{"file": "BIC-agent-service/.trellis/spec/backend/mind-agent-contract-call-chain.md", "reason": "Agent-to-Mind material parse and goal confirm contract."}
+{"file": "BIC-agent-service/.trellis/spec/backend/quality-guidelines.md", "reason": "Backend implementation and test quality rules."}
+{"file": "BIC-agent-portal/.trellis/spec/backend-contract.md", "reason": "Portal <-> agent-service snapshot/HTTP/SSE contract."}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/state-management.md", "reason": "Workspace store and selector patterns for backend-backed objective state."}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/type-safety.md", "reason": "Portal DTO/type safety rules for objective client and snapshot types."}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/component-guidelines.md", "reason": "Portal component composition conventions for objective form changes."}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/quality-guidelines.md", "reason": "Portal quality and test expectations."}
+{"file": "BIC-agent-portal/.trellis/spec/ui/L3/workspace.md", "reason": "Workspace right-pane behavior and layout rules."}
+{"file": "BIC-agent-portal/.trellis/spec/ui/L3/form.md", "reason": "Form interaction and validation UI conventions."}
+{"file": "BIC-agent-portal/.trellis/spec/ui/tokens.md", "reason": "Workspace visual/status token guidance."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/research/backend-touchpoints-current.md", "reason": "Live backend touch-points (v1.1.6a1) and the 7 schema/event/routing deltas."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/research/sharedtypes-portal-current.md", "reason": "Verbatim shared-types v1.1.6a1 Mind contract + current portal objective-form gaps."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/design.md", "reason": "Technical contract: schema, enums, objective endpoints, dual-path event, routing, Mind stub toggle."}
+{"file": ".trellis/tasks/06-18-implement-experiment-objective/implement.md", "reason": "Phased execution checklist with per-phase validation and rollback points."}

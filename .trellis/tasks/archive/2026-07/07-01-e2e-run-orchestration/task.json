@@ -1,0 +1,31 @@
+{
+  "id": "e2e-run-orchestration",
+  "name": "e2e-run-orchestration",
+  "title": "E2E run orchestration and investigation",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-07-01",
+  "completedAt": "2026-07-01",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-01-e2e-templates",
+    "07-01-e2e-run-lifecycle",
+    "07-01-e2e-monitors",
+    "07-01-e2e-investigate-skill"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,0 +1,5 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/fast-path-handlers.md", "reason": "Verify the placeholder behavior + docstring match after edit"}
+{"file": "BIC-agent-service/.trellis/spec/backend/quality-guidelines.md", "reason": "Verify quality bar (lint/typecheck/tests) is satisfied"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/quality-guidelines.md", "reason": "Verify FE lint/typecheck + Playwright stability"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/index.md", "reason": "Cross-check L2 conventions are still satisfied after docstring edit"}
+{"file": "BIC-agent-portal/.trellis/spec/frontend/index.md", "reason": "Cross-check FE conventions on the modified test file"}

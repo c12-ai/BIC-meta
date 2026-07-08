@@ -1,0 +1,30 @@
+{
+  "id": "sse-heartbeat-honest-guard",
+  "name": "sse-heartbeat-honest-guard",
+  "title": "SSE freeze: heartbeat cure + honest browser-path guard",
+  "description": "Manual full-chain runs (TLC auto-retry; TLC->CC->RE) freeze the UI while the green E2E suite passes, because every spec asserts on backend truth (session_events/snapshot/psql) and has reload+fallback recovery a real browser lacks. Root cause: SSE stream emits no heartbeat/keepalive, so an idle connection behind the local 7890 proxy is reaped and native EventSource reconnect is slow/half-open -> frozen page. 05-27-sse-replay is already DONE (Last-Event-ID replay works on reconnect). Two independently-verifiable deliverables: (A) BE SSE heartbeat as the cure; (B) FE honest browser-path guard spec as the alarm. Constraint: test changes must not touch product code and vice versa.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-06-30",
+  "completedAt": "2026-06-30",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-30-be-sse-heartbeat",
+    "06-30-fe-honest-guard",
+    "06-30-plan-stage-backstop"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

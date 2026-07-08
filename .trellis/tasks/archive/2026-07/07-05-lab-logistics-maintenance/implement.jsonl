@@ -1,0 +1,7 @@
+{"file":"BIC-agent-portal/CLAUDE.md","reason":"Portal implementation conventions: no BFF, TanStack Query/server state, i18n, commands, and test gates."}
+{"file":"BIC-agent-portal/.trellis/spec/ui/L3/form.md","reason":"Existing Parameter Design / MaterialPreparation form-confirm flow and TLC logistics behavior being revised."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Task crosses portal UI, Lab Service REST contracts, and dispatch payloads."}
+{"file":"BIC-agent-portal/docs/project-prd.md","reason":"Persisted Project PRD for TLC/CC Lab Logistics scope and behavior contract."}
+{"file":"BIC-agent-portal/src/components/workspace/material-preparation/MaterialPreparationPanel.tsx","reason":"Implemented TLC workspace-backed maintenance mode and existing tube selection flow."}
+{"file":"BIC-agent-portal/src/components/workspace/forms/TubeSelectorGrid.tsx","reason":"Stopped selection mode from minting tube ids for empty cells."}
+{"file":"BIC-agent-portal/tests/material-preparation-layout.spec.ts","reason":"Added focused TLC maintenance/selection Playwright coverage."}

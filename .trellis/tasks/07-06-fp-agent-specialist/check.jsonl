@@ -1,0 +1,7 @@
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/specialist_tools.md", "reason": "Specialist tool conventions (copilot fill contract, tool registration) — fp.py tools must conform"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/graphs.md", "reason": "Subgraph structure, phase machine, form emission and prompt-block conventions for specialists"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/state.md", "reason": "Runtime state fields (specialist_kind, planned_executor, task_id) the fp routing touches"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/lifecycle.md", "reason": "Jobs/trials lifecycle — fp must mint trials via the same path as cc/re/tlc"}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "FE-BE contract rules incl. duo-panel deterministic decision minting"}
+{"file": ".trellis/tasks/07-06-fp-agent-program/design.md", "reason": "Program design: DTOs (section 2), dispatch mapping + unit-test plan (section 3), FP-RE bridge (section 4), RE cleanup (section 5)"}
+{"file": ".trellis/tasks/07-06-fp-agent-program/prd.md", "reason": "Requirements R1-R5 and cross-child acceptance criteria"}

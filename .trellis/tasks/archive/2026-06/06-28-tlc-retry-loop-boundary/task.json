@@ -1,0 +1,30 @@
+{
+  "id": "tlc-retry-loop-boundary",
+  "name": "tlc-retry-loop-boundary",
+  "title": "TLC Rf-retry loop: prep-once / per-round develop / cleanup-on-success",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-06-28",
+  "completedAt": "2026-06-30",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-29-tlc-round-contracts",
+    "06-29-tlc-lab-round-split",
+    "06-29-tlc-agent-round-loop"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

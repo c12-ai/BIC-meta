@@ -1,0 +1,77 @@
+name: bic-devcontainer
+
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/BIC:cached
+      # Overlay host .venv / node_modules — macOS host envs are not usable
+      # inside the Linux container (and vice versa).
+      - agent-service-venv:/workspaces/BIC/BIC-agent-service/.venv
+      - lab-service-venv:/workspaces/BIC/BIC-lab-service/.venv
+      - portal-node-modules:/workspaces/BIC/BIC-agent-portal/node_modules
+
+  # Infra sidecars share the dev container's network namespace so everything
+  # is reachable on localhost — the repos' .env files work unchanged.
+  # No `ports:` mappings: VS Code forwards from the container, so this stack
+  # never collides with the bic-* containers running on the host.
+  postgres:
+    image: postgres:16
+    network_mode: service:dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: bic_local_dev
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+
+  redis:
+    image: redis:7
+    network_mode: service:dev
+    command: redis-server --requirepass bic_local_dev
+    volumes:
+      - redis-data:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    network_mode: service:dev
+    environment:
+      RABBITMQ_DEFAULT_USER: rabbitmq
+      RABBITMQ_DEFAULT_PASS: bic_local_dev
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  minio:
+    image: minio/minio
+    network_mode: service:dev
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: bic_local_dev
+    volumes:
+      - minio-data:/data
+
+  # One-shot: create the buckets the services expect, then exit.
+  minio-init:
+    image: minio/mc
+    network_mode: service:dev
+    depends_on:
+      - minio
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://localhost:9000 minioadmin bic_local_dev; do sleep 1; done;
+      mc mb -p local/tlc-images local/labrun;
+      exit 0"
+
+volumes:
+  agent-service-venv:
+  lab-service-venv:
+  portal-node-modules:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:

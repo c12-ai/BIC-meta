@@ -1,0 +1,43 @@
+{
+  "id": "align-l1-l2-experiment-workflow-lifecycle",
+  "name": "align-l1-l2-experiment-workflow-lifecycle",
+  "title": "Align L1 L2 experiment workflow lifecycle",
+  "description": "Parent task for aligning the Level 1 lifecycle, implementing the Experiment Objective subagent, and exposing the Level 1/Level 2 hierarchy through backend and portal state.",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "cross-repo-backend-portal-lifecycle",
+  "package": "BIC-agent-service",
+  "priority": "P1",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-06-21",
+  "completedAt": "2026-06-22",
+  "branch": "feat/l1-l2-workflow-lifecycle",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-18-implement-experiment-objective",
+    "06-22-experiment-objective-subagent",
+    "06-22-l2-lifecycle-plan-confirm",
+    "06-22-portal-lifecycle-objective-form",
+    "06-22-objective-draft-live-sync"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    "BIC-agent-service/app/data/models.py",
+    "BIC-agent-service/app/repositories/experiments_repo.py",
+    "BIC-agent-service/app/repositories/jobs_repo.py",
+    "BIC-agent-service/app/events/runtime_emitted.py",
+    "BIC-agent-service/app/runtime/graphs/nodes/route_after_admit.py",
+    "BIC-agent-service/app/runtime/graphs/nodes/experiment_objective.py",
+    "BIC-agent-service/app/runtime/graphs/factory.py",
+    "BIC-agent-service/app/runtime/graphs/nodes/plan_subgraph.py",
+    "BIC-agent-service/app/api/routers/sessions.py",
+    "BIC-agent-portal"
+  ],
+  "notes": "Do not start implementation until Drake confirms prd.md, design.md, and implement.md. Includes backend Experiment Objective subagent; no historical backfill required.",
+  "meta": {}
+}

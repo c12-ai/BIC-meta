@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/06-04-qwen3-6-flash-plan-and-spec-form-drift-versus-pa-gpt-5-mini-baseline/prd.md", "reason": "Task PRD with locked decisions and concrete fix shape"}
+{"file": ".trellis/tasks/06-04-qwen3-6-flash-plan-and-spec-form-drift-versus-pa-gpt-5-mini-baseline/research/be-log-evidence-2026-06-04.md", "reason": "BE log evidence motivating the loader fix (M5 confirmation, mechanism classification per failing spec)"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L2/orchestrator.md", "reason": "Primary spec authority for _load_session_context; SessionContext loader section to edit"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L4/domain-types.md", "reason": "SessionContext / CurrentFocus type table to edit"}
+{"file": "BIC-agent-service/.trellis/spec/backend/contracts.md", "reason": "D17 row to rescind"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/state.md", "reason": "rehydrate snapshot-SystemMessage references to prune; consumer contract verification"}
+{"file": "BIC-agent-service/.trellis/spec/backend/L3/graphs.md", "reason": "rehydrate_specialist_state description to update post-slim-down"}

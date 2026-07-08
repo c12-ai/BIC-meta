@@ -1,0 +1,37 @@
+{
+  "name": "BIC Workspace",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/BIC",
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
+    }
+  },
+  "containerEnv": {
+    "UV_LINK_MODE": "copy"
+  },
+  "forwardPorts": [8800, 8192, 5173, 5432, 6379, 5672, 15672, 9000, 9001],
+  "portsAttributes": {
+    "8800": { "label": "agent BE" },
+    "8192": { "label": "lab service" },
+    "5173": { "label": "portal" },
+    "5432": { "label": "postgres" },
+    "6379": { "label": "redis" },
+    "5672": { "label": "rabbitmq" },
+    "15672": { "label": "rabbitmq mgmt" },
+    "9000": { "label": "minio" },
+    "9001": { "label": "minio console" }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  }
+}

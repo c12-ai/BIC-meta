@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/prd.md", "reason": "Acceptance criteria — R1..R5, especially R4 (FE overwrite contract unchanged) and R5 (confirm-only phase advance)"}
+{"file": ".trellis/tasks/07-02-form-edit-sync-on-send/design.md", "reason": "Two-leg shape + decisions; verify both legs landed (persist AND prompt block), not just one"}
+{"file": ".trellis/spec/BIC-agent-service/backend/contracts.md", "reason": "Verify §3a updated in same change set (Rule 10)"}
+{"file": ".trellis/spec/BIC-agent-service/backend/L4/events.md", "reason": "Verify apply semantics doc matches the phase-guarded implementation"}
+{"file": ".trellis/spec/BIC-agent-portal/backend-contract.md", "reason": "Verify /messages row updated; FE mirrors sessions.py DTO by hand"}
