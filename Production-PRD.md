@@ -294,13 +294,15 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       | TLC | 样品管 sample tubes ×2–4 (rule 9) | 点板枪头盒 spotting tip box ×1 · 配液枪头盒 dispensing tip box ×1 · 展开剂组 developing solvent group ×1 |
       | CC (过柱) | 样品柱 sample column ×1 | 硅胶柱 silica column ×1 · 润柱废液桶 equilibration waste drum ×2 · 过柱用试管架 column tube rack ×1 |
       | FP (组分收集) | — | 馏分收集废液桶 fraction waste drum ×2 |
-      | RE (旋蒸) | 茄形瓶 round-bottom flask ×1 | — |
+      | RE (旋蒸) | —（茄形瓶随 rule 11 移交 FP 的 flasks 任务参数，非 RE 就绪物料） | — |
 
     - Workspace-resident TLC execution items (silica plate, developing tank, waste-tip bin) start
       on the robot bench (配置表: 先自行准备). They are not user-assigned per task, but readiness
       may verify their stock as real inventory (rule 6).
-    - RE's material card is defined here for product completeness; its Lab Logistics module
-      surface remains out of scope until its execution parameters are finalized.
+    - RE has no readiness material card by design (verified 2026-07-09, BIC-meta#81): the
+      round-bottom flask became an FP task parameter (`CreateFPTaskRequest.flasks`,
+      shared-types authority) when rule 11 moved flask/collect configuration to FP —
+      it is not a lab readiness item. The earlier "RE 茄形瓶 ×1" row predated that split.
     - FP's execution parameters are finalized and implemented (2026-07-07, rule 11). FP has NO
       separate Lab Logistics module surface: its Material Preparation card is auto-pick-only
       (fraction waste drum ×2), and its execution configuration happens in the FP Parameter
@@ -469,6 +471,10 @@ For the TLC Lab Logistic panel:
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
+  round-bottom flask row removed — it moved to FP's `flasks` task parameter with
+  rule 11's flask/collect migration; RE has no readiness material card by design.
 
 - 2026-07-09: Requirement 10 UX refinement (Wenlong ruling): the ELN download control
   is shown only on the final experiment step's result surface instead of visible-but-
