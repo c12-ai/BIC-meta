@@ -30,19 +30,22 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 2. BIC-agent-portal: agent frontend. (No BFF anymore) @/Users/drakezhou/Development/BIC/BIC-agent-portal
 3. BIC-lab-service: (Nexus) manage lab status (LIMS), orch and report exp task, communicate with robot and backend using MQ. @/Users/drakezhou/Development/BIC/BIC-lab-service
 4. BIC-shared-types: Defined cross team shared object type @/Users/drakezhou/Development/BIC/BIC-shared-types
+5. BIC-chem-service: stateless RDKit molecular-weight calculator used by Agent Service ELN report enrichment. Optional for the main workflow; if absent, ELN downloads still work but FW/mole fields are omitted.
 
 ## Local Dev Infra:
 
 1. PostgreSQL: Deployed through docker. Container ID: fe20b9a21cbfe1117b5da64ecf88396bb3aa7ceabe01e12e016e7302aa6de3b6
 2. RabbitMQ: Used by LabService to get update from Robot and then push to Agent Side. Container ID: 2431d43650888a896824cfdffa7d29df9e424b6ff3016031279c87e4a360fb0f
 3. MinIO: Docker Container ID: 2a801bee136c178407ee7d1e2b606fed7dcca941a681e91053e1779d32973aa2
-4. tmux session `bic-services` (window `0`, verified 2026-07-03; DRIFTS — never trust a cached roster): current mapping `0.0` lab (`:8192`), `0.1` agent BE (`:8800`, `make dev`), `0.2` portal (`:5173`, node), `0.3` robot mock (uv). Always map panes by listening port / `pane_current_command` before `send-keys`. Restarting agent BE: Ctrl-C+TERM won't free `:8800` — `kill -KILL` the port owner, then relaunch in its pane.
-5. Cold start (after reboot / all down), in order:
+4. BIC Chem Service: optional ELN enrichment service. In infra, `make chem-up` starts `bic-chem-service` on host `:8810`; `make chem-smoke` checks `/health/readiness` and `POST /molecular-weight`. Agent Service host-mode config: `CHEM_SERVICE_HOST=127.0.0.1`, `CHEM_SERVICE_PORT=8810`. Docker/infra-net config: `CHEM_SERVICE_HOST=chem-service`, `CHEM_SERVICE_PORT=8000`.
+5. tmux session `bic-services` (window `0`, verified 2026-07-03; DRIFTS — never trust a cached roster): current mapping `0.0` lab (`:8192`), `0.1` agent BE (`:8800`, `make dev`), `0.2` portal (`:5173`, node), `0.3` robot mock (uv). Always map panes by listening port / `pane_current_command` before `send-keys`. Restarting agent BE: Ctrl-C+TERM won't free `:8800` — `kill -KILL` the port owner, then relaunch in its pane.
+6. Cold start (after reboot / all down), in order:
    1. `open -a Docker`, wait for daemon, then `docker start bic-postgres bic-rabbitmq bic-minio` (bic-redis auto-starts)
-   2. pane `0.0` lab: `cd BIC-lab-service && make dev` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
-   3. pane `0.1` agent BE: `cd BIC-agent-service && make dev`
-   4. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev`
-   5. pane `0.3` robot mock: `cd mars_interface_mock && uv run mars-interface-mock`
+   2. Optional for ELN FW/moles: in BIC-infra, run `make chem-up && make chem-smoke`; then configure Agent Service with `CHEM_SERVICE_HOST=127.0.0.1`, `CHEM_SERVICE_PORT=8810`
+   3. pane `0.0` lab: `cd BIC-lab-service && make dev` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
+   4. pane `0.1` agent BE: `cd BIC-agent-service && make dev`
+   5. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev`
+   6. pane `0.3` robot mock: `cd mars_interface_mock && uv run mars-interface-mock`
    `curl` health checks need `--noproxy '*'` (local 127.0.0.1:7890 proxy masks localhost).
 
 ## Test Scenarios.
