@@ -98,9 +98,13 @@ Core scenarios:
 10. **ELN report export**
    - After every result of an experiment is confirmed, the chemist can export an ELN
      Word report of that experiment from the portal's result-confirmation surface.
-   - The export is gated on all-results-confirmed: the portal disables the download
-     until confirmation completes, and the Agent Service re-checks the gate on every
-     request and refuses (conflict) when results are still open.
+   - The export is gated on all-results-confirmed: the download control appears only
+     on the final experiment step's result surface — hidden on earlier steps' result
+     views (a visible-but-disabled button on every step is rejected UX, ruling
+     2026-07-09); within that final surface it stays un-clickable with a reason hint
+     until confirmation completes. The Agent Service re-checks the gate on every
+     request and refuses (conflict) when results are still open, regardless of what
+     the portal shows.
    - The report is available in Chinese and English; the chemist picks the language at
      download time.
    - Any session member who can view the session can download the report (read-level
@@ -413,8 +417,10 @@ For the TLC Lab Logistic panel:
   the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
 - The RE parameter form no longer collects flask/collect configuration (moved to FP).
 - After all results of an experiment are confirmed, the chemist can download the ELN Word
-  report (zh or en) from the result-confirmation surface; before that, the download is
-  disabled in the portal and refused by the Agent Service.
+  report (zh or en) from the result-confirmation surface; the download control is visible
+  only on the final experiment step's result surface (absent on earlier steps' result
+  views), is not clickable there before all results confirm, and the Agent Service
+  refuses (conflict) regardless of portal state.
 - An ELN report never contains fabricated enrichment values: fields the system cannot
   resolve (e.g. molecular weights without the chemistry calculator service) are absent.
 - A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
@@ -463,6 +469,12 @@ For the TLC Lab Logistic panel:
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-09: Requirement 10 UX refinement (Wenlong ruling): the ELN download control
+  is shown only on the final experiment step's result surface instead of visible-but-
+  disabled everywhere; final-surface disable-until-confirmed and the Agent Service
+  conflict gate are unchanged. Matching acceptance criterion updated. Portal change
+  tracked in BIC-meta#77.
 
 - 2026-07-08: Refined requirement 10 per BIC-agent-service #55: named BIC-chem-service
   as the molecular-weight enrichment source, covered all its failure modes
