@@ -23,7 +23,9 @@
 | #44 | 有 next_job 有 T-closing 过渡叙述；next_job=None（收尾）无叙述路径 → 空气泡 |
 | #11 | done-verdict 投影 TLC-scoped（kind=="tlc"），其他步骤不生效 |
 | #5 | result_review accept 终态化，各步骤各自处理 |
-| #24/#45 | 输出后处理（strip/dedupe）在不同路径覆盖不齐 |
+| #24/#45 | 输出后处理（strip/dedupe）在不同路径覆盖不齐；#45 S2 证实 re.py 缺 cc.py 的 degenerate-repeats 分支（mirror drift 又一例），且全局 text_done chokepoint 只去 `<think>` 不去重（collapse_degenerate_repeats 未挂 chokepoint + 仅 length 门 + 仅邻接） |
+| #45 (Q1) | narrate 历史回显：rightsize 关闭时改写器看全量 50 条历史，末工具为 analyze 时落 TEXT_REPLY prompt（"用历史回答"）→ 整段逐字回放前几轮叙述；片 3 需把 narrate 输入收窄为本 turn 状态事实块 |
+| #45 (Q3) | 世界态防捏造护栏（ff908a9）是软 prompt 非确定性过滤：DB 真相 TLC=failed 在块里，LLM 仍宣称 "entire workflow successfully executed"（seq 1675 FP 结果已同款美化）→ 片 3 需要确定性的终态一致性过滤，不能只靠 prompt |
 | 早期 D | "You are the X specialist agent" ×5 份身份提示各自维护 |
 
 ## 统一生命周期（四步实际相同的骨架）
