@@ -118,3 +118,8 @@ session_id: xxx；关键 seq/事件；DB 查询结果；报错原文
   - **同子系统、语义相关**（如 lab TLC planner 大改）：动手前读对方 diff 的相关语义，对齐后再改。
 - **本地 bench 适配文件的覆盖风险**：外部 PR 若改了 `tests/helpers.ts` 等我们"本地保留不提交"的文件，其合入 main 后会覆盖本机 bench 适配（如 DB 5433 指向、dev/dev 登录）→ 合入后需手动重打本地适配，先例见 portal#14。
 - **编号巧合**：各子 repo 的 issue 编号与 `BIC-meta` 台账编号是**两套独立命名空间**，语义不同（如 portal#12 ≠ BIC-meta#12）。引用时一律带 `owner/repo#N` 全名。
+
+## S1 边界（Wenlong 重申 2026-07-09，第二次）
+
+S1（主会话）只做：症状登记（截图/一句话现象+会话id）→ 建 issue（stage:待调查）→ 立即 dispatch S2/S3（Opus）→ 核验完工、部署、合入。
+**根因调查一律下沉给 dispatch session，结论评论到 issue**——S1 不在主会话里跑 DB 取证/代码翻查（超过定位会话 id 级别的都算调查）。此前 S1 多次先挖根因再建档，属违规先例，勿再循。
