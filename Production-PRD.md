@@ -73,7 +73,7 @@ Core scenarios:
    - Cross-service product behavior belongs in this Production PRD; repo-owned implementation behavior belongs in child Project PRDs or engineering specs.
 
 8. **AI-engine backed intelligence**
-   - ChemEngine (the model service maintained by the Algo Team, "Mind") is the product
+   - ChemEngine (the model service maintained by the MIND team) is the product
      authority for AI-generated experiment intelligence: objective parsing (reaction
      material parse, goal confirmation), parameter recommendation (TLC solvent system,
      CC column choice, RE parameters), and vision-based result analysis (TLC plate
@@ -471,6 +471,10 @@ For the TLC Lab Logistic panel:
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
+  is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
+  entries left as written.
 
 - 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
   round-bottom flask row removed — it moved to FP's `flasks` task parameter with
