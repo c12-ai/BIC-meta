@@ -117,6 +117,13 @@ Core scenarios:
    - The report content is a deterministic aggregation of the experiment's confirmed
      data; no AI engine is involved in producing it.
 
+11. **Agent message feedback**
+   - The portal must allow the chemist to provide positive or negative feedback on persisted assistant replies within the active session.
+   - Positive feedback should be submittable without additional text.
+   - Negative feedback must require an improvement suggestion from the chemist.
+   - Feedback must remain traceable to the current session, user, target assistant reply, turn, and persisted event.
+   - The system must preserve enough workflow context from the target assistant reply time to support later quality analysis by experiment stage, specialist, task, and issue pattern.
+
 ## Core Concepts
 
 1. **Experiment Objective**
@@ -415,6 +422,11 @@ For the TLC Lab Logistic panel:
   are absent, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
+- Users can provide positive feedback on a persisted assistant reply without entering text.
+- Users can provide negative feedback on a persisted assistant reply after entering an improvement suggestion.
+- Feedback can be traced back to the original assistant reply, session event, and workflow context.
+- Updating feedback on the same assistant reply updates the existing feedback record rather than creating duplicate ratings.
+- Stored feedback context reflects the workflow state at the time of the target assistant reply, not only the later state when the user submits feedback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -469,6 +481,7 @@ For the TLC Lab Logistic panel:
   math with RE basis auto-fill), the FP Parameter Design panel UI requirements, matching
   acceptance criteria, and the #81 multi-flask open question; closed rule 10's FP deferral
   (RE's remains). FP is implemented across Agent Service and Portal.
+- 2026-07-07: Added agent message feedback product requirements and acceptance criteria.
 - 2026-07-05: Added rule 10 (per-experiment task material sets from the reviewed 配置表 清单) and
   the right-panel selection-vs-maintenance consistency requirement; flagged the missing
   solvent-group readiness tracking as an open question.
