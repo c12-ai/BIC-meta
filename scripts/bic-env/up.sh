@@ -167,6 +167,14 @@ fi
 
 # ===========================================================================
 section "6. Dependency self-heal"
+# Seed .env from .env.example on fresh clones — without it BE boots on wrong
+# code defaults (template_db, empty Keycloak issuer). Never touches an existing .env.
+for _repo in "${be}" "${lab}" "${portal}"; do
+  if [ -d "${_repo}" ] && [ ! -f "${_repo}/.env" ] && [ -f "${_repo}/.env.example" ]; then
+    do_sh "cp '${_repo}/.env.example' '${_repo}/.env'"
+    ok "$(basename "${_repo}"): seeded .env from .env.example (review before real-Mind use)"
+  fi
+done
 if [ -d "${portal}" ]; then
   if [ ! -d "${portal}/node_modules" ] || [ "${portal}/pnpm-lock.yaml" -nt "${portal}/node_modules" ]; then
     do_sh "cd '${portal}' && pnpm install"
