@@ -345,14 +345,19 @@ Right-panel consistency across jobs (2026-07-05):
   must follow the same pattern. A job must not show one surface for selection and a different
   surface set in maintenance mode.
 
-For the FP Parameter Design panel (2026-07-07):
+For the FP Parameter Design panel (2026-07-07; revised 2026-07-10):
 
 - Upper panel: read-only display of the upstream CC task analysis (peak/fraction table and rack
   map with per-well status).
-- Lower panel: container configuration — the user selects the active container, then clicks
-  well circles in the tube-rack grid (96-well or custom layout) to add/remove that tube from
-  the active container; idle wells are not clickable. The currently selected tube list and
-  total count update live.
+- Container configuration uses a side-by-side layout (ruling 2026-07-10): container selection
+  (flasks/waste) on the left, the full serpentine tube-rack grid on the right — the tall rack
+  must not stack above/below the container controls and waste horizontal space.
+- The user selects the active container, then clicks well circles in the tube-rack grid to
+  add/remove that tube from the active container. **Every physical well is selectable**
+  (ruling 2026-07-10, supersedes the earlier "idle wells are not clickable"): wells Mind
+  classified are pre-colored by status, but the chemist may assign any well — including ones
+  Mind marked idle — to any container. Mind's classification is advisory pre-fill, not an
+  assignment gate. The currently selected tube list and total count update live.
 - After execution, a dedicated FP result card appears under the task result, like other steps.
 
 For the TLC Lab Logistic panel:
@@ -407,8 +412,10 @@ For the TLC Lab Logistic panel:
   can reach in the target deployment.
 - RE realtime result analysis comes from the Robot Team's Mars system, not ChemEngine.
 - A robot-typed FP step runs as a real stage: the FP Parameter Design panel shows the upstream
-  CC analysis (upper) and the container/rack-grid assignment (lower) pre-filled by well status;
-  the user confirms before dispatch; no ChemEngine call occurs anywhere in the FP loop.
+  CC analysis (upper) and the side-by-side container/rack-grid assignment (containers left,
+  full serpentine rack right) pre-filled by well status; every physical well is selectable for
+  assignment regardless of Mind's classification; the user confirms before dispatch; no
+  ChemEngine call occurs anywhere in the FP loop.
 - The FP dispatch payload's per-tube disposition array covers the whole collection rack (one
   element per rack tube; 0 = discard, N = flask ordinal) and matches the user-confirmed
   container assignment.
@@ -472,6 +479,12 @@ For the TLC Lab Logistic panel:
 - 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
+
+- 2026-07-10: FP container-assignment UI revision (Wenlong ruling): side-by-side layout
+  (containers left, full serpentine rack right) and every physical well selectable —
+  supersedes the 2026-07-07 "idle wells are not clickable" clause; Mind classification is
+  advisory pre-fill, not an assignment gate. Matching acceptance criterion updated.
+  Portal change tracked in BIC-meta#176.
 
 - 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
   is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
