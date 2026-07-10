@@ -2,7 +2,8 @@
 # Coworker story: clone this repo, `make up`, done. `make doctor` explains the rest.
 #
 # Knobs (env or `make X=... target`):
-#   BIC_ROOT=/path      where the sibling repos live (default: parent of this repo)
+#   BIC_ROOT=/path      where the service repos live (default: autodetected —
+#                       this repo if they're nested inside it, else its parent)
 #   BIC_PROFILE=minimal|full-real   (default minimal: Mind mocked + local MinIO)
 #   DRY=1               up/restart: print planned actions, change nothing
 #   INFRA=1             down: also stop the shared docker infra
@@ -10,9 +11,10 @@
 
 ENV := ./scripts/bic-env
 
-# Default BIC_ROOT = parent of this repo (the intended coworker layout, where the
-# meta repo is cloned next to the service repos). Override via env or `make X=...`.
-BIC_ROOT ?= $(abspath $(CURDIR)/..)
+# Default BIC_ROOT: autodetect the two known layouts (keep in sync with
+# scripts/bic-env/common.sh) — nested (service repos cloned inside this repo)
+# vs sibling (this repo cloned next to them). Override via env or `make X=...`.
+BIC_ROOT ?= $(shell [ -d "$(CURDIR)/BIC-agent-service" ] && echo "$(CURDIR)" || echo "$(abspath $(CURDIR)/..)")
 export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help

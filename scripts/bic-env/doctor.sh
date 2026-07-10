@@ -117,9 +117,20 @@ EOF
 
 # --- 6. Postgres single instance (#153) — 5433 retired, DBs on 5432 --------
 section "Postgres (:5432 single instance; 5433 retired)"
+# Stale-.env guard: after #153 the apps must point at bic-postgres:5432. A
+# leftover PG_PORT=5433 in a repo .env would send an app at the retired
+# instance — catch it here before it silently hits pre-#153 data.
+pgport="$(app_pg_port)"
+if [ "${pgport}" = "5432" ]; then
+  ok "apps' PG_PORT is 5432 (no stale .env pointing at retired 5433)"
+else
+  fail "apps' PG_PORT=${pgport} is retired (#153) — must be 5432" \
+       "set PG_PORT=5432 in BIC-agent-service/.env and BIC-lab-service/.env"
+fi
 # 5433 must have NO listener: a survivor talos-postgres or an ssh tunnel means
-# an app with a stale .env could silently hit pre-#153 data.
-owner5433="$(port_owner 5433 || true)"
+# an app with a stale .env could silently hit pre-#153 data. (port_owner now
+# tolerates a free port at the source, so no `|| true` needed here.)
+owner5433="$(port_owner 5433)"
 if [ -n "${owner5433}" ]; then
   pid5433="$(printf '%s' "${owner5433}" | awk '{print $2}')"
   fail "5433 has a listener (${owner5433}) — retired port, apps must use 5432" \
