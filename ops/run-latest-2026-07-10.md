@@ -4,6 +4,8 @@
 
 各仓 main（本文写作时）：shared-types `b85ee6c` / mars_interface_mock `389a784` / BIC-agent-service `19deb48` / BIC-agent-portal `c224b98` / BIC-lab-service `ef277d8` / BIC-infra `48c2cba`。
 
+> **端口说明**：本文端口按 2026-07-10 台架**当前实际**写（如 keycloak 起在 `18080`，因本机 8080 被 DMPK 占用）。**端口治理（固定端口方案 + examples 统一更新）是独立续班车任务**——届时会把 keycloak 等端口统一收敛，本文对应处会被续班车修订。在那之前，以本文实际端口为准。
+
 ---
 
 ## 1. 各仓 main 与 shared-types pin
