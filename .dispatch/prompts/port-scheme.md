@@ -17,3 +17,6 @@
 
 ## 收尾
 端口表 + 改动 PR 清单评论到 BIC-meta 新 issue「端口分配定档 2026-07-10」；dispatch done（FACTS/Judgment 分开）。
+
+## 并行协调（root 追加）
+merge-train 正在写 ops/run-latest-2026-07-10.md（团队文档）——你对该文件的端口修订放在最后一步做：先完成方案定稿/infra/examples，末了检查该文件是否已存在，存在才修订（git pull 先），避免和列车撞写。
