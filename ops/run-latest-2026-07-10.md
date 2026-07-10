@@ -4,7 +4,7 @@
 
 各仓 main（本文写作时）：shared-types `b85ee6c` / mars_interface_mock `389a784` / BIC-agent-service `19deb48` / BIC-agent-portal `c224b98` / BIC-lab-service `ef277d8` / BIC-infra `48c2cba`。
 
-> **端口说明**：本文端口按 2026-07-10 台架**当前实际**写（如 keycloak 起在 `18080`，因本机 8080 被 DMPK 占用）。**端口治理（固定端口方案 + examples 统一更新）是独立续班车任务**——届时会把 keycloak 等端口统一收敛，本文对应处会被续班车修订。在那之前，以本文实际端口为准。
+> **端口说明**：端口治理**已定档（2026-07-10）**——固定端口方案 + 各仓 example 已落地（infra `BIC-infra#4`、BE `#76`、portal `#24` 均合并）。权威表见 `ops/port-allocation-2026-07-10.md`（镜像于 `BIC-infra` README）。本文端口即定稿口径：keycloak `18080`（8080+10000，避 DMPK/通用撞车）、chem `8010`、portal `5173`、其余在位不迁。定稿=台架现状，零迁移。
 
 ---
 
@@ -59,6 +59,7 @@ cd BIC-agent-service  && git checkout main && git pull && uv sync
 cd BIC-agent-portal   && git checkout main && git pull && pnpm install
 cd mars_interface_mock&& git checkout main && git pull
 ```
+> **依赖同步不可跳（刚踩的坑）**：切 main 后 portal 的 `pnpm install`（BE/lab 的 `uv sync`）是硬步骤——Keycloak 批给 portal 新增了 `react-oidc-context`，不装则页面**白屏**（import error），且 dev server 仍 `:5173` 200、health 假绿。
 
 各仓 `alembic upgrade head`（lab、BE 都要，含本批新迁移）：
 ```bash
@@ -87,7 +88,8 @@ cd mars_interface_mock && uv run mars-interface-mock
 ```bash
 curl -s --noproxy '*' http://localhost:8192/health        # lab {"status":"healthy","app":"Nexus"}
 curl -s --noproxy '*' http://localhost:8800/health        # BE  {"status":"healthy"}
-curl -s --noproxy '*' http://localhost:5173/ -o /dev/null -w '%{http_code}\n'   # portal 200
+curl -s --noproxy '*' http://localhost:5173/ -o /dev/null -w '%{http_code}\n'   # portal 200（不够，见下）
+curl -s --noproxy '*' http://localhost:5173/src/main.tsx -o /dev/null -w '%{http_code} %{content_type}\n'  # portal 真加载：应 200 text/javascript（拿到 JS=页面可编译；只看 / 的 200 会假绿，dev server 起≠页面能编译）
 curl -s --noproxy '*' http://localhost:18080/realms/bic/.well-known/openid-configuration | head -c 80  # keycloak issuer
 ```
 
