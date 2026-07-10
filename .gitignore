@@ -24,6 +24,7 @@ CLAUDE.local.md
 # Trellis artifacts, scripts, and onboarding files.
 /BIC-agent-portal/
 /BIC-agent-service/
+/BIC-chem-service/
 /BIC-lab-service/
 /BIC-shared-types/
 /mars_interface_mock/

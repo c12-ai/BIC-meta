@@ -231,7 +231,7 @@ for r in BIC-lab-service BIC-agent-service BIC-agent-portal mars_interface_mock;
   if [ -d "${d}/.git" ]; then
     ok "$r @ $(git_branch "${d}") $(git_sha "${d}")"
   else
-    fail "$r not found at ${d}" "make up   # clones missing repos, or set BIC_ROOT=/path/to/your/checkout"
+    fail "$r not found at ${d}" "scripts/bootstrap.sh all   # clones missing repos; or set BIC_ROOT=/path/to/your/checkout"
   fi
 done
 
