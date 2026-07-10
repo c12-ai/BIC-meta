@@ -82,6 +82,7 @@ Reset API:
 
 ```bash
 curl --location --request POST 'http://127.0.0.1:8192/admin/reset-to-test-data' \
+--header "Authorization: Bearer $(scripts/bic-env/get-token.sh)" \
 --header 'User-Agent: Apifox/1.0.0 (https://apifox.com)' \
 --header 'Content-Type: application/json' \
 --header 'Accept: */*' \
@@ -92,7 +93,9 @@ curl --location --request POST 'http://127.0.0.1:8192/admin/reset-to-test-data' 
 }'
 ```
 
-This will reset LabService DB.
+This will reset LabService DB. Lab-service requires a Keycloak Bearer JWT on all
+non-health routes; `scripts/bic-env/get-token.sh` prints a service-account token
+(valid 300 s) for manual calls like this.
 
 ## Working Practices
 
