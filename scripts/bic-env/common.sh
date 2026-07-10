@@ -20,10 +20,18 @@ _bic_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # scripts/bic-env/ -> repo root is two levels up.
 BIC_META_DIR="$(cd "${_bic_here}/../.." && pwd)"
 
-# BIC_ROOT: where the sibling repos (BIC-lab-service, ...) live.
-# Default = parent of the meta checkout (the intended coworker layout, where
-# meta is cloned next to the service repos). Override when your checkout differs.
-BIC_ROOT="${BIC_ROOT:-$(cd "${BIC_META_DIR}/.." && pwd)}"
+# BIC_ROOT: where the service repos (BIC-lab-service, ...) live.
+# Autodetect the two known layouts (keep in sync with the top-level Makefile):
+#   nested  — repos cloned INSIDE the meta checkout (BIC/BIC-agent-service, ...)
+#   sibling — meta cloned NEXT TO the repos (the coworker story's default)
+# Override with BIC_ROOT=... when neither fits.
+if [ -z "${BIC_ROOT:-}" ]; then
+  if [ -d "${BIC_META_DIR}/BIC-agent-service" ]; then
+    BIC_ROOT="${BIC_META_DIR}"
+  else
+    BIC_ROOT="$(cd "${BIC_META_DIR}/.." && pwd)"
+  fi
+fi
 
 # Chem source dir (台架 runs the feat/compound-names worktree; infra image is a
 # fallback). Override with CHEM_DIR=...
@@ -108,14 +116,20 @@ do_sh() {
 # HTTP / proxy helpers — local services must be hit with --noproxy '*'
 # (the box's 127.0.0.1:7890 proxy otherwise swallows localhost).
 # ----------------------------------------------------------------------------
+# NB: on connection failure curl still prints its -w output ('000') before
+# exiting non-zero, so a plain `|| echo 000` would double-print ('000000').
 http_code() {
-  curl -s --noproxy '*' --max-time "${2:-5}" -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || echo 000
+  local c
+  c="$(curl -s --noproxy '*' --max-time "${2:-5}" -o /dev/null -w '%{http_code}' "$1" 2>/dev/null || true)"
+  printf '%s\n' "${c:-000}"
 }
 http_body() {
   curl -s --noproxy '*' --max-time "${2:-5}" "$1" 2>/dev/null || true
 }
 http_code_ct() { # -> "<code> <content-type>"
-  curl -s --noproxy '*' --max-time "${2:-5}" -o /dev/null -w '%{http_code} %{content_type}' "$1" 2>/dev/null || echo "000 -"
+  local c
+  c="$(curl -s --noproxy '*' --max-time "${2:-5}" -o /dev/null -w '%{http_code} %{content_type}' "$1" 2>/dev/null || true)"
+  printf '%s\n' "${c:-000 -}"
 }
 
 # The proxy prefix BE must launch with (unset so it can reach localhost/lab/MQ).
@@ -126,8 +140,10 @@ unset_proxy_prefix() { printf 'unset %s && ' "${PROXY_VARS}"; }
 # Port / process inspection
 # ----------------------------------------------------------------------------
 # port_owner <port> -> "<command> <pid>" for the LISTEN socket, or "" if free.
+# lsof exits 1 on a free port; callers run under `set -euo pipefail`, so the
+# pipeline must not propagate that (a free port is a valid answer, not an error).
 port_owner() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $1" "$2; exit}'
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $1" "$2; exit}' || true
 }
 port_pid()  { port_owner "$1" | awk '{print $2}'; }
 port_cmd()  { port_owner "$1" | awk '{print $1}'; }
@@ -160,6 +176,26 @@ container_running() { docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$1
 container_exists() { docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$1"; }
 # container_on_port <hostport> -> first running container publishing it
 container_on_port() { docker ps --filter "publish=$1" --format '{{.Names}}' 2>/dev/null | head -1; }
+
+# ----------------------------------------------------------------------------
+# Stale-.env guard input (#153) — the only Postgres is bic-postgres:5432;
+# talos-postgres:5433 is retired. This reads the apps' PG_PORT so doctor can
+# red-card a stale .env still pointing at 5433. It is a guard input, NOT a
+# "which Postgres" selection knob (that mechanism went away when #153
+# collapsed the bench to a single instance).
+# ----------------------------------------------------------------------------
+# app_pg_port -> host port from the first PG_PORT= found (.env before
+# .env.example, agent before lab), default 5432.
+app_pg_port() {
+  local f p
+  for f in "$(repo_dir BIC-agent-service)/.env" "$(repo_dir BIC-lab-service)/.env" \
+           "$(repo_dir BIC-agent-service)/.env.example" "$(repo_dir BIC-lab-service)/.env.example"; do
+    [ -f "${f}" ] || continue
+    p="$(sed -n 's/^PG_PORT=//p' "${f}" | head -1)"
+    if [ -n "${p}" ]; then printf '%s\n' "${p}"; return 0; fi
+  done
+  echo 5432
+}
 
 # ----------------------------------------------------------------------------
 # Registries (encode the whole topology). Lines are "|"-separated records.

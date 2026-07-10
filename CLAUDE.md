@@ -44,7 +44,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
    make up        # idempotent: docker+infra, wait-for-pg, DB create, keycloak seed, dep sync, tmux bic-services (lab→BE→portal→mock→chem), each health-gated
    make doctor    # read-only checkup; GREEN = bench up. Every red card prints its own fix command.
    ```
-   `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. On this Mac the repos live under `/Users/wenlongwang/Work/BIC/talos`, so run with `BIC_ROOT=/Users/wenlongwang/Work/BIC/talos` (or export it). The scripts encode every trap below (retired-5433 listener check, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
+   `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. `BIC_ROOT` is autodetected for both known layouts — service repos nested inside this repo, or this repo cloned next to them — so no override is needed on a standard checkout. The scripts encode every trap below (retired-5433 listener check, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
 
    <details><summary>Manual fallback (if <code>make</code> is unavailable / debugging a single step)</summary>
 
