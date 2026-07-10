@@ -5,7 +5,7 @@ DRY_RUN="${DRY_RUN:-0}"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/bootstrap.sh <all|backend|portal|lab|shared>
+Usage: scripts/bootstrap.sh <all|backend|portal|lab|shared|mock|chem>
 
 Environment:
   DRY_RUN=1  Print clone/skip decisions without changing the filesystem.
@@ -53,6 +53,14 @@ bootstrap_shared() {
   clone_if_missing "shared" "BIC-shared-types" "git@github.com:c12-ai/BIC-shared-types.git"
 }
 
+bootstrap_mock() {
+  clone_if_missing "mock" "mars_interface_mock" "git@github.com:c12-ai/mars_interface_mock.git"
+}
+
+bootstrap_chem() {
+  clone_if_missing "chem" "BIC-chem-service" "git@github.com:c12-ai/BIC-chem-service.git"
+}
+
 target="${1:-}"
 
 case "$target" in
@@ -61,6 +69,8 @@ case "$target" in
     bootstrap_backend
     bootstrap_portal
     bootstrap_shared
+    bootstrap_mock
+    bootstrap_chem
     ;;
   backend)
     bootstrap_backend
@@ -73,6 +83,12 @@ case "$target" in
     ;;
   shared)
     bootstrap_shared
+    ;;
+  mock)
+    bootstrap_mock
+    ;;
+  chem)
+    bootstrap_chem
     ;;
   -h|--help|help)
     usage
