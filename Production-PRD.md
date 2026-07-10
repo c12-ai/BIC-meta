@@ -93,6 +93,10 @@ Core scenarios:
    - Material Preparation is the dispatch-time workflow for experiment-specific items that require human assignment or identity tracking.
    - Consumable Maintenance is the inventory upkeep workflow for non-specific items that the robot can auto-pick.
    - The product must not let a Material Preparation surface become a generic consumables editor, and must not let Consumable Maintenance assign experiment-specific items for a task.
+   - TLC is an explicit experiment-specific creation exception: inside Material Preparation, the
+     chemist may add a typed pure/crude sample tube to a concrete empty cell of an existing supply-
+     shelf 2 ml tube box and bind the Lab Service-created tube to the current experiment. This does
+     not make the general Consumable Maintenance page an editor for experiment-specific tubes.
    - A robot dispatch attempt must validate the current task's material state. If validation fails, the user must be guided back to Material Preparation to complete missing or invalid assignments before dispatch.
 
 10. **ELN report export**
@@ -458,15 +462,14 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
 
 ## UI Interaction Requirements
 
-Right-panel consistency across jobs (2026-07-05):
+Right-panel consistency across jobs (revised 2026-07-10):
 
-- For every job's Material Preparation surface, the right panel shows the SAME physical surfaces
-  in the original (selection) view and in the "after entering maintenance" view. Entering
-  maintenance changes editability, not the surface set.
-- This selection-vs-maintenance display logic is uniform across jobs: what TLC does with its
-  shelf sample-tube boxes, CC does with its sample-column rack area, and future RE/FP surfaces
-  must follow the same pattern. A job must not show one surface for selection and a different
-  surface set in maintenance mode.
+- Every Material Preparation right panel uses the same physical inventory projection as the
+  corresponding Lab Service-backed stock surface. The item action changes cell/slot editability,
+  not which physical surface or positions are displayed.
+- TLC reuses the supply-shelf sample-tube box projection shown read-only in Consumable Maintenance;
+  CC uses its sample-column rack area; FP/RE retain their no-manual-placement surfaces. Material
+  Preparation has no separate generic maintenance-mode surface.
 
 For the FP Parameter Design panel (2026-07-07; revised 2026-07-10):
 
@@ -498,8 +501,10 @@ For the TLC Lab Logistic panel:
 - TLC Lab Logistic confirmation happens after TLC parameter confirmation and before TLC dispatch.
 - Experiment-specific items such as sample columns and sample tubes are configured during experiment design/dispatch, not as generic consumables.
 - Generic consumables can be configured through Consumable Maintenance by entering maintenance mode from the upper-right button, clicking slot icons, and exiting edit mode to persist changes.
-- The special item maintenance module is available from the Parameter Design stage and can maintain experiment-specific lab items while also selecting the items required by the current experiment.
-- Exiting special item maintenance/edit mode persists item additions/removals to the database.
+- The Material Preparation special-item module is available from Parameter Design and owns the
+  experiment-specific Add, Assign/Reassign, and Remove actions required by the current task.
+- A successful TLC cell assignment/removal persists through Lab Service immediately; there is no
+  separate special-item maintenance-mode exit step.
 - Dispatch material validation can route the user back to Material Preparation when task material state is incomplete or invalid.
 - Material Preparation task cards separate manual/specific items from robot auto-pick items.
 - Robot auto-pick materials show available stock against capacity and cannot be confirmed when required stock is unavailable.
@@ -509,23 +514,23 @@ For the TLC Lab Logistic panel:
 - TLC inventory state has no records with both `location_id` and `parent_object_id` missing.
 - The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
-- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row, any
-  distinct columns within the box (columns 1–5); column gaps and non-column-1 starts are allowed,
-  matching the robot's v6 reference run (A1+A4) — no contiguity or start-at-column-1 constraint.
-- A TLC selection containing only one sample type (only pure or only crude) cannot be confirmed,
-  and the surface explains which type is missing instead of silently disabling the confirm
-  control; no ordering constraint applies between pure and crude columns.
+- TLC selection and dispatch use 2–4 tubes in ONE shelf sample-tube box and one row, including at
+  least one pure and one crude tube, with pure tubes left of crude tubes; columns need not be
+  contiguous or start at column 1.
 - A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
   is read-only there.
-- Selecting an item for a task never creates inventory; empty slots/cells change only in
-  maintenance mode.
+- CC task assignment selects existing inventory. TLC Material Preparation is the explicit
+  exception: Add creates only a local typed item, and the item's Assign/Reassign action may create
+  and bind a pure/crude tube in an empty cell of an existing shelf 2 ml box through Lab Service.
+- TLC Material Preparation exposes one type selector (Pure tube / Crude tube) and one Add action;
+  pending and assigned items show a visible localized type badge.
 - Each experiment's Material Preparation card shows exactly the rule-10 material set, with manual
   and auto-pick items separated; readiness quantity gates match the rule-10 counts (TLC sample
   tubes 2–4).
-- For each job, the right panel's selection view and maintenance view show the same physical
-  surfaces; only editability changes.
+- For each job, the Material Preparation right panel uses the same Lab Service-backed physical
+  projection as the corresponding stock surface; item-owned actions change only editability.
 - TLC readiness does not depend on placeless placeholder records such as staining jar or
   eluent tube pair.
 - TLC tip boxes exist as physical inventory with concrete locations before execution, and execution
@@ -758,6 +763,11 @@ For the TLC Lab Logistic panel:
 - 2026-07-09: Terminology fix (product-owner ruling): the algorithm team's canonical name
   is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
   entries left as written.
+
+- 2026-07-10: Revised TLC sample-tube assignment to the experiment-specific add-and-bind flow,
+  retained read-only sample-tube stock in Consumable Maintenance, added the single type selector +
+  Add interaction and item type badges, and reconciled the non-contiguous purity-order dispatch
+  contract.
 
 - 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
   round-bottom flask row removed — it moved to FP's `flasks` task parameter with
