@@ -11,10 +11,12 @@
 
 ENV := ./scripts/bic-env
 
-# Default BIC_ROOT: autodetect the two known layouts (keep in sync with
-# scripts/bic-env/common.sh) — nested (service repos cloned inside this repo)
-# vs sibling (this repo cloned next to them). Override via env or `make X=...`.
-BIC_ROOT ?= $(shell [ -d "$(CURDIR)/BIC-agent-service" ] && echo "$(CURDIR)" || echo "$(abspath $(CURDIR)/..)")
+# Default BIC_ROOT resolution order: explicit env / make X=... > .bic-env
+# machine pin (gitignored, see common.sh) > autodetect (nested: repos inside
+# this repo; sibling: this repo cloned next to them). The pin exists because
+# autodetect can land on a WRONG parent dir holding stale same-named repos
+# (2026-07-10 incident: migrations ran from a stale checkout).
+BIC_ROOT ?= $(shell . ./.bic-env 2>/dev/null; if [ -n "$$BIC_ROOT" ]; then echo "$$BIC_ROOT"; elif [ -d "$(CURDIR)/BIC-agent-service" ]; then echo "$(CURDIR)"; else echo "$(abspath $(CURDIR)/..)"; fi)
 export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help

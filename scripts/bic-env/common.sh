@@ -20,6 +20,18 @@ _bic_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # scripts/bic-env/ -> repo root is two levels up.
 BIC_META_DIR="$(cd "${_bic_here}/../.." && pwd)"
 
+# Machine-local overrides (gitignored): .bic-env in the meta root can pin
+# BIC_ROOT / BIC_PROFILE / CHEM_DIR for THIS machine, so a bare `make up` works
+# on non-standard layouts. Write it with defaulting syntax so real env vars
+# still win, e.g.:  export BIC_ROOT="${BIC_ROOT:-/path/to/repos}"
+# Motivating incident (2026-07-10): autodetect resolved a meta checkout's
+# parent dir that held STALE template repos, and `make update` ran alembic
+# against the live DB from an old branch.
+if [ -f "${BIC_META_DIR}/.bic-env" ]; then
+  # shellcheck source=/dev/null
+  . "${BIC_META_DIR}/.bic-env"
+fi
+
 # BIC_ROOT: where the service repos (BIC-lab-service, ...) live.
 # Autodetect the two known layouts (keep in sync with the top-level Makefile):
 #   nested  — repos cloned INSIDE the meta checkout (BIC/BIC-agent-service, ...)

@@ -223,8 +223,23 @@ fi
 [ -d "${be}" ] && do_sh "cd '${be}' && uv sync"
 
 section "7. Migrations (alembic upgrade head)"
-[ -d "${lab}" ] && do_sh "cd '${lab}' && uv run alembic upgrade head"
-[ -d "${be}" ]  && do_sh "cd '${be}' && uv run alembic upgrade head"
+# Migrations mutate the SHARED database — only run them from a main checkout.
+# (2026-07-10 incident: a wrong BIC_ROOT pointed at a stale feature-branch
+# checkout and alembic ran against the live DB; it happened to fail safe.)
+# Override consciously with BIC_ALLOW_BRANCH_MIGRATIONS=1.
+migrate_repo() { # <dir> <label>
+  local d="$1" label="$2" branch
+  [ -d "${d}" ] || return 0
+  branch="$(git -C "${d}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  if [ "${branch}" != "main" ] && [ "${BIC_ALLOW_BRANCH_MIGRATIONS:-0}" != "1" ]; then
+    fail "${label}: refusing migrations from branch '${branch}' (not main)" \
+         "cd ${d} && git checkout main   # or BIC_ALLOW_BRANCH_MIGRATIONS=1 if intentional"
+    return 0
+  fi
+  do_sh "cd '${d}' && uv run alembic upgrade head"
+}
+migrate_repo "${lab}" BIC-lab-service
+migrate_repo "${be}" BIC-agent-service
 
 fi  # end full-bring-up sections (ONLY guard)
 
