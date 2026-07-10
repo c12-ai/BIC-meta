@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Avoid duplicated discovery and matching mechanisms while refactoring the analyzer."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The change-set, scope, inventory, and report stages share a structured data contract."}
+{"file":".trellis/spec/tech_design/backend/quality-guidelines.md","reason":"Apply the available project quality checklist to the Python and shell tooling changes."}

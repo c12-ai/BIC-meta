@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""Behavior fixtures for the read-only BIC quality analyzer."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+
+KIT_DIR = Path(__file__).resolve().parents[1]
+ANALYZER = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/quality_context.py"
+
+
+def run(command: list[str], cwd: Path) -> str:
+    proc = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=True)
+    return proc.stdout.strip()
+
+
+def git(repo: Path, *args: str) -> str:
+    return run(["git", *args], repo)
+
+
+def init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    git(path, "init", "-b", "main")
+    git(path, "config", "user.email", "quality@example.invalid")
+    git(path, "config", "user.name", "Quality Fixture")
+
+
+def write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+class QualityContextFixtureTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name) / "BIC-meta"
+        init_repo(self.root)
+        write(self.root / "AGENTS.md", "fixture\n")
+        write(self.root / "Production-PRD.md", "fixture\n")
+        write(self.root / "dirty.txt", "base\n")
+        write(self.root / "delete-me.txt", "delete\n")
+        write(self.root / "old-name.txt", "rename\n")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-m", "base")
+        git(self.root, "switch", "-c", "feature")
+
+        write(self.root / "committed.txt", "committed\n")
+        git(self.root, "mv", "old-name.txt", "new-name.txt")
+        git(self.root, "rm", "delete-me.txt")
+        git(self.root, "add", "committed.txt")
+        git(self.root, "commit", "-m", "feature changes")
+        write(self.root / "committed.txt", "committed then modified\n")
+        write(self.root / "dirty.txt", "dirty\n")
+        write(self.root / "staged.txt", "staged\n")
+        git(self.root, "add", "staged.txt")
+        write(self.root / "untracked.txt", "untracked\n")
+
+        self.child = self.root / "BIC-agent-service"
+        init_repo(self.child)
+        write(self.child / "README.md", "base\n")
+        write(self.child / "app/runtime/existing.py", "def untouched(): ...\n")
+        write(self.child / "app/api/routers/users.py", "def users(): ...\n")
+        write(self.child / "app/api/service.py", "from app.api.routers.one_hop import one_hop\n\ndef run_feature():\n    return one_hop()\n")
+        write(self.child / "tests/unit/test_sse.py", "from app.api.routers.sse import stream\n\ndef test_stream():\n    assert stream is not None\n")
+        write(self.child / "tests/unit/test_parent_import.py", "from app.api.routers import users\n\ndef test_users():\n    assert users is not None\n")
+        write(self.child / "tests/unit/test_unrelated.py", "def test_other():\n    assert True\n")
+        write(self.child / "tests/unit/test_name_collision.py", "def stream():\n    return 'local helper'\n\ndef test_stream_collision():\n    assert stream() == 'local helper'\n")
+        write(self.child / "tests/unit/test_disabled.py", "import pytest\nfrom app.api.routers.disabled import disabled_feature\n\n@pytest.mark.skip(reason='pending')\ndef test_disabled_feature():\n    assert disabled_feature is not None\n")
+        write(self.child / "tests/unit/test_runtime_skip.py", "import pytest\nfrom app.api.routers.runtime_disabled import runtime_disabled\n\ndef test_runtime_disabled():\n    pytest.skip('pending')\n    assert runtime_disabled is not None\n")
+        write(self.child / "tests/unit/test_multi.py", "from app.api.routers.multi import foo\n\ndef test_foo():\n    assert foo() == 'foo'\n")
+        write(self.child / "tests/unit/test_mixed_disabled.py", "import pytest\nfrom app.api.routers.mixed_target import mixed_target\n\n@pytest.mark.skip(reason='pending')\ndef test_mixed_target():\n    assert mixed_target is not None\n\ndef test_unrelated_active():\n    assert True\n")
+        write(self.child / "tests/unit/test_one_hop.py", "from app.api.service import run_feature\n\ndef test_feature():\n    assert run_feature() == 'one-hop'\n")
+        write(self.child / "tests/unit/test_alias_target.py", "from app.api.routers.alias_target import alias_target as subject\n\ndef test_alias_target():\n    assert subject() == 'alias'\n")
+        write(self.child / "app/tests/test_relative.py", "from ..api.feature import feature\n\ndef test_feature_relative():\n    assert feature() == 'feature'\n")
+        write(self.child / "tests/unit/test_unittest_style.py", "import unittest\n\nclass TestStyle(unittest.TestCase):\n    def test_style(self):\n        self.assertEqual(1, 1)\n")
+        git(self.child, "add", ".")
+        git(self.child, "commit", "-m", "base")
+        git(self.child, "switch", "-c", "feature")
+        write(self.child / "app/api/routers/sse.py", "def stream(): ...\n")
+        write(self.child / "app/api/routers/disabled.py", "def disabled_feature(): ...\n")
+        write(self.child / "app/api/routers/runtime_disabled.py", "def runtime_disabled(): ...\n")
+        write(self.child / "app/api/routers/multi.py", "def foo(): return 'foo'\n\ndef bar(): return 'bar'\n")
+        write(self.child / "app/api/routers/mixed_target.py", "def mixed_target(): ...\n")
+        write(self.child / "app/api/routers/one_hop.py", "def one_hop(): return 'one-hop'\n")
+        write(self.child / "app/api/routers/alias_target.py", "def alias_target(): return 'alias'\n")
+        write(self.child / "app/api/feature.py", "def feature(): return 'feature'\n")
+        write(self.child / "app/runtime/existing.py", "def untouched():\n    return 'implementation changed'\n")
+        git(self.child, "add", ".")
+        git(self.child, "commit", "-m", "sse")
+        (self.child / "tests/empty").mkdir(parents=True)
+
+        self.unknown_child = self.root / "BIC-model-service"
+        init_repo(self.unknown_child)
+        write(self.unknown_child / "README.md", "base\n")
+        write(self.unknown_child / "tests/unit/test_unrelated.py", "def test_other(): ...\n")
+        write(self.unknown_child / "tests/unit/inference/test_behavior.py", "def test_behavior(): ...\n")
+        write(self.unknown_child / "playwright.config.ts", "export default {}\n")
+        git(self.unknown_child, "add", ".")
+        git(self.unknown_child, "commit", "-m", "base")
+        git(self.unknown_child, "switch", "-c", "feature")
+        write(self.unknown_child / "engine/novel.py", "VALUE = 1\n")
+        write(self.unknown_child / "app/inference/pipeline.py", "def predict(): ...\n")
+        write(self.unknown_child / "app/inference/worker.go", "package inference\n\nfunc Work() {}\n")
+        write(self.unknown_child / "app/api/routers/jobs.py", "def jobs(): ...\n")
+        write(self.unknown_child / "src/pages/chat/View.tsx", "export const View = () => null\n")
+        write(self.unknown_child / "mq/consumer.py", "def consume(): ...\n")
+        git(self.unknown_child, "add", ".")
+        git(self.unknown_child, "commit", "-m", "unconfigured modules")
+
+        self.other_model = self.root / "BIC-other-model"
+        init_repo(self.other_model)
+        write(self.other_model / "README.md", "base\n")
+        git(self.other_model, "add", ".")
+        git(self.other_model, "commit", "-m", "base")
+        git(self.other_model, "switch", "-c", "feature")
+        write(self.other_model / "app/inference/engine.py", "def infer(): ...\n")
+        git(self.other_model, "add", ".")
+        git(self.other_model, "commit", "-m", "inference module without tests")
+
+        self.portal = self.root / "BIC-agent-portal"
+        init_repo(self.portal)
+        write(self.portal / "README.md", "base\n")
+        write(self.portal / "src/lib/agent-client.test.ts", "import { client } from './agent-client'\ntest('client', () => { expect(client).toBeDefined() })\n")
+        write(self.portal / "src/lib/unrelated.test.ts", "test('other', () => { expect(true).toBe(true) })\n")
+        write(self.portal / "src/stores/chatStore.feedback.test.ts", "import { chatStore } from './chatStore'\ntest('feedback', () => { expect(chatStore).toBeDefined() })\n")
+        write(self.portal / "src/stores/workspaceStore.test.ts", "test('workspace', () => { expect(true).toBe(true) })\n")
+        write(self.portal / "src/stores/skippedStore.test.ts", "import { skippedStore } from './skippedStore'\ndescribe.skip('skipped store', () => { test('value', () => { expect(skippedStore).toBeDefined() }) })\n")
+        write(self.portal / "src/stores/commentStore.test.ts", "import { commentStore } from './commentStore'\ntest('comment store', () => { /* expect(commentStore).toBeDefined() */ })\n")
+        write(self.portal / "src/stores/mixedStore.test.ts", "import { mixedStore } from './mixedStore'\ntest('mixed store', () => { expect(mixedStore).toBeDefined() })\ntest.skip('unrelated skipped', () => { expect(true).toBe(true) })\n")
+        write(self.portal / "src/stores/mixedSuiteStore.test.ts", "import { mixedSuiteStore } from './mixedSuiteStore'\ntest(\n  'mixed suite store',\n  () => {\n    expect(mixedSuiteStore).toBeDefined()\n  },\n)\ndescribe.skip('unrelated suite', () => { test('ignored', () => { expect(true).toBe(true) }) })\n")
+        write(self.portal / "src/stores/aliasStore.test.ts", "import { aliasStore as subject } from './aliasStore'\ntest('alias store', () => { expect(subject).toBeDefined() })\n")
+        write(self.portal / "tests/e2e/client-flow.spec.ts", "test('flow', () => { expect(true).toBe(true) })\n")
+        write(self.portal / "vitest.config.ts", "export default {}\n")
+        write(self.portal / "playwright.config.ts", "export default {}\n")
+        write(
+            self.portal / "package.json",
+            json.dumps({"scripts": {"test": "vitest", "test:e2e": "playwright test"}}),
+        )
+        git(self.portal, "add", ".")
+        git(self.portal, "commit", "-m", "base")
+        git(self.portal, "switch", "-c", "feature")
+        write(self.portal / "src/lib/agent-client.ts", "export const client = {}\n")
+        write(self.portal / "src/stores/chatStore.ts", "export const chatStore = {}\n")
+        write(self.portal / "src/stores/skippedStore.ts", "export const skippedStore = {}\n")
+        write(self.portal / "src/stores/commentStore.ts", "export const commentStore = {}\n")
+        write(self.portal / "src/stores/mixedStore.ts", "export const mixedStore = {}\n")
+        write(self.portal / "src/stores/mixedSuiteStore.ts", "export const mixedSuiteStore = {}\n")
+        write(self.portal / "src/stores/aliasStore.ts", "export const aliasStore = {}\n")
+        git(self.portal, "add", ".")
+        git(self.portal, "commit", "-m", "client")
+
+        self.lab = self.root / "BIC-lab-service"
+        init_repo(self.lab)
+        write(self.lab / "README.md", "base\n")
+        git(self.lab, "add", ".")
+        git(self.lab, "commit", "-m", "base")
+        git(self.lab, "switch", "-c", "feature")
+        write(self.lab / "app/infrastructure/mq_client.py", "class MQClient: ...\n")
+        write(self.lab / "app/repositories/task.py", "class TaskRepository: ...\n")
+        git(self.lab, "add", ".")
+        git(self.lab, "commit", "-m", "mq and db")
+
+        self.shared = self.root / "BIC-shared-types"
+        init_repo(self.shared)
+        write(self.shared / "README.md", "base\n")
+        git(self.shared, "add", ".")
+        git(self.shared, "commit", "-m", "base")
+        git(self.shared, "switch", "-c", "feature")
+        write(self.shared / "src/experiment.ts", "export type Experiment = {}\n")
+        git(self.shared, "add", ".")
+        git(self.shared, "commit", "-m", "contract")
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def analyze(self, command: str, *args: str) -> dict:
+        env = {**os.environ, "BIC_WORKSPACE_ROOT": str(self.root)}
+        proc = subprocess.run(
+            ["python3", str(ANALYZER), command, *args],
+            cwd=self.root, env=env, text=True, capture_output=True, check=True,
+        )
+        return json.loads(proc.stdout)
+
+    def recommend_for(self, context: dict, scope: dict, tests: dict) -> dict:
+        code = """
+import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('quality_context_fixture', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+payload = json.load(sys.stdin)
+print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], payload['tests'])))
+"""
+        env = {**os.environ, "BIC_WORKSPACE_ROOT": str(self.root)}
+        proc = subprocess.run(
+            ["python3", "-c", code, str(ANALYZER)],
+            input=json.dumps({"context": context, "scope": scope, "tests": tests}),
+            cwd=self.root, env=env, text=True, capture_output=True, check=True,
+        )
+        return json.loads(proc.stdout)
+
+    def status(self, repo: Path) -> str:
+        return git(repo, "status", "--porcelain=v1", "-z")
+
+    def test_complete_changeset_and_dynamic_child_discovery_are_read_only(self) -> None:
+        repos = (self.root, self.child, self.unknown_child, self.other_model, self.portal, self.lab, self.shared)
+        before = tuple(self.status(repo) for repo in repos)
+        payload = self.analyze("collect")
+        after = tuple(self.status(repo) for repo in repos)
+        self.assertEqual(before, after)
+
+        self.assertEqual(
+            {repo["name"] for repo in payload["repositories"]},
+            {"BIC-meta", "BIC-agent-service", "BIC-model-service", "BIC-other-model", "BIC-agent-portal", "BIC-lab-service", "BIC-shared-types"},
+        )
+        changes = {item["path"]: item for item in payload["changed_files"]}
+        self.assertIn("committed", changes["committed.txt"]["change_sources"])
+        self.assertIn("worktree", changes["committed.txt"]["change_sources"])
+        self.assertIn("worktree", changes["dirty.txt"]["change_sources"])
+        self.assertIn("staged", changes["staged.txt"]["change_sources"])
+        self.assertIn("untracked", changes["untracked.txt"]["change_sources"])
+        self.assertEqual(changes["delete-me.txt"]["status"], "deleted")
+        self.assertEqual(changes["new-name.txt"]["old_path"], "old-name.txt")
+        self.assertIn("committed", changes["BIC-agent-service/app/api/routers/sse.py"]["change_sources"])
+        self.assertNotIn("BIC-agent-service", changes)
+
+        scope = self.analyze("impact")
+        modules = [
+            item
+            for repo_modules in scope["modules_by_repository"].values()
+            for item in repo_modules
+        ]
+        scope_by_id = {item["id"]: item for item in modules}
+        self.assertEqual(scope_by_id["agent-sse"]["mapping_source"], "explicit")
+        for scope_id in ("portal-api-client", "lab-mq", "lab-database", "shared-contracts"):
+            self.assertEqual(scope_by_id[scope_id]["mapping_source"], "explicit")
+        unmapped = [item for item in modules if item["mapping_source"] == "unmapped"]
+        self.assertTrue(any("BIC-model-service/engine/novel.py" in item["evidence"] for item in unmapped))
+        self.assertTrue(any("BIC-model-service/mq/consumer.py" in item["evidence"] for item in unmapped))
+        structural = {
+            item["module_scope"]: item
+            for item in modules
+            if item["repo"] == "BIC-model-service" and item["mapping_source"] == "structural"
+        }
+        self.assertIn("app/inference", structural)
+        self.assertIn("app/api/routers", structural)
+        self.assertIn("src/pages/chat", structural)
+        self.assertTrue(
+            any(
+                item["repo"] == "BIC-other-model"
+                and item["module_scope"] == "app/inference"
+                and item["mapping_source"] == "structural"
+                for item in modules
+            )
+        )
+        self.assertEqual(
+            set(scope["affected_repositories"]),
+            {"BIC-meta", "BIC-agent-service", "BIC-model-service", "BIC-other-model", "BIC-agent-portal", "BIC-lab-service", "BIC-shared-types"},
+        )
+        self.assertEqual(set(scope["modules_by_repository"]), set(scope["affected_repositories"]))
+        self.assertTrue(all(item["repo"] == repo for repo, items in scope["modules_by_repository"].items() for item in items))
+        self.assertTrue(scope["direct_cross_repository"])
+        serialized = json.dumps(scope)
+        for removed_key in ("capability_scope", "risk", "verification_scope", "potential_contract_impact", "cross_repository_impact"):
+            self.assertNotIn(f'"{removed_key}"', serialized)
+
+    def test_missing_explicit_base_warns_and_test_discovery_requires_files(self) -> None:
+        collected = self.analyze("collect", "--base-ref", "does-not-exist")
+        for repo in collected["repositories"]:
+            self.assertEqual(repo["base_resolution"], "explicit-missing")
+            self.assertTrue(repo["warnings"])
+        self.assertNotIn(
+            "BIC-agent-service/app/api/routers/sse.py",
+            {item["path"] for item in collected["changed_files"]},
+        )
+
+        inventory = self.analyze("inventory")
+        assets = inventory["discovered_assets"]
+        paths = {asset["path"] for asset in assets}
+        self.assertIn("BIC-agent-service/tests/unit/test_sse.py", paths)
+        self.assertNotIn("BIC-agent-service/tests/empty", paths)
+        self.assertIn("BIC-agent-portal/src/lib/agent-client.test.ts", paths)
+        self.assertIn("BIC-agent-portal/tests/e2e/client-flow.spec.ts", paths)
+        self.assertIn("BIC-agent-portal/vitest.config.ts", paths)
+        self.assertIn("BIC-agent-portal/playwright.config.ts", paths)
+        self.assertTrue(any(asset["asset_kind"] == "test-command" for asset in assets if asset["repo"] == "BIC-agent-portal"))
+        asset_by_path = {asset["path"]: asset for asset in assets}
+        self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_sse.py"]["test_facts"]["has_assertions"])
+        self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_unittest_style.py"]["test_facts"]["has_assertions"])
+        self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_disabled.py"]["test_facts"]["has_disabled_tests"])
+        self.assertFalse(asset_by_path["BIC-agent-service/tests/unit/test_runtime_skip.py"]["test_facts"]["has_active_test_with_assertion"])
+        self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_mixed_disabled.py"]["test_facts"]["has_active_test_with_assertion"])
+        self.assertFalse(asset_by_path["BIC-agent-portal/src/stores/skippedStore.test.ts"]["test_facts"]["has_active_test_with_assertion"])
+        self.assertFalse(asset_by_path["BIC-agent-portal/src/stores/commentStore.test.ts"]["test_facts"]["has_assertions"])
+        self.assertTrue(asset_by_path["BIC-agent-portal/src/stores/mixedStore.test.ts"]["test_facts"]["has_active_test_with_assertion"])
+        self.assertTrue(asset_by_path["BIC-agent-portal/src/stores/mixedSuiteStore.test.ts"]["test_facts"]["has_active_test_with_assertion"])
+
+        suggested = self.analyze("suggest")
+        correspondence = suggested["test_correspondence"]
+        modules = {(item["repo"], item["module_scope"]): item for item in correspondence["modules"]}
+        agent_sse = modules[("BIC-agent-service", "agent/sse")]
+        self.assertTrue(any(item["path"].endswith("test_sse.py") for item in agent_sse["directly_related_tests"]))
+        self.assertFalse(any(item["path"].endswith("test_name_collision.py") for item in agent_sse["directly_related_tests"]))
+        self.assertFalse(any(item["path"].endswith("test_parent_import.py") for item in agent_sse["directly_related_tests"]))
+        self.assertTrue(any("function stream" in reason for reason in agent_sse["no_obvious_test_gaps"]))
+
+        agent_api = modules[("BIC-agent-service", "agent/api")]
+        disabled_relation = next(item for item in agent_api["directly_related_tests"] if item["path"].endswith("test_disabled.py"))
+        self.assertFalse(disabled_relation["has_active_test_with_assertion"])
+        self.assertTrue(any("disabled_feature" in reason for reason in agent_api["strengthen_tests"]))
+        runtime_skip = next(item for item in agent_api["directly_related_tests"] if item["path"].endswith("test_runtime_skip.py"))
+        self.assertFalse(runtime_skip["has_active_test_with_assertion"])
+        self.assertTrue(any("runtime_disabled" in reason for reason in agent_api["strengthen_tests"]))
+        mixed_disabled = next(item for item in agent_api["directly_related_tests"] if item["path"].endswith("test_mixed_disabled.py"))
+        self.assertFalse(mixed_disabled["has_active_test_with_assertion"])
+        self.assertTrue(any("mixed_target" in reason for reason in agent_api["strengthen_tests"]))
+        self.assertTrue(any(item["path"].endswith("test_one_hop.py") for item in agent_api["indirectly_related_tests"]))
+        self.assertTrue(any("function one_hop" in reason for reason in agent_api["no_obvious_test_gaps"]))
+        self.assertTrue(any("function alias_target" in reason for reason in agent_api["no_obvious_test_gaps"]))
+        self.assertTrue(any(item["path"].endswith("app/tests/test_relative.py") for item in agent_api["directly_related_tests"]))
+        self.assertTrue(any("function feature" in reason for reason in agent_api["no_obvious_test_gaps"]))
+        self.assertTrue(any("function foo" in reason for reason in agent_api["no_obvious_test_gaps"]))
+        self.assertTrue(any("function bar" in reason for reason in agent_api["add_tests"]))
+
+        agent_runtime = modules[("BIC-agent-service", "agent/runtime")]
+        self.assertEqual(
+            [(item["name"], item["kind"]) for item in agent_runtime["changed_symbols"]],
+            [("existing", "changed-file")],
+        )
+        self.assertIn("file-level changed object", agent_runtime["symbol_scope_note"])
+
+        model_inference = modules[("BIC-model-service", "app/inference")]
+        self.assertTrue(any(item["path"].endswith("test_behavior.py") for item in model_inference["possibly_related_tests"]))
+        self.assertTrue(any("predict" in reason for reason in model_inference["add_tests"]))
+        self.assertTrue(any("worker.go" in item["path"] and item["kind"] == "changed-file" for item in model_inference["changed_symbols"]))
+        self.assertTrue(any("worker.go" in reason for reason in model_inference["add_tests"]))
+        other_inference = modules[("BIC-other-model", "app/inference")]
+        self.assertTrue(any("engine" in reason for reason in other_inference["add_tests"]))
+
+        portal_ui = modules[("BIC-agent-portal", "portal/ui")]
+        self.assertTrue(any(item["path"].endswith("chatStore.feedback.test.ts") for item in portal_ui["directly_related_tests"]))
+        self.assertFalse(any(item["path"].endswith("workspaceStore.test.ts") for item in portal_ui["directly_related_tests"]))
+        self.assertTrue(any("skippedStore" in reason for reason in portal_ui["strengthen_tests"]))
+        self.assertTrue(any("commentStore" in reason for reason in portal_ui["strengthen_tests"]))
+        self.assertTrue(any("mixedStore" in reason for reason in portal_ui["no_obvious_test_gaps"]))
+        self.assertTrue(any("mixedSuiteStore" in reason for reason in portal_ui["no_obvious_test_gaps"]))
+        self.assertTrue(any("aliasStore" in reason for reason in portal_ui["no_obvious_test_gaps"]))
+
+        shared = modules[("BIC-shared-types", "shared/contracts")]
+        self.assertTrue(any(item["repo"] == "BIC-agent-portal" for item in shared["indirectly_related_tests"]))
+        self.assertTrue(shared["add_tests"])
+
+        serialized = json.dumps(correspondence)
+        for removed in ("confidence", "evidence_type", "coverage_gaps", "coverage_unconfirmed"):
+            self.assertNotIn(f'"{removed}"', serialized)
+
+    def test_suggest_contract_uses_scope_and_module_names_only(self) -> None:
+        suggested = self.analyze("suggest")
+        self.assertIn("scope", suggested)
+        self.assertNotIn("impact", suggested)
+        serialized = json.dumps(suggested)
+        for removed_key in ("capability_scope", "aggregate_risk", "upgrade_suggested", "verification_scope", "confidence", "evidence_type", "coverage_gaps", "coverage_unconfirmed"):
+            self.assertNotIn(f'"{removed_key}"', serialized)
+
+    def test_configured_module_relation_is_repository_qualified(self) -> None:
+        module = "app/inference"
+        scope = {
+            "modules_by_repository": {
+                "repo-a": [{"repo": "repo-a", "module_scope": module}],
+                "repo-b": [{"repo": "repo-b", "module_scope": module}],
+            },
+            "changed_files": [
+                {"repo": "repo-a", "path": "repo-a/app/inference/a.py", "change_types": ["added"]},
+                {"repo": "repo-b", "path": "repo-b/app/inference/b.py", "change_types": ["added"]},
+            ],
+            "file_mappings": [
+                {"repo": "repo-a", "path": "repo-a/app/inference/a.py", "mapping": {"module_scope": module}},
+                {"repo": "repo-b", "path": "repo-b/app/inference/b.py", "mapping": {"module_scope": module}},
+            ],
+        }
+        context = {"changed_files": scope["changed_files"]}
+        own_repo_inventory = {
+            "tests": [{
+                "id": "repo-a-tests", "repo": "repo-a", "relates_modules": [module],
+                "relates_objects": ["a"],
+                "present": True, "matching_discovered_assets": ["repo-a/tests/test_a.py"],
+            }],
+            "discovered_assets": [{
+                "id": "a-test", "repo": "repo-a", "path": "repo-a/tests/test_a.py",
+                "asset_kind": "test-file", "framework": "pytest",
+                "test_facts": {"imports": [], "referenced_identifiers": [], "test_names": ["test_a"], "assertions": ["assert"], "disabled_tests": [], "has_active_test_with_assertion": True},
+            }],
+        }
+        result = self.recommend_for(context, scope, own_repo_inventory)
+        modules = {(item["repo"], item["module_scope"]): item for item in result["modules"]}
+        self.assertTrue(modules[("repo-a", module)]["indirectly_related_tests"])
+        self.assertFalse(modules[("repo-a", module)]["add_tests"])
+        self.assertTrue(modules[("repo-a", module)]["no_obvious_test_gaps"])
+        self.assertFalse(modules[("repo-b", module)]["indirectly_related_tests"])
+        self.assertTrue(modules[("repo-b", module)]["add_tests"])
+
+        own_repo_inventory["tests"][0]["relates_repository_modules"] = [
+            {"repo": "repo-b", "module_scope": module}
+        ]
+        explicit_cross_repo = self.recommend_for(context, scope, own_repo_inventory)
+        modules = {(item["repo"], item["module_scope"]): item for item in explicit_cross_repo["modules"]}
+        self.assertTrue(modules[("repo-b", module)]["indirectly_related_tests"])
+        self.assertTrue(modules[("repo-b", module)]["add_tests"])
+
+        own_repo_inventory["tests"][0]["relates_repository_modules"][0]["objects"] = ["b"]
+        explicit_object_relation = self.recommend_for(context, scope, own_repo_inventory)
+        modules = {(item["repo"], item["module_scope"]): item for item in explicit_object_relation["modules"]}
+        self.assertFalse(modules[("repo-b", module)]["add_tests"])
+        self.assertTrue(any("file b" in reason for reason in modules[("repo-b", module)]["no_obvious_test_gaps"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
