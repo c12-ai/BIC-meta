@@ -1,5 +1,9 @@
 # 如何起最新代码（2026-07-10 合并列车后）
 
+> **这份文档现在是 `make up` / `make doctor` 的 troubleshooting 附录，不是日常入口。**
+> 日常起环境：仓库根 `make up`（幂等自愈）+ `make doctor`（只读体检，红牌自带 fix 命令）。
+> 冷启知识已编码进 `scripts/bic-env/*`；只有 doctor 红牌不够用时才往下读本文对应小节。
+
 **结论先行。** 2026-07-10 合并列车把 TLC purity 双 PR、Keycloak 登录、Phoenix 点赞点踩、以及一批我方 bench 修复全部合入各仓 main。起最新代码有两个 profile：**最小本地档（无 Mind，同事默认）** 只需 docker 基建 + 本地 MinIO + `MIND_MOCK_MODE=true`；**全真档** 额外需要 Mind 可达的共享 MinIO（台架用 orin 上的 Mind + 192.168.12.150 MinIO）。冷启顺序 **lab→BE→portal→mock**，BE 启动命令**必须 unset 代理变量**。**Keycloak 是本次新增的硬依赖**：BE 只认 Bearer JWT（X-User-Id 回退已删），portal 走 OIDC 登录——本机 8080 被 DMPK 占用，故 keycloak 起在 **18080**，BE/portal 的 issuer 要对齐。所有 `curl` 打本地服务都要 `--noproxy '*'`（本机代理 127.0.0.1:7890 会拦截 localhost）。
 
 各仓 main（本文写作时）：shared-types `b85ee6c` / mars_interface_mock `389a784` / BIC-agent-service `19deb48` / BIC-agent-portal `c224b98` / BIC-lab-service `ef277d8` / BIC-infra `48c2cba`。
