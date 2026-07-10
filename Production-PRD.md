@@ -322,10 +322,14 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       requirement 8: ChemEngine has no FP endpoint; the robot reports no structured fraction
       result).
     - **Dispatch contract.** The dispatch payload is an ordered flask list plus a per-tube
-      disposition array covering the WHOLE collection rack (one element per rack tube, in rack
-      order): 0 = discard, N ≥ 1 = collect into the N-th flask. Flask volume defaults to 500 ml.
-      Multi-flask is supported by the model; operationally a single flask is configured until
-      the robot team confirms multi-flask capability (BIC-lab-service issue #81).
+      disposition array (`collect_config`) whose **index i addresses physical tube i+1**
+      (Mars-confirmed 2026-07-10, BIC-meta#177): the array is a prefix starting at tube 1 and
+      must cover tubes 1..max(involved tube); tubes not assigned to any container carry 0
+      (discard); N ≥ 1 = collect into the N-th flask. Variable length is legal but the prefix
+      always starts at tube 1 — an arbitrary starting offset cannot be expressed. Flask volume
+      defaults to 500 ml. Multi-flask is supported by the model; operationally a single flask
+      is configured until the robot team confirms multi-flask capability (BIC-lab-service
+      issue #81).
     - **Result rules.** The FP result is a container → tube mapping table with peak
       classification (主峰 / 边缘峰 / 杂质 / 混合). Volume math: 1 tube = 15 ml (5 tubes
       collected = 75 ml, 3 discarded = 45 ml); the result shows collected vs discarded totals
@@ -416,9 +420,11 @@ For the TLC Lab Logistic panel:
   full serpentine rack right) pre-filled by well status; every physical well is selectable for
   assignment regardless of Mind's classification; the user confirms before dispatch; no
   ChemEngine call occurs anywhere in the FP loop.
-- The FP dispatch payload's per-tube disposition array covers the whole collection rack (one
-  element per rack tube; 0 = discard, N = flask ordinal) and matches the user-confirmed
-  container assignment.
+- The FP dispatch payload's disposition array is prefix-indexed from tube 1 (index i =
+  physical tube i+1, BIC-meta#177), covers tubes 1..max(involved tube) with unassigned
+  positions 0, and matches the user-confirmed container assignment — including wells the
+  chemist assigned that Mind never referenced, with no positional misalignment when the
+  referenced set is non-contiguous.
 - The FP result card shows the container → tube mapping with peak classification and 15 ml/tube
   volume math (collected vs discarded totals) plus the solvent system; confirming it auto-fills
   the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
@@ -465,13 +471,11 @@ For the TLC Lab Logistic panel:
   (rule 11). The collect_config indexing definition follows the shared-types contract example
   (Drake ruling, 2026-07-06).
 
-- FP collect_config true semantics is UNRESOLVED and blocks the "every well dispatchable"
-  half of the 2026-07-10 assignment revision (BIC-meta#177): rule 11's "whole rack, one
-  element per rack tube" wording contradicts the shipped referenced-order variable-length
-  arrays (contract example + Drake 2026-07-06 indexing ruling + BE implementation). Needs a
-  Robot/Mars + shared-types ruling on the index→physical-tube mapping; until then the FP
-  surface ships the side-by-side layout only, and assigning Mind-unreferenced wells stays
-  blocked at the BE gate (fail-loud) rather than silently dropped at dispatch.
+- FP collect_config semantics RESOLVED (Mars via Wenlong, 2026-07-10, BIC-meta#177 closed):
+  index i = physical tube i+1, prefix from tube 1, gaps zero-filled. The shipped
+  build-parallel-to-referenced-list implementation was a latent misalignment bug for
+  non-contiguous reference sets; fix lands with the every-well-assignable work (BIC-meta#176
+  items 2/3).
 
 - BIC-chem-service (stateless RDKit molecular-weight calculator consumed by the ELN
   report) is not stood up yet. Until it exists and is configured, ELN reports render
@@ -487,6 +491,11 @@ For the TLC Lab Logistic panel:
 - 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
+
+- 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
+  index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
+  contract and acceptance criteria reworded; the referenced-list-parallel construction is
+  recorded as a latent misalignment bug fixed under BIC-meta#176.
 
 - 2026-07-10: FP container-assignment UI revision (Wenlong ruling): side-by-side layout
   (containers left, full serpentine rack right) and every physical well selectable —
