@@ -200,7 +200,15 @@ start_cmd_for() {
     lab)    printf 'cd %q && make dev' "${lab}" ;;
     BE)     printf 'cd %q && %suv run uvicorn app.main:app --host 0.0.0.0 --port 8800' "${be}" "$(unset_proxy_prefix)" ;;
     portal) printf 'cd %q && pnpm dev' "${portal}" ;;
-    mock)   printf 'cd %q && uv run mars-interface-mock' "$(repo_dir mars_interface_mock)" ;;
+    # Mock uploads plate photos to S3; its coded defaults (localhost:9000 +
+    # minioadmin/minioadmin) match neither infra MinIO's secret (bic_local_dev)
+    # nor the full-real bench store (192.168.12.150, which real Mind must reach).
+    # minimal profile -> local infra MinIO; anything else -> the 150 store.
+    mock)   if [ "${BIC_PROFILE}" = "minimal" ]; then
+              printf 'cd %q && S3_ENDPOINT=localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-mock uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
+            else
+              printf 'cd %q && S3_ENDPOINT=192.168.12.150:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-images uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
+            fi ;;
     chem)   printf 'cd %q && uv run uvicorn app.main:app --host 127.0.0.1 --port 8010' "${CHEM_DIR}" ;;
   esac
 }

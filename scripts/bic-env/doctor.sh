@@ -18,7 +18,7 @@ print_context
 
 # --- 1. Tooling ------------------------------------------------------------
 section "Toolchain"
-for t in docker node pnpm uv curl lsof jq; do
+for t in docker node pnpm uv curl lsof jq tmux; do
   if command -v "$t" >/dev/null 2>&1; then
     ok "$t ${C_DIM}$( "$t" --version 2>/dev/null | head -1 )${C_RST}"
   else
