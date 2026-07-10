@@ -465,6 +465,14 @@ For the TLC Lab Logistic panel:
   (rule 11). The collect_config indexing definition follows the shared-types contract example
   (Drake ruling, 2026-07-06).
 
+- FP collect_config true semantics is UNRESOLVED and blocks the "every well dispatchable"
+  half of the 2026-07-10 assignment revision (BIC-meta#177): rule 11's "whole rack, one
+  element per rack tube" wording contradicts the shipped referenced-order variable-length
+  arrays (contract example + Drake 2026-07-06 indexing ruling + BE implementation). Needs a
+  Robot/Mars + shared-types ruling on the index→physical-tube mapping; until then the FP
+  surface ships the side-by-side layout only, and assigning Mind-unreferenced wells stays
+  blocked at the BE gate (fail-loud) rather than silently dropped at dispatch.
+
 - BIC-chem-service (stateless RDKit molecular-weight calculator consumed by the ELN
   report) is not stood up yet. Until it exists and is configured, ELN reports render
   with FW/moles omitted (the designed degrade). Tracked in BIC-agent-service issue #54.
