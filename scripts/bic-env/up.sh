@@ -161,6 +161,25 @@ if wait_http "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-confi
   else
     note "[dry] would ensure ${KC_CLIENT} redirectUris include localhost + 127.0.0.1:5173"
   fi
+  # BIC login theme (BIC-meta#178): set realm loginTheme=bic idempotently. The
+  # realm file sets it on first import; this covers a realm imported before the
+  # theme existed. Also ensures zh-CN so Keycloak's built-in Chinese login copy
+  # renders (styling lives in the infra themes/bic theme; copy is not hardcoded).
+  if [ "${DRY_RUN}" != "1" ]; then
+    theme="$(docker exec "${kc}" "${KCADM}" get "realms/${KC_REALM}" --fields loginTheme --format csv --noquotes 2>/dev/null | tr -d '\r' || true)"
+    if [ "${theme}" = "bic" ]; then
+      ok "realm ${KC_REALM} loginTheme already bic"
+    else
+      do_run docker exec "${kc}" "${KCADM}" update "realms/${KC_REALM}" \
+        -s loginTheme=bic \
+        -s internationalizationEnabled=true \
+        -s defaultLocale=zh-CN \
+        -s 'supportedLocales=["zh-CN"]'
+      ok "realm ${KC_REALM} loginTheme set to bic (zh-CN login copy)"
+    fi
+  else
+    note "[dry] would set realm ${KC_REALM} loginTheme=bic (+ zh-CN i18n) if not already bic"
+  fi
 else
   fail "keycloak realm ${KC_REALM} not live — cannot seed" "docker logs $(container_on_port 18080) --tail 50"
 fi
