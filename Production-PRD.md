@@ -73,7 +73,7 @@ Core scenarios:
    - Cross-service product behavior belongs in this Production PRD; repo-owned implementation behavior belongs in child Project PRDs or engineering specs.
 
 8. **AI-engine backed intelligence**
-   - ChemEngine (the model service maintained by the Algo Team, "Mind") is the product
+   - ChemEngine (the model service maintained by the MIND team) is the product
      authority for AI-generated experiment intelligence: objective parsing (reaction
      material parse, goal confirmation), parameter recommendation (TLC solvent system,
      CC column choice, RE parameters), and vision-based result analysis (TLC plate
@@ -98,9 +98,11 @@ Core scenarios:
 10. **ELN report export**
    - After every result of an experiment is confirmed, the chemist can export an ELN
      Word report of that experiment from the portal's result-confirmation surface.
-   - The export is gated on all-results-confirmed: the portal disables the download
-     until confirmation completes, and the Agent Service re-checks the gate on every
-     request and refuses (conflict) when results are still open.
+   - The export is gated on all-results-confirmed: the download control belongs only
+     to the final experiment step's result surface and must stay hidden until that
+     final result is confirmed. The Agent Service re-checks the gate on every
+     request and refuses (conflict) when results are still open, regardless of what
+     the portal shows.
    - The report is available in Chinese and English; the chemist picks the language at
      download time.
    - Any session member who can view the session can download the report (read-level
@@ -116,6 +118,13 @@ Core scenarios:
      enrichment.
    - The report content is a deterministic aggregation of the experiment's confirmed
      data; no AI engine is involved in producing it.
+
+11. **Agent message feedback**
+   - The portal must allow the chemist to provide positive or negative feedback on persisted assistant replies within the active session.
+   - Positive feedback should be submittable without additional text.
+   - Negative feedback must require an improvement suggestion from the chemist.
+   - Feedback must remain traceable to the current session, user, target assistant reply, turn, and persisted event.
+   - The system must preserve enough workflow context from the target assistant reply time to support later quality analysis by experiment stage, specialist, task, and issue pattern.
 
 ## Core Concepts
 
@@ -283,13 +292,15 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       | TLC | 样品管 sample tubes ×2–4 (rule 9) | 点板枪头盒 spotting tip box ×1 · 配液枪头盒 dispensing tip box ×1 · 展开剂组 developing solvent group ×1 |
       | CC (过柱) | 样品柱 sample column ×1 | 硅胶柱 silica column ×1 · 润柱废液桶 equilibration waste drum ×2 · 过柱用试管架 column tube rack ×1 |
       | FP (组分收集) | — | 馏分收集废液桶 fraction waste drum ×2 |
-      | RE (旋蒸) | 茄形瓶 round-bottom flask ×1 | — |
+      | RE (旋蒸) | —（茄形瓶随 rule 11 移交 FP 的 flasks 任务参数，非 RE 就绪物料） | — |
 
     - Workspace-resident TLC execution items (silica plate, developing tank, waste-tip bin) start
       on the robot bench (配置表: 先自行准备). They are not user-assigned per task, but readiness
       may verify their stock as real inventory (rule 6).
-    - RE's material card is defined here for product completeness; its Lab Logistics module
-      surface remains out of scope until its execution parameters are finalized.
+    - RE has no readiness material card by design (verified 2026-07-09, BIC-meta#81): the
+      round-bottom flask became an FP task parameter (`CreateFPTaskRequest.flasks`,
+      shared-types authority) when rule 11 moved flask/collect configuration to FP —
+      it is not a lab readiness item. The earlier "RE 茄形瓶 ×1" row predated that split.
     - FP's execution parameters are finalized and implemented (2026-07-07, rule 11). FP has NO
       separate Lab Logistics module surface: its Material Preparation card is auto-pick-only
       (fraction waste drum ×2), and its execution configuration happens in the FP Parameter
@@ -406,8 +417,9 @@ For the TLC Lab Logistic panel:
   the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
 - The RE parameter form no longer collects flask/collect configuration (moved to FP).
 - After all results of an experiment are confirmed, the chemist can download the ELN Word
-  report (zh or en) from the result-confirmation surface; before that, the download is
-  disabled in the portal and refused by the Agent Service.
+  report (zh or en) from the result-confirmation surface; the download entry is visible only
+  on the final experiment step after that result is confirmed, and the Agent Service refuses
+  (conflict) before then regardless of portal state.
 - An ELN report never contains fabricated enrichment values: fields the system cannot
   resolve (e.g. molecular weights without the chemistry calculator service) are absent.
 - A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
@@ -415,6 +427,11 @@ For the TLC Lab Logistic panel:
   are absent, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
+- Users can provide positive feedback on a persisted assistant reply without entering text.
+- Users can provide negative feedback on a persisted assistant reply after entering an improvement suggestion.
+- Feedback can be traced back to the original assistant reply, session event, and workflow context.
+- Updating feedback on the same assistant reply updates the existing feedback record rather than creating duplicate ratings.
+- Stored feedback context reflects the workflow state at the time of the target assistant reply, not only the later state when the user submits feedback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -452,6 +469,24 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
+- 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
+  download entry until the final result is confirmed instead of showing an
+  unclickable hint or disabled button before the report is ready.
+
+- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
+  is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
+  entries left as written.
+
+- 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
+  round-bottom flask row removed — it moved to FP's `flasks` task parameter with
+  rule 11's flask/collect migration; RE has no readiness material card by design.
+
+- 2026-07-09: Requirement 10 UX refinement (Wenlong ruling): the ELN download control
+  is shown only on the final experiment step's result surface instead of visible-but-
+  disabled everywhere; final-surface disable-until-confirmed and the Agent Service
+  conflict gate are unchanged. Matching acceptance criterion updated. Portal change
+  tracked in BIC-meta#77.
+
 - 2026-07-08: Refined requirement 10 per BIC-agent-service #55: named BIC-chem-service
   as the molecular-weight enrichment source, covered all its failure modes
   (unconfigured / unreachable / unparseable molecule), and made the degrade contract
@@ -469,6 +504,7 @@ For the TLC Lab Logistic panel:
   math with RE basis auto-fill), the FP Parameter Design panel UI requirements, matching
   acceptance criteria, and the #81 multi-flask open question; closed rule 10's FP deferral
   (RE's remains). FP is implemented across Agent Service and Portal.
+- 2026-07-07: Added agent message feedback product requirements and acceptance criteria.
 - 2026-07-05: Added rule 10 (per-experiment task material sets from the reviewed 配置表 清单) and
   the right-panel selection-vs-maintenance consistency requirement; flagged the missing
   solvent-group readiness tracking as an open question.

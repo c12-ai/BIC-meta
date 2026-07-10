@@ -86,21 +86,31 @@ Use the `prd` skill when creating, updating, splitting, moving, or reviewing PRD
 
 ## Local Startup
 
-Start shared infra first:
+Three lines. Everything else is encoded in the scripts and printed by `make doctor`.
 
 ```bash
-docker start bic-postgres bic-redis bic-rabbitmq bic-minio
-```
-
-Then start services in order:
-
-```bash
-cd BIC-lab-service && make dev
-cd BIC-agent-service && make dev
-cd BIC-agent-portal && pnpm dev
+git clone git@github.com:c12-ai/BIC-meta.git BIC && cd BIC
+make up          # idempotent: infra, DBs, keycloak seed, deps, tmux bic-services
+make doctor      # read-only checkup; every red card prints its own fix command
 ```
 
 Open <http://localhost:5173>.
+
+| Command | What it does |
+| --- | --- |
+| `make up` | Idempotent bring-up + self-heal. `make up DRY=1` previews without changing anything. |
+| `make doctor` | Read-only full checkup (docker, containers, ports vs the authoritative table, 5433 tunnel-shadow, DBs, keycloak, service health). GREEN = bench is up. |
+| `make status` | One screen: `service : port : status : git sha`. |
+| `make down` | Stop app services. `make down INFRA=1` also stops the shared docker infra. |
+| `make restart-<svc>` | Restart one of `lab \| BE \| portal \| mock \| chem` with the same health gate. |
+
+Knobs: `BIC_ROOT=/path` (where the sibling repos live — defaults to this repo's parent),
+`BIC_PROFILE=minimal\|full-real` (default `minimal`: Mind mocked + local MinIO).
+
+When a red card isn't enough, the troubleshooting appendix is
+[`ops/run-latest-2026-07-10.md`](ops/run-latest-2026-07-10.md) — `make doctor` points there.
+`make up` does NOT clone the repos yet; run `make bootstrap` (below) first, or `make up` will
+red-card the missing ones with the fix command.
 
 ## PRD Update Flow
 
