@@ -34,11 +34,11 @@
 
 ## 2. Docker 基建
 
-用专用 `talos-postgres` 容器在 **:5433**（本机原生 Homebrew Postgres 占了 :5432，会和 docker `bic-postgres` 脑裂）。其余基建走 docker `bic-*` 默认端口。
+Postgres **单实例 `bic-postgres:5432`**（#153 收敛，2026-07-10：`talos-postgres:5433` 已退役、数据行数对账迁入 5432；全部库归 infra `postgres-databases.txt` 管，schema 迁移仍归各服务 alembic）。其余基建走 docker `bic-*` 默认端口。
 
 | 组件 | 端口 | 凭据 |
 |---|---|---|
-| Postgres（专用） | `talos-postgres` :5433→5432 | postgres / bic_local_dev；库 `labrun_db`(lab)、`talos_agent_db`(agent) |
+| Postgres（单实例） | `bic-postgres` :5432 | postgres / bic_local_dev；库 `labrun_db`(lab)、`talos_agent_db`(agent) |
 | Redis | :6379 | bic_local_dev |
 | RabbitMQ | :5672 / :15672 | rabbitmq / bic_local_dev，vhost `/` |
 | MinIO | :9000 / :9001 | minioadmin / bic_local_dev |
@@ -48,8 +48,8 @@
 
 初次建库：
 ```bash
-PGPASSWORD=bic_local_dev psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE labrun_db;"
-PGPASSWORD=bic_local_dev psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE talos_agent_db;"
+PGPASSWORD=bic_local_dev psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE labrun_db;"
+PGPASSWORD=bic_local_dev psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE talos_agent_db;"
 ```
 
 ---
@@ -104,7 +104,7 @@ curl -s --noproxy '*' http://localhost:18080/realms/bic/.well-known/openid-confi
 **BIC-agent-service/.env**（占位不写真 key）：
 ```ini
 PG_HOST=localhost
-PG_PORT=5433
+PG_PORT=5432
 PG_USER=postgres
 PG_PASSWORD=bic_local_dev
 PG_DATABASE=talos_agent_db
@@ -130,7 +130,7 @@ VITE_OIDC_AUTHORITY=http://localhost:18080/realms/bic
 VITE_OIDC_CLIENT_ID=bic-portal
 ```
 
-**BIC-lab-service/.env**：`PG_PORT=5433`，`PG_DATABASE=labrun_db`。
+**BIC-lab-service/.env**：`PG_PORT=5432`，`PG_DATABASE=labrun_db`。
 
 ### Profile A — 最小本地档（无 Mind，同事默认）
 - `MIND_MOCK_MODE=true`（BE main 与 .env.example 默认即 true）：所有 MindClient 调用返回 med005 fixture、打 WARN、不发任何 Mind/ChemEngine 网络请求。**无需 Mind/ChemEngine 可达**。
@@ -191,7 +191,7 @@ SID=$(curl -s --noproxy '*' -X POST -H "Authorization: Bearer $TOKEN" -H 'Conten
 ## 8. 常见坑
 
 - **代理变量**：本机 profile 每个新 shell 都会 set `http_proxy=127.0.0.1:7890`。BE 启动**必须** `unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY` 前缀（否则打 localhost/lab/MQ 被拦）；所有 `curl` 打本地服务加 `--noproxy '*'`（`no_proxy` 里的 localhost/127.0.0.1 有时不生效——曾出现整片 000）。**反过来**：`uv lock`/git 拉 github 又**需要**代理（本机直连 github 超时、经 7890 通）——分场景处理。
-- **Postgres 脑裂**：用 `talos-postgres:5433`，别用 5432（被原生 pg 影子）。
+- **Postgres 单实例（#153）**：一律 `bic-postgres:5432`；`5433` 退役，任何 5433 监听（残留容器/ssh 隧道）都是错误状态，`make doctor` 会红卡。若本机原生 pg 抢 5432，doctor 的端口表检查（owner 必须是 docker）会暴露。
 - **Keycloak 端口/issuer**：8080 可能被占；keycloak 端口、`KC_HOSTNAME`、BE `KEYCLOAK_ISSUER_URL`、portal `VITE_OIDC_AUTHORITY` 四处必须同一字符串。BE 启动时 JWKS warm-up 若 keycloak 未就绪会 WARN（不抛，惰性重取）——先起 keycloak 再起 BE。
 - **S3=150 不可换本机**（全真档）：真 Mind 在 orin，拉不到你本机 localhost 的照片。
 - **realm 导入 first-boot-only**：改 realm-bic.json 后不会更新已导入的 realm；dev reset = 删 keycloak 库/容器重来。

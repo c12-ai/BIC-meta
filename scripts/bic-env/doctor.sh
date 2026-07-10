@@ -5,7 +5,7 @@
 # card prints the exact command to fix it. Verdict = GREEN when 0 red cards.
 #
 # Encodes tonight's real traps:
-#   - 5433 held by an ssh tunnel instead of docker (shadows talos-postgres)
+#   - anything still listening on retired 5433 (post-#153 apps must use 5432)
 #   - proxy vars poisoning localhost calls
 #   - portal "200 but white screen" (checks /src/main.tsx returns JS, not just /)
 set -euo pipefail
@@ -115,34 +115,39 @@ done <<EOF
 $(port_table)
 EOF
 
-# --- 6. 5433 tunnel-shadow + DB existence (tonight's trap) -----------------
-section "Postgres 5433 (talos) — tunnel-shadow + databases"
-owner5433="$(port_owner 5433)"
-cmd5433="$(printf '%s' "${owner5433}" | awk '{print $1}')"
-pid5433="$(printf '%s' "${owner5433}" | awk '{print $2}')"
-if [ -z "${owner5433}" ]; then
-  fail "nothing listening on 5433" "docker start talos-postgres"
-elif [ "${cmd5433}" = "ssh" ]; then
-  fail "5433 is an ssh TUNNEL (pid ${pid5433}), NOT docker talos-postgres — apps will hit the wrong DB" \
-       "kill ${pid5433} && docker start talos-postgres"
+# --- 6. Postgres single instance (#153) — 5433 retired, DBs on 5432 --------
+section "Postgres (:5432 single instance; 5433 retired)"
+# 5433 must have NO listener: a survivor talos-postgres or an ssh tunnel means
+# an app with a stale .env could silently hit pre-#153 data.
+owner5433="$(port_owner 5433 || true)"
+if [ -n "${owner5433}" ]; then
+  pid5433="$(printf '%s' "${owner5433}" | awk '{print $2}')"
+  fail "5433 has a listener (${owner5433}) — retired port, apps must use 5432" \
+       "docker stop talos-postgres 2>/dev/null || kill ${pid5433}   # ssh tunnel case"
 else
-  ok "5433 listener is docker (${cmd5433}), not a tunnel"
-  # Verify the real databases exist — via docker exec (no host psql needed,
-  # and it bypasses whatever is on the host port).
-  if container_running talos-postgres; then
-    dbs="$(docker exec talos-postgres psql -U postgres -tAc \
-          "SELECT datname FROM pg_database WHERE datname IN ('talos_agent_db','labrun_db');" 2>/dev/null || true)"
-    for db in talos_agent_db labrun_db; do
-      if printf '%s\n' "${dbs}" | grep -qx "${db}"; then
-        ok "database ${db} exists"
-      else
-        fail "database ${db} MISSING" \
-             "docker exec talos-postgres psql -U postgres -c 'CREATE DATABASE ${db};'"
-      fi
-    done
+  ok "5433 has no listener (retired)"
+fi
+if container_running bic-postgres; then
+  dbs="$(docker exec bic-postgres psql -U postgres -tAc \
+        "SELECT datname FROM pg_database WHERE datname IN ('talos_agent_db','labrun_db');" 2>/dev/null || true)"
+  for db in talos_agent_db labrun_db; do
+    if printf '%s\n' "${dbs}" | grep -qx "${db}"; then
+      ok "database ${db} exists on bic-postgres:5432"
+    else
+      fail "database ${db} MISSING on bic-postgres:5432" \
+           "docker exec bic-postgres psql -U postgres -c 'CREATE DATABASE ${db};'"
+    fi
+  done
+  # Guard against the wrong-instance swap trap: agent schema must actually live here.
+  if docker exec bic-postgres psql -U postgres -d talos_agent_db -tAc \
+       "SELECT 1 FROM information_schema.tables WHERE table_name='sessions'" 2>/dev/null | grep -q 1; then
+    ok "talos_agent_db on 5432 carries the agent schema (sessions table)"
   else
-    warn "talos-postgres container not running — cannot verify DBs (docker start talos-postgres)"
+    fail "talos_agent_db on 5432 has NO agent schema — empty shell, apps may point at the wrong instance" \
+         "restore from ~/Work/BIC/db-backups-20260710 or run alembic upgrade head in BIC-agent-service"
   fi
+else
+  fail "bic-postgres container not running" "docker start bic-postgres"
 fi
 
 # --- 7. Keycloak -----------------------------------------------------------

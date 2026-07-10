@@ -33,7 +33,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## Local Dev Infra:
 
-> **端口口径（定档 2026-07-10）**：全平台端口分配以 `ops/port-allocation-2026-07-10.md`（权威源 `BIC-infra` README）为准。已在位不迁：lab `:8192` · BE `:8800` · portal `:5173`（`5174` 废止）· chem `:8010` · Mind 代理 `:8011` · Phoenix `:6006`/`:4317`。易撞默认口 `+10000`：**Keycloak `:18080`**（新增硬依赖，8080+10000）· Grafana 未来 `:13000`。禁用清单 `3000/5000/7000/8000/8080`。基建：pg-bic `:5432`/pg-talos `:5433` · redis `:6379` · rabbitmq `:5672`(+`15672`) · minio `:9000`(+`9001`)。
+> **端口口径（定档 2026-07-10）**：全平台端口分配以 `ops/port-allocation-2026-07-10.md`（权威源 `BIC-infra` README）为准。已在位不迁：lab `:8192` · BE `:8800` · portal `:5173`（`5174` 废止）· chem `:8010` · Mind 代理 `:8011` · Phoenix `:6006`/`:4317`。易撞默认口 `+10000`：**Keycloak `:18080`**（新增硬依赖，8080+10000）· Grafana 未来 `:13000`。禁用清单 `3000/5000/7000/8000/8080`。基建：postgres 单实例 `bic-postgres:5432`（`5433` 退役，#153 收敛，全库归 infra `postgres-databases.txt` 管）· redis `:6379` · rabbitmq `:5672`(+`15672`) · minio `:9000`(+`9001`)。
 
 1. PostgreSQL: Deployed through docker. Container ID: fe20b9a21cbfe1117b5da64ecf88396bb3aa7ceabe01e12e016e7302aa6de3b6
 2. RabbitMQ: Used by LabService to get update from Robot and then push to Agent Side. Container ID: 2431d43650888a896824cfdffa7d29df9e424b6ff3016031279c87e4a360fb0f
@@ -44,7 +44,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
    make up        # idempotent: docker+infra, wait-for-pg, DB create, keycloak seed, dep sync, tmux bic-services (lab→BE→portal→mock→chem), each health-gated
    make doctor    # read-only checkup; GREEN = bench up. Every red card prints its own fix command.
    ```
-   `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. On this Mac the repos live under `/Users/wenlongwang/Work/BIC/talos`, so run with `BIC_ROOT=/Users/wenlongwang/Work/BIC/talos` (or export it). The scripts encode every trap below (5433 tunnel-shadow, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
+   `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. On this Mac the repos live under `/Users/wenlongwang/Work/BIC/talos`, so run with `BIC_ROOT=/Users/wenlongwang/Work/BIC/talos` (or export it). The scripts encode every trap below (retired-5433 listener check, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
 
    <details><summary>Manual fallback (if <code>make</code> is unavailable / debugging a single step)</summary>
 

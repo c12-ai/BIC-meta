@@ -41,9 +41,9 @@ wait_http() { # <url> <timeout_s>
 }
 wait_pg() { # <timeout_s>
   local t="${1:-30}" i=0
-  if [ "${DRY_RUN}" = "1" ]; then note "[dry] would wait (<=${t}s) for talos-postgres pg_isready"; return 0; fi
+  if [ "${DRY_RUN}" = "1" ]; then note "[dry] would wait (<=${t}s) for bic-postgres pg_isready"; return 0; fi
   while [ "${i}" -lt "${t}" ]; do
-    docker exec talos-postgres pg_isready -U postgres >/dev/null 2>&1 && return 0
+    docker exec bic-postgres pg_isready -U postgres >/dev/null 2>&1 && return 0
     i=$((i + 1)); sleep 1
   done
   return 1
@@ -99,25 +99,25 @@ else
 fi
 
 # ===========================================================================
-section "3. Postgres readiness (talos :5433)"
+section "3. Postgres readiness (bic :5432)"
 if wait_pg 30; then
-  ok "talos-postgres accepting connections"
+  ok "bic-postgres accepting connections"
 else
-  fail "talos-postgres not ready after 30s" "docker logs talos-postgres --tail 50"
+  fail "bic-postgres not ready after 30s" "docker logs bic-postgres --tail 50"
 fi
 
 section "4. Databases"
 existing=""
-if container_running talos-postgres; then
+if container_running bic-postgres; then
   # read-only probe — safe to run even under DRY so the plan is truthful
-  existing="$(docker exec talos-postgres psql -U postgres -tAc \
+  existing="$(docker exec bic-postgres psql -U postgres -tAc \
     "SELECT datname FROM pg_database WHERE datname IN ('talos_agent_db','labrun_db');" 2>/dev/null || true)"
 fi
 for db in labrun_db talos_agent_db; do
   if printf '%s\n' "${existing}" | grep -qx "${db}"; then
     ok "database ${db} present"
   else
-    do_run docker exec talos-postgres psql -U postgres -c "CREATE DATABASE ${db};"
+    do_run docker exec bic-postgres psql -U postgres -c "CREATE DATABASE ${db};"
   fi
 done
 

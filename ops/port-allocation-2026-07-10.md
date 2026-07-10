@@ -20,8 +20,8 @@
 | 认证 | Keycloak | `18080` | `8080 + 10000`（规则 2） |
 | 可观测 | Phoenix UI / OTLP gRPC | `6006` / `4317` | 在位不迁 |
 | 可观测 | Grafana（未来） | `13000` | `3000 + 10000`（规则 2） |
-| 数据 | Postgres（bic 共享基建） | `5432` | 事实标准 |
-| 数据 | Postgres（talos 本机专用） | `5433` | 规避本机原生 pg 对 5432 的影子；**per-developer workaround，非提交默认** |
+| 数据 | Postgres（单实例 `bic-postgres`） | `5432` | 事实标准；全部库归 infra `postgres-databases.txt` 管（#153） |
+| 数据 | ~~Postgres（talos 专用）~~ | ~~`5433`~~ | **退役**（#153，2026-07-10）：数据已对账迁入 5432；任何 5433 监听视为错误状态 |
 | 数据 | Redis | `6379` | 事实标准 |
 | 消息 | RabbitMQ AMQP / 管理台 | `5672` / `15672` | 事实标准 |
 | 对象存储 | MinIO S3 API / 控制台 | `9000` / `9001` | 事实标准 |
@@ -56,7 +56,7 @@
 | phoenix | `6006` | `200` |
 | minio | `9000` | `200` |
 | rabbitmq mgmt | `15672` | `200` |
-| redis / pg-talos / pg-bic | `6379` / `5433` / `5432` | TCP-open |
+| redis / postgres | `6379` / `5432` | TCP-open（`5433` 退役：必须**无**监听） |
 
 ### portal 5173 vs 5174 定夺
 

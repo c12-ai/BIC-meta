@@ -167,8 +167,7 @@ container_on_port() { docker ps --filter "publish=$1" --format '{{.Names}}' 2>/d
 # Infra containers we manage:  name|primary_port|label
 infra_containers() {
   cat <<'REC'
-bic-postgres|5432|Postgres (shared infra)
-talos-postgres|5433|Postgres (talos — apps use this)
+bic-postgres|5432|Postgres (single instance — apps use this; #153)
 bic-redis|6379|Redis
 bic-rabbitmq|5672|RabbitMQ (AMQP 5672 / mgmt 15672)
 bic-minio|9000|MinIO (S3 9000 / console 9001)
@@ -179,8 +178,7 @@ REC
 #   kind=docker -> LISTEN owner must be docker; kind=app -> our host process.
 port_table() {
   cat <<'REC'
-5432|docker|bic-postgres|Postgres (shared infra)
-5433|docker|talos-postgres|Postgres (talos, apps use this)
+5432|docker|bic-postgres|Postgres (single instance, apps use this)
 6379|docker|bic-redis|Redis
 5672|docker|bic-rabbitmq|RabbitMQ AMQP
 15672|docker|bic-rabbitmq|RabbitMQ mgmt
