@@ -18,12 +18,13 @@ BIC_ROOT ?= $(shell [ -d "$(CURDIR)/BIC-agent-service" ] && echo "$(CURDIR)" || 
 export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: help up doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
+.PHONY: help up pull doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
         bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared
 
 help: ## Show this help
 	@echo "BIC env — one-shot local bring-up"
 	@echo ""
+	@echo "  make pull      fast-forward all repos (meta/services/infra) to origin/main"
 	@echo "  make up        idempotent bring-up + self-heal (DRY=1 to preview)"
 	@echo "  make doctor    read-only full checkup (each red card has a fix command)"
 	@echo "  make status    one-screen service:port:status:sha"
@@ -35,6 +36,7 @@ help: ## Show this help
 
 ## --- one-shot env ----------------------------------------------------------
 up:            ; @$(ENV)/up.sh
+pull:          ; @$(ENV)/pull.sh
 doctor:        ; @$(ENV)/doctor.sh
 status:        ; @$(ENV)/status.sh
 down:          ; @$(ENV)/down.sh

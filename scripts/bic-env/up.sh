@@ -165,7 +165,25 @@ if wait_http "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-confi
   # realm file sets it on first import; this covers a realm imported before the
   # theme existed. Also ensures zh-CN so Keycloak's built-in Chinese login copy
   # renders (styling lives in the infra themes/bic theme; copy is not hardcoded).
+  #
+  # A container created BEFORE the compose theme mount has no /opt/keycloak/themes/bic
+  # — pointing loginTheme at a missing theme breaks the login page. Inject it via
+  # docker cp first (idempotent; dev-mode keycloak serves themes without restart).
   if [ "${DRY_RUN}" != "1" ]; then
+    if ! docker exec "${kc}" test -d /opt/keycloak/themes/bic 2>/dev/null; then
+      if [ -d "${INFRA_DIR}/themes/bic" ]; then
+        do_run docker cp "${INFRA_DIR}/themes/bic" "${kc}":/opt/keycloak/themes/bic
+        ok "bic theme injected into ${kc} (container predates compose mount)"
+      else
+        warn "bic theme missing in ${kc} and no ${INFRA_DIR}/themes/bic — pull BIC-infra (make pull); skipping loginTheme"
+      fi
+    fi
+  else
+    note "[dry] would docker-cp ${INFRA_DIR}/themes/bic into the keycloak container if absent"
+  fi
+  if [ "${DRY_RUN}" != "1" ] && ! docker exec "${kc}" test -d /opt/keycloak/themes/bic 2>/dev/null; then
+    : # theme unavailable — loginTheme left untouched (guarded above)
+  elif [ "${DRY_RUN}" != "1" ]; then
     theme="$(docker exec "${kc}" "${KCADM}" get "realms/${KC_REALM}" --fields loginTheme --format csv --noquotes 2>/dev/null | tr -d '\r' || true)"
     if [ "${theme}" = "bic" ]; then
       ok "realm ${KC_REALM} loginTheme already bic"
