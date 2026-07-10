@@ -122,7 +122,7 @@ for db in labrun_db talos_agent_db; do
 done
 
 # ===========================================================================
-section "5. Keycloak seed (realm ${KC_REALM}, dev users, portal redirectUris)"
+section "5. Keycloak seed (realm ${KC_REALM}, dev users, portal redirectUris, service client)"
 if wait_http "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-configuration" 40; then
   ok "realm ${KC_REALM} live"
   kc="$(container_on_port 18080)"
@@ -197,6 +197,28 @@ if wait_http "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-confi
     fi
   else
     note "[dry] would set realm ${KC_REALM} loginTheme=bic (+ zh-CN i18n) if not already bic"
+  fi
+  # bic-agent-service confidential client (create if missing, idempotent) —
+  # realm import is first-boot-only (IGNORE_EXISTING), so already-imported
+  # benches only get the client through this seed step.
+  have=""
+  if [ "${DRY_RUN}" != "1" ]; then
+    have="$(docker exec "${kc}" "${KCADM}" get clients -r "${KC_REALM}" -q clientId="${KC_SERVICE_CLIENT}" --fields clientId 2>/dev/null | grep -c "\"${KC_SERVICE_CLIENT}\"" || true)"
+  fi
+  if [ "${have:-0}" != "0" ]; then
+    ok "client ${KC_SERVICE_CLIENT} exists"
+  else
+    do_run docker exec "${kc}" "${KCADM}" create clients -r "${KC_REALM}" \
+      -s clientId="${KC_SERVICE_CLIENT}" \
+      -s name="BIC Agent Service" \
+      -s protocol=openid-connect \
+      -s enabled=true \
+      -s publicClient=false \
+      -s serviceAccountsEnabled=true \
+      -s standardFlowEnabled=false \
+      -s directAccessGrantsEnabled=false \
+      -s clientAuthenticatorType=client-secret \
+      -s secret="${KC_SERVICE_CLIENT_SECRET}"
   fi
 else
   fail "keycloak realm ${KC_REALM} not live — cannot seed" "docker logs $(container_on_port 18080) --tail 50"
