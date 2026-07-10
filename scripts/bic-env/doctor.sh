@@ -18,7 +18,7 @@ print_context
 
 # --- 1. Tooling ------------------------------------------------------------
 section "Toolchain"
-for t in docker node pnpm uv curl lsof jq; do
+for t in docker node pnpm uv curl lsof jq tmux; do
   if command -v "$t" >/dev/null 2>&1; then
     ok "$t ${C_DIM}$( "$t" --version 2>/dev/null | head -1 )${C_RST}"
   else
@@ -231,7 +231,7 @@ for r in BIC-lab-service BIC-agent-service BIC-agent-portal mars_interface_mock;
   if [ -d "${d}/.git" ]; then
     ok "$r @ $(git_branch "${d}") $(git_sha "${d}")"
   else
-    fail "$r not found at ${d}" "make up   # clones missing repos, or set BIC_ROOT=/path/to/your/checkout"
+    fail "$r not found at ${d}" "make bootstrap   # clones missing repos (make up does NOT clone), or set BIC_ROOT=/path/to/your/checkout"
   fi
 done
 
