@@ -12,12 +12,33 @@
 Validation: temporary Git repositories must demonstrate committed, dirty,
 staged, untracked, rename, delete, missing-base, and child-repository behavior.
 
+## 1.5 Issue Context and Pre-test Risk
+
+- After Diff collection, list open Issues for every affected GitHub repository.
+  Keep current PR links/closing text, Diff commit messages, and a strong
+  branch-name pattern as higher-priority association evidence.
+- Preserve repository-qualified candidates, scan counts, source priority,
+  selection reason, query failures, and ambiguity instead of choosing
+  arbitrarily. Keep explicit references as overrides.
+- Compare repository candidates with mapped modules and changed objects; read
+  full bodies only for plausible candidates and keep non-unique results
+  `unassessed`.
+- Extract Issue goals, labels, repository, and acceptance items.
+- Generate deterministic risk rows for Issue clarity, impact breadth,
+  contract/state boundaries, test evidence, and change attribution.
+- Require semantic acceptance-item alignment in the Skill report and preserve
+  `unassessed` when Issue context is unavailable.
+
+Validation: fixtures cover affected-repository scans, strong-link precedence,
+ambiguity, and query failure without mutating Git state; a real GitHub list
+receives a read-only smoke check.
+
 ## 2. Repository and Module Mapping
 
 - Migrate explicit taxonomy from `capability_scope` plus risk metadata to a
   single `module_scope` for known BIC business modules.
-- Remove risk scores, generic keyword-to-capability inference, and duplicate
-  impact labels from configuration, analyzer output, references, and reports.
+- Remove path-derived risk scores, generic keyword-to-capability inference, and
+  duplicate impact labels from module mapping and reports.
 - Add structural module extraction for unmatched paths using stable source roots
   and repository-relative directory segments.
 - Preserve `explicit`, `structural`, and `unmapped` mapping evidence and direct
@@ -41,6 +62,8 @@ and root/unusual files remain visible.
   repository/module without exposing confidence or evidence labels.
 - Derive separate natural-language groups for tests to add, tests to strengthen,
   and modules with no obvious static gap.
+- Exclude local skill copies, backups, and independently discovered child
+  repositories from duplicate root-repository test discovery.
 
 Validation: fixture repositories must cover Python and TypeScript symbols,
 imports/references, assertions, disabled tests, unrelated same-name files,
@@ -51,7 +74,12 @@ repository isolation.
 
 - Update `SKILL.md`, references, config, README, and implementation notes with
   the changed-object and test-correspondence contract.
-- Keep output as one concise `BIC Quality Brief` and retain the read-only boundary.
+- Keep output as one concise `BIC Quality Brief` with module mapping,
+  direct/indirect/possible test correspondence, and missing-test guidance.
+  Omit `mapping_source` and a general next-step field while retaining the
+  read-only boundary.
+- Add Issue Context and an evidence-backed pre-test Risk Matrix without implying
+  that any verification command ran.
 - Reinstall source to `.agents` and `.claude` only after source verification.
 
 ## 5. Final Verification

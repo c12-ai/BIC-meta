@@ -27,6 +27,12 @@ Discover concrete Python and JavaScript/TypeScript test files plus runner
 configuration and command hints. Empty directories are not assets. Configuration
 and commands describe how tests may be run later; they are never test evidence.
 
+Exclude generated/local tool state such as `.agents`, `.claude`, `.codex`, and
+`.trellis`, including installed skill copies and backups. When the workspace
+root contains independently discovered child Git repositories, scan each child
+under its own repository identity and do not scan it again as part of the root
+repository.
+
 Inspect concrete test files as text or syntax trees. Record imports, referenced
 identifiers, test/describe names, assertions, and skip/xfail/todo state without
 importing the file.
@@ -58,6 +64,16 @@ Keep correspondence facts separate from the need to add tests:
 
 Broad module/scenario candidates remain useful search context but do not clear
 an object-level gap.
+
+## Public brief
+
+Report module mapping, direct relations, safe indirect relations, possible
+candidates, relation evidence, and missing-test guidance as separate fields.
+Possible candidates remain visible search clues but never count as coverage.
+Do not print `mapping_source`; when a module is unmapped, say only that the
+functional module is not yet identified and cite the changed files. Do not add
+a general next-step recommendation field. Do not recommend tests for
+documentation or planning files without an executable documentation contract.
 
 These outcomes are not risk, priority, confidence, pass/fail, or proof of
 runtime coverage. Describe the concrete missing object or scenario in natural

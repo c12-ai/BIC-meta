@@ -9,9 +9,10 @@ copies of the source skill.
 
 ## Analysis Pipeline
 
-The pipeline is organized into six stages: workspace discovery, change-set
-collection, module inference, changed-object extraction, test-asset inspection,
-and test-correspondence analysis.
+The pipeline is organized into a Diff-driven sequence: workspace discovery,
+change-set collection, affected-repository Issue candidate collection, module
+inference, changed-object extraction, semantic Issue analysis, test-asset
+inspection, test-correspondence analysis, and pre-test risk assessment.
 Every stage emits structured JSON with evidence so later stages do not need to
 re-scan or invent facts.
 
@@ -36,6 +37,18 @@ path. Each record retains `change_sources`, `change_types`, and `old_path` for
 renames. Repository metadata records branch, head, base, merge base, resolution
 source, and warnings.
 
+## Issue Context
+
+Issue collection is Diff-driven. After change collection identifies repositories
+with `change_count > 0`, the collector lists open Issues for each corresponding
+GitHub repository. It retains repository, number, title, labels, URL, and update
+time for bounded semantic analysis. Current-PR links, PR closing text, Diff
+commit references, and a strong `issue-123` branch pattern remain authoritative
+when uniquely present. Without a strong link, the Skill compares candidates
+with mapped modules and changed objects and reads only plausible Issue bodies.
+An explicit number, URL, or `owner/repo#number` overrides discovery. Query
+failure or ambiguity remains visible rather than producing a guessed Issue.
+
 ## Repository and Module Mapping
 
 Repository identity comes from the discovered Git worktree and is not inferred
@@ -52,7 +65,8 @@ business capabilities.
 Mappings expose `module_scope`, `mapping_source` (`explicit`, `structural`, or
 `unmapped`), and path evidence. Direct cross-repository impact is the factual
 condition that changed files exist in multiple repositories. The analyzer does
-not output risk scores or impact labels.
+not output risk scores or impact labels. `mapping_source` remains raw diagnostic
+metadata and is not printed in the default brief.
 
 ## Changed Objects
 
@@ -67,6 +81,9 @@ the report never invents symbols.
 The scanner collects actual test files plus pytest, JavaScript test-runner, and
 Playwright configuration. It reads `pyproject.toml` and `package.json` only for
 framework and command hints. Empty directories do not count as test assets.
+Local tool-state directories and installed skill copies are excluded. A child
+Git repository discovered independently is scanned only under its own identity,
+not again as part of the root repository.
 
 Concrete test files are inspected for imports, referenced identifiers, test and
 scenario names, assertions, and skip/xfail/todo state. The analyzer never
@@ -94,6 +111,13 @@ test recommendation keys are replaced because they represented a misleading
 coverage contract rather than compatibility-worthy behavior.
 Shell wrappers forward CLI arguments. Default invocation requires no new input.
 The Skill continues to produce exactly one `BIC Quality Brief`.
+The default brief restores separate module mapping, direct/indirect/possible
+test-correspondence, and missing-test sections. `mapping_source` remains raw
+diagnostic metadata, and no general next-step recommendation is emitted.
+The brief also includes affected-repository Issue candidates and a pre-test Risk
+Matrix. Deterministic rows establish a risk floor; semantic
+Issue-to-Diff-to-test alignment may raise but not lower it. Missing or
+non-unique Issue context makes overall risk `unassessed`.
 
 ## Rollback
 

@@ -4,15 +4,25 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
 KIT_DIR = Path(__file__).resolve().parents[1]
 ANALYZER = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/quality_context.py"
+SKILL_FILE = KIT_DIR / "skill/bic-quality-guan-ping-ce/SKILL.md"
+DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables.md"
+ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
+
+ISSUE_SPEC = importlib.util.spec_from_file_location("bic_quality_issue_context", ISSUE_CONTEXT)
+assert ISSUE_SPEC and ISSUE_SPEC.loader
+ISSUE_MODULE = importlib.util.module_from_spec(ISSUE_SPEC)
+ISSUE_SPEC.loader.exec_module(ISSUE_MODULE)
 
 
 def run(command: list[str], cwd: Path) -> str:
@@ -40,9 +50,29 @@ class QualityContextFixtureTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / "BIC-meta"
+        self.issue_file = Path(self.temp.name) / "issue.json"
+        write(
+            self.issue_file,
+            json.dumps({
+                "number": 42,
+                "title": "Keep SSE feedback targets aligned",
+                "body": (
+                    "## Acceptance Criteria\n"
+                    "- [ ] Map the changed repositories and modules\n"
+                    "- [ ] Identify missing tests for changed behavior\n"
+                ),
+                "state": "OPEN",
+                "url": "https://github.com/c12-ai/BIC-meta/issues/42",
+                "labels": [{"name": "quality"}],
+            }),
+        )
         init_repo(self.root)
         write(self.root / "AGENTS.md", "fixture\n")
         write(self.root / "Production-PRD.md", "fixture\n")
+        write(self.root / ".agents/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
+        write(self.root / ".claude/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
+        write(self.root / ".codex/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
+        write(self.root / ".trellis/.runtime/skill-backups/copied-skill/tests/test_backup.py", "def test_backup(): assert True\n")
         write(self.root / "dirty.txt", "base\n")
         write(self.root / "delete-me.txt", "delete\n")
         write(self.root / "old-name.txt", "rename\n")
@@ -211,8 +241,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         repos = (self.root, self.child, self.unknown_child, self.other_model, self.portal, self.lab, self.shared)
         before = tuple(self.status(repo) for repo in repos)
         payload = self.analyze("collect")
+        assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
         after = tuple(self.status(repo) for repo in repos)
         self.assertEqual(before, after)
+        self.assertTrue(assessed["context"]["issue_context"]["resolved"])
 
         self.assertEqual(
             {repo["name"] for repo in payload["repositories"]},
@@ -282,8 +314,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         inventory = self.analyze("inventory")
         assets = inventory["discovered_assets"]
         paths = {asset["path"] for asset in assets}
+        root_paths = {asset["path"] for asset in assets if asset["repo"] == "BIC-meta"}
         self.assertIn("BIC-agent-service/tests/unit/test_sse.py", paths)
+        self.assertNotIn("BIC-agent-service/tests/unit/test_sse.py", root_paths)
         self.assertNotIn("BIC-agent-service/tests/empty", paths)
+        self.assertFalse(any(path.startswith((".agents/", ".claude/", ".codex/", ".trellis/")) for path in paths))
         self.assertIn("BIC-agent-portal/src/lib/agent-client.test.ts", paths)
         self.assertIn("BIC-agent-portal/tests/e2e/client-flow.spec.ts", paths)
         self.assertIn("BIC-agent-portal/vitest.config.ts", paths)
@@ -366,6 +401,221 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         serialized = json.dumps(suggested)
         for removed_key in ("capability_scope", "aggregate_risk", "upgrade_suggested", "verification_scope", "confidence", "evidence_type", "coverage_gaps", "coverage_unconfirmed"):
             self.assertNotIn(f'"{removed_key}"', serialized)
+
+    def test_public_brief_restores_relations_without_mapping_source_or_next_step(self) -> None:
+        skill = SKILL_FILE.read_text(encoding="utf-8")
+        deliverables = DELIVERABLES.read_text(encoding="utf-8")
+        public_template = deliverables.split("```text", 1)[1].split("```", 1)[0]
+
+        self.assertIn("Module Mapping", public_template)
+        self.assertIn("Issue Context", public_template)
+        self.assertIn("受影响仓库 Issue 扫描：", public_template)
+        self.assertIn("候选对应分析：", public_template)
+        self.assertIn("Test Correspondence", public_template)
+        self.assertIn("直接相关测试：", public_template)
+        self.assertIn("间接相关测试：", public_template)
+        self.assertIn("可能相关测试：", public_template)
+        self.assertIn("对应依据：", public_template)
+        self.assertIn("Missing Tests", public_template)
+        self.assertIn("Risk Matrix", public_template)
+        self.assertNotIn("映射来源：", public_template)
+        self.assertNotIn("下一步建议：", public_template)
+        self.assertIn("do not print it in the default brief", skill)
+
+    def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
+        without_issue = self.analyze("assess")
+        self.assertFalse(without_issue["context"]["issue_context"]["resolved"])
+        self.assertEqual(without_issue["risk_assessment"]["overall_risk"], "unassessed")
+
+        assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
+        issue = assessed["context"]["issue_context"]
+        risk = assessed["risk_assessment"]
+        self.assertEqual(issue["title"], "Keep SSE feedback targets aligned")
+        self.assertEqual(issue["repository"], "c12-ai/BIC-meta")
+        self.assertEqual(issue["item_type"], "issue")
+        self.assertEqual(len(issue["acceptance_items"]), 2)
+        self.assertEqual(risk["assessment_stage"], "pre-test")
+        self.assertEqual(risk["overall_risk"], "high")
+        dimensions = {item["dimension"] for item in risk["risk_matrix"]}
+        self.assertEqual(
+            dimensions,
+            {"issue-clarity", "impact-breadth", "contract-and-state-boundary", "test-evidence", "change-attribution"},
+        )
+        self.assertTrue(risk["requires_semantic_issue_alignment"])
+        self.assertTrue(all("reason" in item for item in risk["risk_matrix"]))
+
+    def test_issue_auto_discovery_uses_strong_sources_and_rejects_ambiguity(self) -> None:
+        pr_candidates = ISSUE_MODULE.pr_reference_candidates(
+            {
+                "url": "https://github.com/c12-ai/BIC-meta/pull/7",
+                "body": "Closes #42",
+                "closingIssuesReferences": [{
+                    "number": 42,
+                    "url": "https://github.com/c12-ai/BIC-meta/issues/42",
+                    "repository": {"nameWithOwner": "c12-ai/BIC-meta"},
+                }],
+            },
+            "c12-ai/BIC-meta",
+        )
+        selected, ordered = ISSUE_MODULE.select_issue_candidate(pr_candidates)
+        self.assertEqual(selected["reference"], "c12-ai/BIC-meta#42")
+        self.assertEqual(selected["source"], "current-pr-linked-issue")
+        self.assertEqual(len(ordered), 1)
+
+        commit_candidates = ISSUE_MODULE.closing_reference_candidates(
+            "Fixes #73\nUnrelated mention #99",
+            "c12-ai/BIC-agent-service",
+            "commit-message",
+            2,
+        )
+        self.assertEqual(
+            [item["reference"] for item in commit_candidates],
+            ["c12-ai/BIC-agent-service#73"],
+        )
+        branch_candidates = ISSUE_MODULE.branch_reference_candidates(
+            "feature/issue-88-sse", "c12-ai/BIC-agent-service",
+        )
+        self.assertEqual(branch_candidates[0]["reference"], "c12-ai/BIC-agent-service#88")
+
+        ambiguous, ordered = ISSUE_MODULE.select_issue_candidate([
+            {"reference": "c12-ai/BIC-meta#1", "source": "current-pr-linked-issue", "priority": 0, "evidence": "pr"},
+            {"reference": "c12-ai/BIC-meta#2", "source": "current-pr-linked-issue", "priority": 0, "evidence": "pr"},
+        ])
+        self.assertIsNone(ambiguous)
+        self.assertEqual(len(ordered), 2)
+
+    def test_issue_auto_discovery_scans_affected_repository_issues(self) -> None:
+        repositories = [{
+            "name": "BIC-meta",
+            "path": str(self.root),
+            "branch": "feature/quality-agent",
+            "merge_base": "abc123",
+            "change_count": 3,
+        }]
+        open_issues = [
+            {
+                "number": 150,
+                "title": "Add repository-aware quality analysis",
+                "url": "https://github.com/c12-ai/BIC-meta/issues/150",
+                "state": "OPEN",
+                "labels": [{"name": "quality"}],
+                "updatedAt": "2026-07-10T00:00:00Z",
+            },
+            {
+                "number": 149,
+                "title": "Unrelated open work",
+                "url": "https://github.com/c12-ai/BIC-meta/issues/149",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2026-07-09T00:00:00Z",
+            },
+        ]
+
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=None),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(ISSUE_MODULE, "list_repository_issues", return_value=(open_issues, None)),
+        ):
+            scanned = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+
+        self.assertFalse(scanned["resolved"])
+        self.assertEqual(scanned["discovery_mode"], "affected-repository-scan")
+        self.assertEqual(scanned["analysis_status"], "semantic-review-required")
+        self.assertEqual(scanned["repository_issue_counts"], {"c12-ai/BIC-meta": 2})
+        self.assertEqual(
+            [item["reference"] for item in scanned["candidates"]],
+            ["c12-ai/BIC-meta#149", "c12-ai/BIC-meta#150"],
+        )
+        self.assertEqual(scanned["candidates"][1]["labels"], ["quality"])
+
+        linked_pr = {
+            "url": "https://github.com/c12-ai/BIC-meta/pull/7",
+            "body": "Closes #150",
+            "closingIssuesReferences": [{
+                "number": 150,
+                "url": "https://github.com/c12-ai/BIC-meta/issues/150",
+                "repository": {"nameWithOwner": "c12-ai/BIC-meta"},
+            }],
+        }
+        resolved_issue = ISSUE_MODULE.normalize_issue(
+            {
+                **open_issues[0],
+                "body": "## Acceptance Criteria\n- [ ] Inspect Issues after mapping the Diff",
+            },
+            "c12-ai/BIC-meta#150",
+            "github-cli",
+        )
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=linked_pr),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(ISSUE_MODULE, "list_repository_issues", return_value=(open_issues, None)),
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=resolved_issue),
+        ):
+            selected = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+
+        self.assertTrue(selected["resolved"])
+        self.assertEqual(selected["selection_reason"], "current-pr-linked-issue")
+        self.assertEqual(selected["analysis_status"], "strong-link-selected")
+        selected_candidate = next(
+            item for item in selected["candidates"]
+            if item["reference"] == "c12-ai/BIC-meta#150"
+        )
+        self.assertEqual(selected_candidate["title"], "Add repository-aware quality analysis")
+
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=None),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(
+                ISSUE_MODULE,
+                "list_repository_issues",
+                return_value=([], "Could not scan open Issues for c12-ai/BIC-meta: auth failed"),
+            ),
+        ):
+            failed_scan = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+        self.assertTrue(any("auth failed" in warning for warning in failed_scan["warnings"]))
+
+    def test_repository_issue_listing_is_read_only_bounded_and_warns(self) -> None:
+        payload = [{
+            "number": 150,
+            "title": "Quality analysis",
+            "url": "https://github.com/c12-ai/BIC-meta/issues/150",
+            "state": "OPEN",
+            "labels": [],
+            "updatedAt": "2026-07-10T00:00:00Z",
+        }]
+        success = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(payload), stderr="",
+        )
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(ISSUE_MODULE.subprocess, "run", return_value=success) as run_mock,
+        ):
+            issues, warning = ISSUE_MODULE.list_repository_issues(
+                "c12-ai/BIC-meta", self.root,
+            )
+        self.assertEqual(issues, payload)
+        self.assertIsNone(warning)
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[:4], ["gh", "issue", "list", "--repo"])
+        self.assertIn("c12-ai/BIC-meta", command)
+        self.assertIn("open", command)
+        self.assertIn("100", command)
+
+        failure = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="auth failed",
+        )
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(ISSUE_MODULE.subprocess, "run", return_value=failure),
+        ):
+            issues, warning = ISSUE_MODULE.list_repository_issues(
+                "c12-ai/BIC-meta", self.root,
+            )
+        self.assertEqual(issues, [])
+        self.assertIn("auth failed", warning)
 
     def test_configured_module_relation_is_repository_qualified(self) -> None:
         module = "app/inference"

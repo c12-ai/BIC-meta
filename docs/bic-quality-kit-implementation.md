@@ -43,7 +43,10 @@ It tells the agent to:
 
 - collect quality context;
 - map diff to scope taxonomy;
+- scan open Issues in the affected repositories, prioritize strong links, and
+  analyze plausible candidates against changed modules and objects;
 - inspect test inventory;
+- generate an evidence-backed pre-test Risk Matrix;
 - produce one structured `BIC Quality Brief`;
 - avoid test execution and environment mutation.
 
@@ -55,6 +58,7 @@ Reference files were placed under `references/` so the skill can load only what 
 workspace-map.md
 scope-taxonomy.md
 test-analysis-rules.md
+risk-model.md
 deliverables.md
 ```
 
@@ -72,7 +76,9 @@ The analysis chain is:
 
 ```text
 changed file -> discovered repository -> explicit or structural module
-             -> changed object -> existing test correspondence -> missing-test guidance
+      -> affected-repository Issues -> changed object -> test correspondence
+      -> pre-test Risk Matrix
+      -> missing-test guidance
 ```
 
 The machine-readable config is:
@@ -105,6 +111,11 @@ runner configuration, and command hints. Concrete test files are inspected for
 imports, referenced objects, scenarios, assertions, and disabled state without
 importing or executing project code.
 
+Local tool state (`.agents`, `.claude`, `.codex`, and `.trellis`) is excluded
+from test discovery. Independently discovered child Git repositories are also
+excluded from the root repository scan and analyzed once under their own
+repository identity.
+
 The inventory adds project-specific `relates_modules` relationships; it is not
 the only source of test knowledge and never proves that tests pass. Relation
 identity is repository-qualified. `relates_modules` targets the entry's own
@@ -119,7 +130,28 @@ object-specific filename candidates produce a recommendation to strengthen
 tests. Broad module/scenario candidates and module-only configuration do not
 clear every changed object.
 
-## 7. Added Read-only Scripts
+## 7. Added Issue-aware Pre-test Risk Assessment
+
+`issue_context.py` runs after change collection has identified affected
+repositories. It scans open Issues in each affected GitHub repository and keeps
+their repository, number, title, labels, URL, and update time as candidate
+metadata. Current-PR links, PR/commit closing text, and a strong `issue-123`
+branch-name pattern remain higher-priority association evidence. Without a
+strong link, the Skill compares candidates with modules and changed objects,
+then reads only plausible Issue bodies. An explicit Issue remains an override.
+Failed queries and ambiguous candidates remain visible and prevent a guessed
+overall risk conclusion.
+
+`risk_assessment.py` combines Issue availability, affected repositories/modules,
+configured contract/state boundaries, changed-object attribution, and static
+test evidence. It emits a deterministic risk floor and matrix rows. The final
+Skill adds one semantic alignment row per Issue acceptance item; semantic review
+may raise but cannot lower the deterministic floor.
+
+This is a pre-test matrix. It does not execute tests or represent residual
+release risk.
+
+## 8. Added Read-only Scripts
 
 The following script wrappers were added:
 
@@ -128,12 +160,15 @@ scripts/collect-quality-context.sh
 scripts/detect-impact-scope.sh
 scripts/inspect-test-inventory.sh
 scripts/suggest-test-scope.sh
+scripts/assess-risk-matrix.sh
 ```
 
 They call a dependency-free Python analysis pipeline:
 
 ```text
 scripts/quality_context.py     # orchestration and CLI
+scripts/issue_context.py       # GitHub/local Issue collection
+scripts/risk_assessment.py     # deterministic pre-test risk floor
 scripts/test_assets.py         # test discovery and per-test facts
 scripts/symbol_extraction.py   # changed objects and source references
 scripts/test_relations.py      # direct/indirect/possible correspondence
@@ -145,7 +180,7 @@ For each repository it resolves a local base, reads
 then performs module mapping, changed-object extraction, and test
 correspondence analysis. It never fetches or checks out refs.
 
-## 8. Added Install And Verify
+## 9. Added Install And Verify
 
 `install.sh` installs the skill into local project skill locations:
 
@@ -162,7 +197,7 @@ inference, test discovery, recommendation isolation, and read-only Git state.
 
 The verification script also checks that source and installed scripts resolve `workspace_root` back to `BIC-meta`. This prevents installed skill copies under `.agents/skills` or `.claude/skills` from silently analyzing the wrong parent directory.
 
-## 9. Added User Documentation
+## 10. Added User Documentation
 
 `README.md` explains install, usage, read-only boundaries, and direct script debugging commands.
 
@@ -186,12 +221,20 @@ The expected output is one structured report:
 ```text
 BIC Quality Brief
 - Change Set
+- Issue Context
 - Module Mapping
 - Test Correspondence
-- Missing Tests & Next Step
+- Risk Matrix
+- Missing Tests
 ```
 
-## 10. Current Acceptance Criteria
+The raw JSON retains `mapping_source` for diagnostics, but the default brief
+does not print it. Direct/indirect/possible relations remain visible as separate
+test-correspondence fields, possible candidates never count as coverage, and no
+general next-step recommendation is added. The static-analysis limitation is
+stated once at the end.
+
+## 11. Current Acceptance Criteria
 
 The current implementation is considered ready when:
 
@@ -202,14 +245,23 @@ The current implementation is considered ready when:
 - module output preserves repository identity and test conclusions cite concrete
   changed objects, imports/references, scenarios, assertions, or explicit
   relations;
+- generated skill copies, backups, and separately discovered child repositories
+  are not duplicated as root-repository test assets;
 - test conclusions separate tests to add, tests to strengthen, and modules with
-  no obvious static gap without confidence, risk, or priority labels;
+  no obvious static gap without confidence or priority labels;
+- the default brief shows module evidence and direct/indirect/possible test
+  correspondence without `mapping_source` or a general next-step field;
+- open Issues are scanned read-only for every affected repository, strong
+  association evidence remains prioritized, and ambiguous semantic candidates
+  yield `unassessed` rather than guessed risk;
+- the pre-test Risk Matrix binds every row to Issue, Diff, and test evidence and
+  never claims that tests ran or passed;
 - scripts run without mutating project state;
 - install script can sync the skill into Claude/Codex project skill paths;
 - verification script passes;
 - the skill can support a read-only diff quality analysis conversation.
 
-## 11. Review Hardening
+## 12. Review Hardening
 
 During implementation review, several issues were tightened:
 

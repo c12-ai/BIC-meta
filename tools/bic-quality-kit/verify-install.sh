@@ -50,8 +50,12 @@ check_dir "$SOURCE_DIR"
 check_file "$SOURCE_DIR/SKILL.md"
 check_file "$SOURCE_DIR/config/scope-taxonomy.yaml"
 check_file "$SOURCE_DIR/config/test-inventory.yaml"
+check_file "$SOURCE_DIR/config/risk-model.yaml"
+check_file "$SOURCE_DIR/references/risk-model.md"
 check_file "$SOURCE_DIR/references/test-analysis-rules.md"
 check_file "$SOURCE_DIR/scripts/quality_context.py"
+check_file "$SOURCE_DIR/scripts/issue_context.py"
+check_file "$SOURCE_DIR/scripts/risk_assessment.py"
 check_file "$SOURCE_DIR/scripts/symbol_extraction.py"
 check_file "$SOURCE_DIR/scripts/test_assets.py"
 check_file "$SOURCE_DIR/scripts/test_relations.py"
@@ -59,15 +63,18 @@ check_file "$SOURCE_DIR/scripts/collect-quality-context.sh"
 check_file "$SOURCE_DIR/scripts/detect-impact-scope.sh"
 check_file "$SOURCE_DIR/scripts/inspect-test-inventory.sh"
 check_file "$SOURCE_DIR/scripts/suggest-test-scope.sh"
+check_file "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
 
 python3 -m json.tool "$SOURCE_DIR/config/scope-taxonomy.yaml" >/dev/null
 python3 -m json.tool "$SOURCE_DIR/config/test-inventory.yaml" >/dev/null
+python3 -m json.tool "$SOURCE_DIR/config/risk-model.yaml" >/dev/null
 python3 -m unittest discover -s "$KIT_DIR/tests" -v
 
 check_workspace_root "$SOURCE_DIR/scripts/collect-quality-context.sh"
 check_workspace_root "$SOURCE_DIR/scripts/detect-impact-scope.sh"
 bash "$SOURCE_DIR/scripts/inspect-test-inventory.sh" >/dev/null
 check_workspace_root "$SOURCE_DIR/scripts/suggest-test-scope.sh"
+check_workspace_root "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
 
 if [[ -d "$ROOT_DIR/.agents/skills/$SKILL_NAME" ]]; then
   echo "Codex project skill installed: $ROOT_DIR/.agents/skills/$SKILL_NAME"

@@ -25,9 +25,10 @@ repository or test directory is added.
   generic keywords such as `api`, `models`, `events`, or `client`.
 - Retain unmapped changes visibly when no stable structural module exists.
 - Report direct multi-repository changes as a fact derived from changed repos.
-- Do not calculate or expose high/medium/low risk levels or duplicate impact
-  labels. Repository, module, test evidence, and next-step verification are the
-  complete MVP contract.
+- Do not derive risk from paths or duplicate impact labels. A strongly linked,
+  uniquely matched, or explicitly overridden Issue may enable an
+  evidence-backed high/medium/low pre-test Risk Matrix; without a unique Issue,
+  overall risk must remain `unassessed`.
 - Discover concrete test files, test directories, framework configuration, and
   command hints automatically for Python and JavaScript/TypeScript repositories.
 - Treat `test-inventory.yaml` as an explicit semantic override instead of the
@@ -36,10 +37,16 @@ repository or test directory is added.
   classes plus JavaScript/TypeScript exports, components, stores, routes,
   events, and types. Fall back to changed-file facts when a language cannot be
   parsed safely.
+- After the Diff identifies affected repositories, scan open GitHub Issues in
+  each affected repository. Preserve current-PR links, PR/commit closing text,
+  and a strong branch-name pattern as higher-priority association evidence.
+  Without a strong link, retain repository Issue candidates for semantic
+  comparison with changed modules and objects. Accept an explicit reference
+  only as an override. All GitHub access is read-only through local `gh`.
 - Analyze test correspondence per `(repo, module_scope)`: direct code
   references, safe one-hop or explicitly configured relations, and weaker
-  scenario/path candidates must remain distinguishable without confidence
-  scores.
+  scenario/path candidates must remain distinguishable in raw analysis and the
+  default brief without confidence scores.
 - Separate relation facts from the need to add tests. A changed object with no
   object-specific test relation needs a new test. Disabled, assertion-free, or
   object-specific filename candidates need strengthening. Active direct,
@@ -51,6 +58,15 @@ repository or test directory is added.
   Never equate discovered test assets with passing tests or proven coverage.
 - Preserve the current read-only boundary: no tests, services, resets, process
   control, Git fetch/checkout, or business-code modification.
+- Exclude installed skill copies, backups, local tool state, and independently
+  discovered child repositories from duplicate root-repository test discovery.
+- Keep `mapping_source` in raw JSON for diagnostics but omit it from the default
+  brief. Keep direct/indirect/possible relation sections visible, and do not add
+  a general next-step recommendation field.
+- Generate a pre-test Risk Matrix from Issue clarity, Diff breadth,
+  contract/state boundaries, changed-object attribution, and test evidence.
+  Require semantic Issue-acceptance alignment in the final brief; missing Issue
+  context must produce `unassessed`, not a guessed low risk.
 - Keep source and installed Claude/Codex skill copies synchronized.
 
 ## Acceptance Criteria
@@ -65,7 +81,7 @@ repository or test directory is added.
 - [x] Unmapped repositories and files remain visible without invented semantics.
 - [x] Explicit business-module matches and structural-module matches expose their
       source and evidence.
-- [x] No analyzer or report output contains path-derived risk levels or duplicate
+- [x] No analyzer or report output contains path-only risk levels or duplicate
       impact labels.
 - [x] An unconfigured path such as `BIC-model-service/app/inference/pipeline.py`
       maps to repository `BIC-model-service` and structural module `app/inference`,
@@ -74,6 +90,8 @@ repository or test directory is added.
       from actual files and configuration.
 - [x] Test files expose imports/references, test cases, assertions, and disabled
       state without importing or executing project code.
+- [x] Installed copies, backups, and child repositories are not duplicated as
+      root-repository test assets.
 - [x] Changed source files expose deterministic symbol facts where supported and
       preserve a file-level fallback where not supported.
 - [x] Every affected `(repo, module_scope)` reports changed files/objects,
@@ -87,6 +105,18 @@ repository or test directory is added.
       declaration.
 - [x] The public test-analysis contract does not contain `coverage_gaps`,
       `coverage_unconfirmed`, `evidence_type`, or confidence fields.
+- [x] The default brief contains module evidence, direct/indirect/possible test
+      relations, and missing-test guidance without mapping-source or a general
+      next-step field.
+- [x] Auto-discovered or explicitly overridden Issue references produce
+      structured context with candidates/selection evidence without mutating
+      repository state.
+- [x] When no strong reference exists, every affected GitHub repository is
+      scanned for open Issues and returns repository-qualified candidate
+      metadata plus query warnings for semantic Diff/module comparison.
+- [x] The default brief includes an Issue-aware pre-test Risk Matrix with an
+      evidence-backed risk floor and `unassessed` behavior when Issue context is
+      missing.
 - [x] Temporary Git fixtures verify committed, dirty, staged, untracked, rename,
       delete, missing-base, and dynamic child-repository behavior.
 - [x] Verification confirms the analyzer leaves Git state unchanged.

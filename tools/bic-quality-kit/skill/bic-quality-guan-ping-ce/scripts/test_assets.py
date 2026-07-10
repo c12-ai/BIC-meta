@@ -12,8 +12,9 @@ from typing import Any, Callable, Iterable
 
 
 DISCOVERY_EXCLUDES = {
-    ".git", ".venv", "node_modules", "__pycache__", ".pytest_cache",
-    ".pnpm-store", "artifacts",
+    ".agents", ".claude", ".codex", ".git", ".trellis", ".venv",
+    "node_modules", "__pycache__", ".pytest_cache", ".pnpm-store",
+    "artifacts",
 }
 TEST_FILE_RE = re.compile(
     r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(test|spec)\.[^.\/]+)$",
@@ -38,11 +39,18 @@ JS_NONCODE_RE = re.compile(
 )
 
 
-def iter_repo_files(repo: Path) -> Iterable[Path]:
+def iter_repo_files(repo: Path, excluded_roots: Iterable[Path] = ()) -> Iterable[Path]:
+    excluded = {path.resolve() for path in excluded_roots}
     for root, dirs, files in os.walk(repo):
-        dirs[:] = [name for name in dirs if name not in DISCOVERY_EXCLUDES and not name.startswith(".git")]
+        root_path = Path(root)
+        dirs[:] = [
+            name for name in dirs
+            if name not in DISCOVERY_EXCLUDES
+            and not name.startswith(".git")
+            and (root_path / name).resolve() not in excluded
+        ]
         for filename in files:
-            yield Path(root) / filename
+            yield root_path / filename
 
 
 def test_type_for_path(relative: str) -> tuple[str, str]:
@@ -284,16 +292,18 @@ def discover_test_assets(
     is_ignored: Callable[[str], bool],
 ) -> list[dict[str, Any]]:
     assets: list[dict[str, Any]] = []
+    repository_roots = {Path(item["path"]).resolve() for item in repositories}
     for repo_info in repositories:
-        repo = Path(repo_info["path"])
+        repo = Path(repo_info["path"]).resolve()
         repo_rel = repo_info["relative_path"]
+        nested_repositories = repository_roots - {repo}
 
         def workspace_path(path: Path) -> str:
             local = path.relative_to(repo).as_posix()
             return local if repo_rel == "." else f"{repo_rel}/{local}"
 
         test_dirs: set[str] = set()
-        for path in iter_repo_files(repo):
+        for path in iter_repo_files(repo, nested_repositories):
             local = path.relative_to(repo).as_posix()
             output_path = workspace_path(path)
             if is_ignored(output_path) or not TEST_FILE_RE.search(local):

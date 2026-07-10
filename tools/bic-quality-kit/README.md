@@ -9,6 +9,10 @@ It is intentionally read-only:
 - It combines explicit BIC module rules with repository-relative structural modules.
 - It inspects concrete tests and relates them to changed source objects by
   repository and functional module.
+- After the Diff identifies affected repositories, it scans their open GitHub
+  Issues, preserves strong PR/commit/branch links, and generates an
+  evidence-backed pre-test Risk Matrix from Issue, Diff, contract-boundary,
+  and test evidence.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
 - It outputs one `BIC Quality Brief`.
@@ -48,6 +52,26 @@ or:
 帮我分析这次改动涉及哪些模块和测试 scope
 ```
 
+Issue-aware Diff risk assessment is automatic:
+
+```text
+用 BIC quality 看当前 diff，分析测试和风险
+```
+
+An explicit Issue remains available as an override:
+
+```text
+用 BIC quality 看当前 diff 和 c12-ai/BIC-meta#150，生成风险矩阵
+```
+
+By default the Skill first identifies repositories changed by the Diff, then
+scans open Issues in each affected repository. Current PR links, PR/commit
+closing references, and a strong `issue-123` branch-name pattern take priority.
+Without a strong link, the Skill compares repository candidates with changed
+modules and objects and reads only plausible Issue bodies. Ambiguous candidates
+remain visible and keep overall risk `unassessed`. An explicit reference is
+translated to `--issue` and overrides discovery.
+
 An explicit local base can be supplied through conversation:
 
 ```text
@@ -60,9 +84,15 @@ the head. A missing ref is reported per repository and never silently replaced.
 The expected output is one structured `BIC Quality Brief` with:
 
 - `Change Set`
+- `Issue Context`
 - `Module Mapping`
 - `Test Correspondence`
-- `Missing Tests & Next Step`
+- `Risk Matrix`
+- `Missing Tests`
+
+`mapping_source` remains available in raw JSON for diagnostics but is omitted
+from the default brief. Direct, indirect, and possible test relations remain
+visible; the report does not add a general next-step recommendation.
 
 ## Read-only Scripts
 
@@ -73,13 +103,18 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/collect-quality-con
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/detect-impact-scope.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/inspect-test-inventory.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/suggest-test-scope.sh
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
 ```
 
-All wrappers accept `--base-ref <local-ref>` or `--worktree-only`. By default,
+All wrappers accept `--base-ref <local-ref>` or `--worktree-only`; Issue-aware
+commands also accept `--issue <number-or-url-or-owner/repo#number>`. By default,
 each repository selects the first locally available CI base, `origin/main`,
 `main`, `origin/master`, or `master`, then combines
 `merge-base(base, HEAD)..HEAD` with unstaged, staged, and untracked changes.
-The scripts do not fetch, checkout, execute discovered commands, or run tests.
+The scripts do not fetch Git refs, checkout, execute discovered commands, or run
+tests. GitHub Issue listing and lookup are read-only metadata requests through
+`gh` and are limited to repositories affected by the Diff.
 
 ## Source Verification
 

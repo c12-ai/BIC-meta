@@ -21,6 +21,8 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from symbol_extraction import extract_changed_symbols
+from issue_context import collect_issue_context
+from risk_assessment import assess_pretest_risk
 from test_assets import discover_test_assets as discover_assets
 from test_relations import analyze_test_relations
 
@@ -304,7 +306,12 @@ def collect_repository_changes(
     return metadata, sorted(changes.values(), key=lambda item: item["path"])
 
 
-def collect_context(base_ref: str | None = None, worktree_only: bool = False) -> dict[str, Any]:
+def collect_context(
+    base_ref: str | None = None,
+    worktree_only: bool = False,
+    issue_ref: str | None = None,
+    issue_file: str | None = None,
+) -> dict[str, Any]:
     discovered = discover_repositories()
     child_paths = {repo["relative_path"] for repo in discovered if repo["relative_path"] != "."}
     repositories: list[dict[str, Any]] = []
@@ -322,6 +329,9 @@ def collect_context(base_ref: str | None = None, worktree_only: bool = False) ->
         "branch": branch or None,
         "analysis_mode": "worktree-only" if worktree_only else "complete-local-changeset",
         "requested_base_ref": base_ref,
+        "issue_context": collect_issue_context(
+            WORKSPACE_ROOT, issue_ref, issue_file, repositories,
+        ),
         "repositories": repositories,
         "changed_files": sorted(changed, key=lambda item: item["path"]),
         "root_git_status_short": root_status.splitlines() if root_status else [],
@@ -457,8 +467,13 @@ def recommend_tests(context: dict[str, Any], scope: dict[str, Any], tests: dict[
     return analyze_test_relations(WORKSPACE_ROOT, scope, symbols, tests["discovered_assets"], tests["tests"])
 
 
-def suggest_scope(base_ref: str | None = None, worktree_only: bool = False) -> dict[str, Any]:
-    context = collect_context(base_ref, worktree_only)
+def suggest_scope(
+    base_ref: str | None = None,
+    worktree_only: bool = False,
+    issue_ref: str | None = None,
+    issue_file: str | None = None,
+) -> dict[str, Any]:
+    context = collect_context(base_ref, worktree_only, issue_ref, issue_file)
     scope = map_modules(context)
     tests = inspect_tests(context)
     return {
@@ -470,23 +485,46 @@ def suggest_scope(base_ref: str | None = None, worktree_only: bool = False) -> d
     }
 
 
+def assess_quality(
+    base_ref: str | None = None,
+    worktree_only: bool = False,
+    issue_ref: str | None = None,
+    issue_file: str | None = None,
+) -> dict[str, Any]:
+    payload = suggest_scope(base_ref, worktree_only, issue_ref, issue_file)
+    payload["risk_assessment"] = assess_pretest_risk(
+        payload["context"],
+        payload["scope"],
+        payload["test_correspondence"],
+        payload["context"]["issue_context"],
+        load_json_yaml(CONFIG_DIR / "risk-model.yaml"),
+    )
+    return payload
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["collect", "impact", "inventory", "suggest"])
+    parser.add_argument("command", choices=["collect", "impact", "inventory", "suggest", "assess"])
     parser.add_argument("--base-ref", help="Compare checked-out HEAD to this local base ref in every repository.")
     parser.add_argument("--worktree-only", action="store_true", help="Skip committed branch comparison.")
+    parser.add_argument("--issue", help="Read this GitHub issue number, URL, or owner/repo#number with the local gh CLI.")
+    parser.add_argument("--issue-file", help="Read issue context from a local JSON or Markdown file.")
     args = parser.parse_args()
     if args.base_ref and args.worktree_only:
         parser.error("--base-ref and --worktree-only are mutually exclusive")
+    if args.issue and args.issue_file:
+        parser.error("--issue and --issue-file are mutually exclusive")
 
     if args.command == "collect":
-        payload = collect_context(args.base_ref, args.worktree_only)
+        payload = collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file)
     elif args.command == "impact":
-        payload = map_modules(collect_context(args.base_ref, args.worktree_only))
+        payload = map_modules(collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file))
     elif args.command == "inventory":
-        payload = inspect_tests(collect_context(args.base_ref, args.worktree_only))
+        payload = inspect_tests(collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file))
+    elif args.command == "suggest":
+        payload = suggest_scope(args.base_ref, args.worktree_only, args.issue, args.issue_file)
     else:
-        payload = suggest_scope(args.base_ref, args.worktree_only)
+        payload = assess_quality(args.base_ref, args.worktree_only, args.issue, args.issue_file)
     json.dump(payload, sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
