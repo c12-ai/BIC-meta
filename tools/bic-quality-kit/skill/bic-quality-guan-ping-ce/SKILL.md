@@ -7,7 +7,7 @@ description: >-
   review. This skill performs read-only analysis only: it inspects complete
   local branch/worktree changes, maps affected repositories and modules, scans
   their GitHub Issues, relates changed source objects to existing tests, and
-  returns a structured BIC Quality Brief with a pre-test Risk Matrix.
+  returns a structured `BIC 质量简报` with a pre-test risk matrix.
 ---
 
 # BIC Quality Guan/Ping/Ce
@@ -30,7 +30,7 @@ Do:
 - Identify tests to add or strengthen by static source inspection.
 - Generate an evidence-backed pre-test Risk Matrix from Issue, Diff, module,
   contract-boundary, and test evidence.
-- Output one structured `BIC Quality Brief`.
+- Output one structured `BIC 质量简报`.
 
 Do not:
 - Execute tests.
@@ -114,7 +114,7 @@ If the user asks to execute tests, state that this skill only provides read-only
    the overall result `unassessed`. Never lower the risk floor or infer alignment
    from keyword overlap alone. This matrix describes pre-test verification risk,
    not residual risk.
-8. Produce one `BIC Quality Brief`.
+8. Produce one `BIC 质量简报`.
 
 ## Output
 
@@ -122,8 +122,11 @@ Return exactly one structured report unless the user asks for raw JSON. Follow
 the template and selection rules in `references/deliverables.md`. Every
 conclusion should cite concrete facts: changed file paths and objects, test
 paths, imports/references, scenarios, assertions, disabled state, or explicit
-repository-qualified relations. State the selected base once. State once at the
-end that tests were not executed and static correspondence does not prove
-pass/fail. Do not add a next-step recommendation field beyond the missing-test
-guidance defined by the template. If Issue context is absent or unresolved,
-state that Issue alignment and overall risk are unassessed.
+repository-qualified relations. Start with the concise `核心结论` required by the
+template; it must summarize rather than add evidence, labels, or recommendations.
+Report risk separately for independent change streams when their Issue alignment
+differs. State the selected base once. State once at the end that tests were not
+executed and static correspondence does not prove pass/fail. Do not add a
+next-step recommendation field beyond the missing-test guidance defined by the
+template. If Issue context is absent or unresolved, state that Issue alignment
+and the corresponding stream's risk are unassessed.

@@ -407,20 +407,39 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         deliverables = DELIVERABLES.read_text(encoding="utf-8")
         public_template = deliverables.split("```text", 1)[1].split("```", 1)[0]
 
-        self.assertIn("Module Mapping", public_template)
-        self.assertIn("Issue Context", public_template)
+        self.assertIn("BIC 质量简报", public_template)
+        self.assertIn("核心结论", public_template)
+        self.assertLess(public_template.index("核心结论"), public_template.index("变更集"))
+        self.assertIn("影响范围：", public_template)
+        self.assertIn("跨仓判断：", public_template)
+        self.assertIn("Issue 对齐：", public_template)
+        self.assertIn("测试判断：", public_template)
+        self.assertIn("风险结论：", public_template)
+        self.assertIn("模块映射", public_template)
+        self.assertIn("需求与问题单", public_template)
         self.assertIn("受影响仓库 Issue 扫描：", public_template)
         self.assertIn("候选对应分析：", public_template)
-        self.assertIn("Test Correspondence", public_template)
+        self.assertIn("测试对应性", public_template)
         self.assertIn("直接相关测试：", public_template)
         self.assertIn("间接相关测试：", public_template)
         self.assertIn("可能相关测试：", public_template)
         self.assertIn("对应依据：", public_template)
-        self.assertIn("Missing Tests", public_template)
-        self.assertIn("Risk Matrix", public_template)
+        self.assertIn("测试缺口", public_template)
+        self.assertIn("测试前风险矩阵", public_template)
+        for english_heading in (
+            "BIC Quality Brief",
+            "Change Set",
+            "Issue Context",
+            "Module Mapping",
+            "Test Correspondence",
+            "Risk Matrix",
+            "Missing Tests",
+        ):
+            self.assertNotIn(english_heading, public_template)
         self.assertNotIn("映射来源：", public_template)
         self.assertNotIn("下一步建议：", public_template)
         self.assertIn("do not print it in the default brief", skill)
+        self.assertIn("Start with the concise `核心结论`", skill)
 
     def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
         without_issue = self.analyze("assess")
