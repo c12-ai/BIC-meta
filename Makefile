@@ -18,13 +18,14 @@ BIC_ROOT ?= $(shell [ -d "$(CURDIR)/BIC-agent-service" ] && echo "$(CURDIR)" || 
 export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: help up pull doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
+.PHONY: help up pull update doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
         bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared
 
 help: ## Show this help
 	@echo "BIC env — one-shot local bring-up"
 	@echo ""
 	@echo "  make pull      fast-forward all repos (meta/services/infra) to origin/main"
+	@echo "  make update    pull + full restart on the new code (pull && up alone does NOT redeploy running services)"
 	@echo "  make up        idempotent bring-up + self-heal (DRY=1 to preview)"
 	@echo "  make doctor    read-only full checkup (each red card has a fix command)"
 	@echo "  make status    one-screen service:port:status:sha"
@@ -37,6 +38,11 @@ help: ## Show this help
 ## --- one-shot env ----------------------------------------------------------
 up:            ; @$(ENV)/up.sh
 pull:          ; @$(ENV)/pull.sh
+# update = pull + restart everything on the new code. A bare `make pull && make up`
+# on a RUNNING bench is safe but does NOT redeploy: up only heals unhealthy
+# services, so BE/lab/mock keep executing pre-pull code (vite portal is the
+# exception — it serves from disk). update closes that gap deterministically.
+update:        ; @$(ENV)/pull.sh && $(ENV)/down.sh && $(ENV)/up.sh
 doctor:        ; @$(ENV)/doctor.sh
 status:        ; @$(ENV)/status.sh
 down:          ; @$(ENV)/down.sh
