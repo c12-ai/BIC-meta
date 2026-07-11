@@ -107,10 +107,13 @@ Core scenarios:
      download time.
    - Any session member who can view the session can download the report (read-level
      action, no execute authority required).
-   - Report enrichment data the system cannot obtain is omitted from the report, never
-     fabricated. Reactant molecular weights come from BIC-chem-service (a stateless
+   - Report data the system cannot obtain is shown as an explicit placeholder
+     (e.g. "—" / "未提供" / "not reported"), never fabricated and never silently
+     dropped — a checklist field must either carry a real value or a visible
+     placeholder (Wenlong ruling 2026-07-11; refines the earlier "omitted" wording).
+     Reactant molecular weights come from BIC-chem-service (a stateless
      RDKit chemistry calculator); any enrichment failure — service not configured,
-     unreachable, or unable to parse a molecule — leaves the affected fields absent
+     unreachable, or unable to parse a molecule — placeholders the affected fields
      and never blocks the report download.
    - Chem-service enrichment is optional by design, so its failures degrade silently
      to absent fields. This is a deliberate exception to requirement 8's fail-loud
@@ -445,11 +448,13 @@ For the TLC Lab Logistic panel:
   report (zh or en) from the result-confirmation surface; the download entry is visible only
   on the final experiment step after that result is confirmed, and the Agent Service refuses
   (conflict) before then regardless of portal state.
-- An ELN report never contains fabricated enrichment values: fields the system cannot
-  resolve (e.g. molecular weights without the chemistry calculator service) are absent.
+- An ELN report never contains fabricated values: fields the system cannot resolve
+  (e.g. molecular weights without the chemistry calculator service) carry an explicit
+  placeholder — every checklist field is either a real value or a visible placeholder,
+  never silently dropped (2026-07-11 ruling).
 - A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
   molecule) does not block the ELN report download; only the affected enrichment fields
-  are absent, and no error surfaces to the chemist for the enrichment miss.
+  are placeholdered, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Users can provide positive feedback on a persisted assistant reply without entering text.
@@ -503,6 +508,12 @@ For the TLC Lab Logistic panel:
 - 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
+
+- 2026-07-11 (late): Requirement 10 degrade rendering refined (Wenlong ruling): unobtainable
+  report fields switch from silent omission to explicit placeholders ("—"/"未提供"/
+  "not reported") — real value or visible placeholder, never fabricated, never silently
+  dropped. Matching acceptance criteria updated. Implementation with BIC-agent-service#63
+  checklist reconciliation.
 
 - 2026-07-11: Rule 8 supplement (Wenlong ruling, BIC-meta#206): experiment-context staged
   placement — TLC/CC material-prep surface may place tubes into empty cells in the selection
