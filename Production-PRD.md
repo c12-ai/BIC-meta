@@ -311,6 +311,22 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      explicit, type-first, Confirm-gated staged placement".
    - This supersedes the external interaction document's description of assignment as clicking an
      empty slot; the Feishu document must be corrected at source.
+   - **Supplement (selection-side type integrity, Wenlong ruling 2026-07-11, BIC-meta#242)**: a
+     sample tube's 纯品/粗品 type is stored in an opaque, nullable inventory property that Lab
+     Service never interprets (it stays a physical-state passthrough), so the pure/crude
+     discipline is a PRODUCT-LAYER rule enforced by the material-preparation surface on
+     selection — no Lab Service change. On that surface a filled-cell click resolves by the
+     armed add-mode and the tube's recorded type:
+     (a) with NO type armed, a typed tube selects normally, but a type-less tube is REFUSED with
+         a hint to arm a 纯品/粗品 type first — a selection must never carry an unknown type;
+     (b) with a type armed, a same-type tube selects, a differently-typed tube is REFUSED with a
+         hint naming the tube's own type (and the mode to switch to), and a type-less tube is
+         BACKFILLED to the armed type;
+     (c) a backfill is a Confirm-gated purity write on an EXISTING tube (the cell stays occupied;
+         only `properties.purity` is written) — the type chip flips immediately, the lab write
+         happens only on Confirm, and Cancel drops it with zero lab writes, exactly like a staged
+         placement (rule 8 (b)/(c)/(d) invariants hold);
+     (d) a backfilled tube's adopted type counts toward the rule 9 pure/crude pairing.
 
 9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05; pairing added 2026-07-11)
    - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row, any
@@ -451,6 +467,13 @@ For the TLC Lab Logistic panel:
   is read-only there.
 - Selecting an item for a task never creates inventory; empty slots/cells change only in
   maintenance mode.
+- On the TLC material-preparation surface, a filled sample-tube click enforces type integrity
+  (rule 8 #242 supplement): with no type armed a type-less ('?') tube cannot be selected and the
+  surface explains a type must be armed first; with a type armed, a differently-typed tube cannot
+  be selected and the hint names the tube's own type, while a type-less tube is backfilled to the
+  armed type as a Confirm-gated purity write (chip flips immediately, no lab write until Confirm,
+  Cancel restores the '?' with zero lab writes), and the backfilled type counts toward the
+  pure/crude pairing.
 - Each experiment's Material Preparation card shows exactly the rule-10 material set, with manual
   and auto-pick items separated; readiness quantity gates match the rule-10 counts (TLC sample
   tubes 2–4).
@@ -552,7 +575,19 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+- 2026-07-11 (latest): Rule 8 supplement — selection-side type integrity (Wenlong ruling,
+  BIC-meta#242). A sample tube's 纯品/粗品 type lives in an opaque, nullable inventory property
+  Lab Service never reads, so the pure/crude discipline is a product-layer rule enforced by the
+  material-preparation surface on selection (no Lab Service change; lab#114 left as the opaque
+  contract). A filled-cell click resolves by (armed add-mode × the tube's recorded type): unarmed
+  refuses a type-less tube (arm a type first), armed refuses a differently-typed tube (naming the
+  tube's own type) and backfills a type-less tube to the armed type via a Confirm-gated
+  `properties.purity` write; the backfilled type counts toward the rule 9 pairing. Every rule 8
+  #206 invariant holds (type-first, existing select/deselect never touches inventory,
+  Confirm-gated write, Cancel restores with zero lab writes). Matching acceptance criterion added.
+  Portal fix lands in BIC-agent-portal PR#72.
+
+- 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
