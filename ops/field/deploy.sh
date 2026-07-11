@@ -110,20 +110,25 @@ compose() { docker compose -f "$HERE/$1/docker-compose.yml" --env-file "$ENV_FIL
 # ---------------------------------------------------------------------------
 port_in_use() {
   local p="$1"
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
-  elif command -v ss >/dev/null 2>&1; then
+  # ss first: kernel netlink sees root-owned listeners (docker-proxy) without
+  # privileges; unprivileged lsof silently misses other users' sockets and
+  # false-negatives every shared-infra port on the field box.
+  if command -v ss >/dev/null 2>&1; then
     ss -ltnH "( sport = :$p )" 2>/dev/null | grep -q .
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
   else
     (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null && { exec 3>&- 3<&-; return 0; } || return 1
   fi
 }
 port_occupant() {
   local p="$1"
-  if command -v lsof >/dev/null 2>&1; then
-    lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $1"(pid "$2")"}' | sort -u | tr '\n' ' '
-  elif command -v ss >/dev/null 2>&1; then
+  # same ss-first ordering as port_in_use (unprivileged lsof can't name
+  # root-owned occupants; ss at least reports the pid when visible)
+  if command -v ss >/dev/null 2>&1; then
     ss -ltnpH "( sport = :$p )" 2>/dev/null | grep -oE 'users:\(\("[^"]+",pid=[0-9]+' | sed -E 's/users:\(\(//; s/pid=/pid /' | tr '\n' ' '
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $1"(pid "$2")"}' | sort -u | tr '\n' ' '
   fi
 }
 
