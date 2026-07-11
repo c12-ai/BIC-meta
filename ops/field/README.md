@@ -1,7 +1,7 @@
-# BIC V2 field deployment (orin-tail, 192.168.12.150)
+# BIC V2 field deployment (orin (192.168.12.150, LAN direct))
 
 Self-contained package to deploy the BIC V2 stack (Keycloak · chem · lab · agent ·
-portal) on orin-tail. After transfer, the field action collapses to
+portal) on orin. After transfer, the field action collapses to
 **`./deploy.sh init-env` → review `.env` → `./deploy.sh login` → `./deploy.sh up`**.
 Everything provable off-machine has been proven (portal image smoke, full local
 5-service rehearsal, deploy.sh pre-flight self-test) before this package shipped.
@@ -28,7 +28,7 @@ shared infra by container name (`bic-postgres`, `bic-redis`, `bic-minio`,
 `bic-rabbitmq`). Images come from `ghcr.io/c12-ai/<repo>:${IMAGE_TAG}` (portal:
 `${PORTAL_IMAGE_TAG}` = the `field-<sha>` variant).
 
-## Prerequisites on orin-tail
+## Prerequisites on orin
 
 1. Shared infra containers up & healthy (postgres/redis/minio/rabbitmq) — unchanged from V1.
 2. GHCR PAT (classic, **read:packages only**) at `~/.config/bic-v2/ghcr.token` (600),
@@ -47,7 +47,7 @@ rsync -avz --exclude='.env' ops/field/ wangwenlong@192.168.12.150:~/bic-v2/
 (or `scp -r ops/field wangwenlong@192.168.12.150:~/bic-v2`). The realm JSON and
 theme travel with the package — no BIC-infra checkout needed on the field.
 
-## One-time setup (on orin-tail, in `~/bic-v2`)
+## One-time setup (on orin, in `~/bic-v2`)
 
 ```bash
 ./deploy.sh init-env        # writes .env (600): shared creds from ~/bic/.env + generated KC admin pw
@@ -140,11 +140,11 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
 
 ### Ready-to-paste Claude prompt (hand this to a Claude Code session)
 
-> 现场更新部署：BIC V2 跑在 orin-tail（ssh orin-tail，~/bic-v2，方案与 runbook 见
+> 现场更新部署：BIC V2 跑在 orin（ssh orin，~/bic-v2，方案与 runbook 见
 > BIC-meta PR#231 与 ops/field/README.md）。请为 <REPO 名> 的最新 main 做一次滚动更新：
 > ① gh workflow run docker-build.yml 构建镜像并等绿（portal 用 field build-args 出
 > field-<sha> tag，OIDC authority=http://192.168.12.150:18080/realms/bic）；
-> ② ssh 到 orin-tail 在 ~/bic-v2 对该服务 pull + up -d 并 health-gate；
+> ② ssh 到 orin 在 ~/bic-v2 对该服务 pull + up -d 并 health-gate；
 > ③ 只动目标服务，绝不碰共享基建（bic-postgres/redis/minio/rabbitmq）和其它 V2 容器；
 > ④ 若 health 不过：docker logs 留证 → 回滚该服务到上一 tag（compose 里改 IMAGE_TAG
 > 为上一个 sha- tag 再 up -d）→ 报告而不是重试到死。
@@ -181,3 +181,13 @@ Switching to the REAL robot = `./mock.sh down`, then the robot team starts
 Default TLC fixture is a single passing plate (`tlc_plate_med02.jpg`, Rf ≈0.481);
 set `MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg` in
 `.env` for the fail→retry→pass demo.
+
+### Known issue: V1-era MQ queue argument mismatch (auto-guarded since 2026-07-11)
+
+RabbitMQ queue arguments are fixed at first declaration. On any site with V1
+history, `agent.task.status` exists WITHOUT `x-dead-letter-exchange`; V2 BE's
+redeclare then fails (`PRECONDITION_FAILED`) forever and the lab→BE task-status
+channel is dead (experiments stick at 已下发 while BE retries every 30s).
+`deploy.sh init-data` now detects V1-shaped queues with 0 consumers and deletes
+them so BE recreates them with V2 args. If the guard reports the queue HAS
+consumers, V1 is not actually retired — stop and check.

@@ -204,6 +204,26 @@ cmd_init_data() {
     minio/mc -c 'for b in '"$BE_S3_BUCKET $LAB_S3_BUCKET $CHEM_S3_BUCKET"'; do mc mb --ignore-existing "fld/$b" >/dev/null && echo "  ✓ bucket $b"; done' \
     || warn "minio bucket ensure skipped/failed (check MINIO_ROOT_PASSWORD / $MINIO_CONTAINER on $INFRA_NET)"
   info "redis index assignments (indices always exist; recorded for the ledger): BE=${BE_REDIS_DB:-3} lab=${LAB_REDIS_DB:-4}"
+  info "stale V1 MQ queues (arg-shape guard)"
+  # Queue arguments are fixed at first declaration. A V1-era agent.task.status
+  # (declared WITHOUT x-dead-letter-exchange) makes V2 BE's redeclare fail with
+  # PRECONDITION_FAILED forever (hit live on orin, 2026-07-11: lab->BE task
+  # status channel dead, experiments stuck at 已下发). Safe to delete only when
+  # nothing consumes it (V1 retired) — BE recreates it with V2 args on its next
+  # 30s retry.
+  for q in agent.task.status agent.task.status.dlq; do
+    line="$(docker exec "$MQ_CONTAINER" rabbitmqctl list_queues name arguments consumers 2>/dev/null | awk -v q="$q" '$1==q')"
+    if [ -z "$line" ]; then
+      ok "queue $q absent (BE will declare it)"
+    elif echo "$line" | grep -q "x-dead-letter-exchange"; then
+      ok "queue $q already V2-shaped"
+    elif [ "$(echo "$line" | awk '{print $NF}')" = "0" ]; then
+      docker exec "$MQ_CONTAINER" rabbitmqctl delete_queue "$q" >/dev/null
+      ok "queue $q was V1-shaped with 0 consumers — deleted (BE redeclares within 30s)"
+    else
+      warn "queue $q is V1-shaped but HAS consumers — is V1 really retired? Not touching it."
+    fi
+  done
   ok "init-data done"
 }
 
