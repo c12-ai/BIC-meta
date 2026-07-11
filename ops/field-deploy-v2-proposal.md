@@ -89,10 +89,12 @@
 ### 5. 切换与回滚（关键约束：rabbitmq 消费互斥）
 
 - V1 lab 与 V2 lab 消费**同一 robot.exchange**，不能并行双跑 → lab 是**天然切换制**，没有灰度双活。
-- **切换窗口**（预约时段，与 robot 团队打招呼）：
-  1. `docker stop` V1 四容器（frontend/bff/backend/lab）——**stop 不 rm**，镜像与容器保留；
-  2. `~/bic-v2` 顺序 up：keycloak → chem → lab(:8192) → BE(:8800) → portal(:15173)，每步 health-gate（照搬台架 `make up` 的分步健康检查纪律）；
-  3. 验收清单（预写二元项）：五端口 health 200、Keycloak issuer 匹配、portal 真实登录+一次 TLC 派发往返、ELN 下载。
+- **先退役 V1，再部署 V2**（Wenlong review 裁定 2026-07-11）：不做应用层双跑——窗口开头即停 V1 四容器（frontend/bff/backend/lab），**直接停止和退役，不删除镜像**（镜像保留 = 回滚依赖）。
+- **deploy.sh 内置端口冲突检测**（Wenlong review 裁定）：up 前 pre-flight 逐个检查目标口（8192/8800/15173/8010/18080）无监听者，占用即中止并打印占用进程；共享口只做存活确认，绝不接管。
+- 切换窗口流程（预约时段，与 robot 团队打招呼）：
+  1. 停 V1 四容器（stop 不 rm）；
+  2. `deploy.sh` 端口 pre-flight 全绿 → 顺序 up：keycloak → chem → lab(:8192) → BE(:8800) → portal(:15173)，每步 health-gate（照搬台架 `make up` 分步健康检查纪律）；
+  3. 验收清单（预写二元项）：五端口 health 200、Keycloak issuer 匹配、portal 真实登录+一次 TLC 派发往返、**Mind 现场端点真链一次参数推荐/结果分析**（Mind 已部署现场，Wenlong 确认可测试）、ELN 下载。
 - **回滚** = `docker stop` V2 五容器 + V1 目录 `bic-deploy.sh up`（镜像都在本机，分钟级）；V2 新建的库/桶留着不碍事。
 - `mars-log-consumer`、`artemis-eval`、日志栈、robot_service 均不动。
 
@@ -100,18 +102,20 @@
 
 | 阶段 | 内容 | 出口条件（二元） |
 |---|---|---|
-| P1 构建就绪 | portal Dockerfile+workflow；三仓 dispatch 构建；GHCR 拉取通路（PAT） | orin-tail 能 `docker pull` 全部五镜像 |
-| P2 旁路部署 | `~/bic-v2` 落位；keycloak/chem/BE/portal 起在空闲口；lab **暂不起**（8192 未交接），BE 先指台架 lab 或仅做静态联调 | 四服务 health 200 + portal 可登录 |
-| P3 切换窗口 | 停 V1 应用层 → V2 lab 接 8192 → 全链验收 → 回滚演练一次 | 预写清单全绿；回滚演练实测通过 |
+| P1 构建就绪 | portal Dockerfile+workflow；三仓 dispatch 构建；GHCR 拉取通路（Wenlong PAT） | orin-tail 能 `docker pull` 全部五镜像 |
+| P2 退役+部署窗口 | 停 V1 应用层（stop 不删镜像）→ `deploy.sh` 端口 pre-flight → V2 五服务顺序 up（含 lab:8192 交接） | pre-flight 全绿；五服务 health 200 + portal 可登录 |
+| P3 全链验收 | 真实登录 + TLC 派发往返 + Mind 现场端点真链 + ELN 下载 → 回滚演练一次 | 预写清单全绿；回滚演练实测通过 |
 
-### 7. 开放问题（需拍板/外部）
+### 7. 决议记录（Wenlong review 2026-07-11，PR#231 inline）
 
-1. **LLM 供给 —— 已裁定（Wenlong 2026-07-11）**：与 V1 相同，用宿主 :8000 本地模型。V2 BE `.env` 沿用 `BASE_URL=http://host.docker.internal:8000/v1`，无需现场外网出口。
-2. **Mind ChemEngine 现场端点**（#127 内网部署未落）：requirement 8 的 fail-loud 意味着没有 Mind 时参数推荐/结果分析会可见地报错——P3 验收范围要不要含 Mind 链路，取决于 Mind 侧进度。
-3. **portal 对外端口**：:15173 是我的建议（+10000 惯例）；若现场用户习惯 :8080，需要先退役 V1 frontend 且推翻 canon 禁用口——不建议。
-4. **GHCR org 权限**：c12-ai packages 的可见性/PAT 发放（谁的账号、最小权限 read:packages）。
-5. **V1 退役节奏**：切换稳定多久后 rm V1 容器/清 ECR 旧镜像（建议 ≥2 周观察期）。
-6. **bic-sa-\* 栈归属**：与 lab 团队确认其用途与生命周期，避免 P3 窗口误伤。
+1. **LLM 供给**：与 V1 相同，宿主 :8000 本地模型——`BASE_URL=http://host.docker.internal:8000/v1`，无需现场外网出口。
+2. **Mind ChemEngine**：用现场端点，**已部署可测试**——P3 验收含 Mind 真链。
+3. **部署时序**：部署 V2 前退役 V1；deploy.sh 必须内置端口冲突检测。
+4. **GHCR 凭据**：Wenlong 账号新建最小权限 PAT（read:packages），保存在现场 orin 机器内（`docker login ghcr.io` 凭据只落现场）。
+5. **V1 退役方式**：直接停止和退役，**不删除镜像**。
+6. **bic-sa-\* 栈**：是独立服务、独立部署，与 V1/V2 不冲突——仅保持端口避让，无归属疑问。
+
+仍开放：portal 对外端口 :15173（建议值，未被否决即采用）。
 
 ## 附：本次勘察未做的事
 
