@@ -142,8 +142,11 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
 
 > 现场更新部署：BIC V2 跑在 orin（ssh orin，~/bic-v2，方案与 runbook 见
 > BIC-meta PR#231 与 ops/field/README.md）。请为 <REPO 名> 的最新 main 做一次滚动更新：
-> ① gh workflow run docker-build.yml 构建镜像并等绿（portal 用 field build-args 出
-> field-<sha> tag，OIDC authority=http://192.168.12.150:18080/realms/bic）；
+> ① gh workflow run docker-build.yml 构建镜像并等绿。portal 的 field 构建必须显式传全三个 URL：
+> gh workflow run docker-build.yml --repo c12-ai/BIC-agent-portal --ref main -f image_variant=field \
+>   -f vite_api_base_url=http://192.168.12.150:8800 -f vite_lab_api_base_url=http://192.168.12.150:8192 \
+>   -f vite_oidc_authority=http://192.168.12.150:18080/realms/bic
+> （漏传会被 CI 守卫直接打红——localhost 烘焙进 field 镜像会把浏览器送去操作员本机）；
 > ② ssh 到 orin 在 ~/bic-v2 对该服务 pull + up -d 并 health-gate；
 > ③ 只动目标服务，绝不碰共享基建（bic-postgres/redis/minio/rabbitmq）和其它 V2 容器；
 > ④ 若 health 不过：docker logs 留证 → 回滚该服务到上一 tag（compose 里改 IMAGE_TAG
