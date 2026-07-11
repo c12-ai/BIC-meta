@@ -269,10 +269,22 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - The product surface must explain that the robot fetches the box from the shelf itself, so
      the chemist never hand-stocks the robot bench.
 
-8. **Assignment semantics: maintain-then-select** (decided 2026-07-05, applies to CC and TLC uniformly)
+8. **Assignment semantics: maintain-then-select** (decided 2026-07-05, applies to CC and TLC uniformly;
+   supplemented 2026-07-11)
    - Assigning a manual/specific item to a task means SELECTING an already-maintained physical
      item; selection must never create inventory.
-   - Empty slots or cells are filled and cleared only in maintenance mode.
+   - Empty slots or cells are filled and cleared only in maintenance mode — refined by the
+     experiment-context staged-placement supplement below.
+   - **Supplement (experiment-context staged placement, Wenlong ruling 2026-07-11, BIC-meta#206;
+     closes #192)**: the TLC/CC material-preparation surface MAY allow placing tubes into empty
+     cells within the selection context, provided ALL invariants hold:
+     (a) placement is type-first — a 纯品/粗品 type must be armed before any cell can be placed;
+     (b) selecting/deselecting an EXISTING physical tube never creates or deletes inventory;
+     (c) every inventory write is deferred to and triggered only by Confirm — zero lab writes
+     before Confirm (client-side draft staging);
+     (d) Cancel restores both inventory and selection to the exact pre-modal state.
+     "Empty filled only in maintenance mode" is thereby refined to "empty filled only via
+     explicit, type-first, Confirm-gated staged placement".
    - This supersedes the external interaction document's description of assignment as clicking an
      empty slot; the Feishu document must be corrected at source.
 
@@ -491,6 +503,14 @@ For the TLC Lab Logistic panel:
 - 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
+
+- 2026-07-11: Rule 8 supplement (Wenlong ruling, BIC-meta#206): experiment-context staged
+  placement — TLC/CC material-prep surface may place tubes into empty cells in the selection
+  context under four invariants (type-first, existing-tube select/deselect never touches
+  inventory, Confirm-gated writes with client-side draft staging = Option A, Cancel restores
+  pre-modal state). Closes the #192 tension. Implementation lands as one comprehensive update
+  on portal PR#46 (restoring #188 CC semantics in the same pass); main's destructive
+  deselect gets an interim hotfix.
 
 - 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
   index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
