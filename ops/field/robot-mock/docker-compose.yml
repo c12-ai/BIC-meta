@@ -1,0 +1,40 @@
+# BIC V2 field — mock robot (mars-interface-mock) on the shared robot.exchange.
+#
+# NOT part of `deploy.sh up` — the mock is an on-demand stand-in for the real
+# robot and must be MUTUALLY EXCLUSIVE with mars_interface on the same
+# ${ROBOT_ID}.cmd queue. Start/stop it ONLY via ./mock.sh, which enforces the
+# consumer-mutex guard before bringing it up.
+#
+# S3_ENDPOINT is the HOST LAN address (not the bic-minio container name) on
+# purpose: the mock presigns image URLs that Mind/ChemEngine and browsers must
+# be able to fetch — a container-name URL dies outside infra-net.
+services:
+  robot-mock:
+    image: ghcr.io/c12-ai/mars_interface_mock:${MOCK_IMAGE_TAG:-latest}
+    container_name: ${MOCK_CONTAINER_NAME:-bic-robot-mock}
+    environment:
+      MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}
+      MQ_PORT: "5672"
+      MQ_USER: ${MQ_USER:-rabbitmq}
+      MQ_PASSWORD: ${MQ_PASSWORD:?set MQ_PASSWORD in the field .env}
+      MQ_VHOST: ${MQ_VHOST:-/}
+      MQ_EXCHANGE: robot.exchange
+      ROBOT_ID: ${MOCK_ROBOT_ID:-talos.001}
+      S3_ENDPOINT: ${FIELD_HOST:-192.168.12.150}:9000
+      S3_BUCKET: ${MOCK_S3_BUCKET:-tlc-images}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}
+      S3_SECURE: "false"
+      # Default: a single passing plate (Rf ~0.481, inside the usual 0.4–0.6
+      # window). For the fail→retry→pass demo use:
+      #   MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg
+      TLC_FIXTURE_SEQUENCE: ${MOCK_TLC_FIXTURE_SEQUENCE:-tlc_plate_med02.jpg}
+      TZ: ${TZ:-Asia/Shanghai}
+    networks:
+      - infra-net
+    restart: unless-stopped
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}
