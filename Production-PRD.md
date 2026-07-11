@@ -312,10 +312,15 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - This supersedes the external interaction document's description of assignment as clicking an
      empty slot; the Feishu document must be corrected at source.
 
-9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05)
+9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05; pairing added 2026-07-11)
    - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row,
      contiguous columns, starting at column 1 (the shape rule applies within the box the robot
      carries).
+   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes, ordered
+     pure-left / crude-right (Wenlong ruling 2026-07-11, BIC-meta#239): the pairing is deliberate
+     chemistry design, not an implementation artifact. A single-type selection is invalid, and the
+     product must explain the unmet pairing requirement explicitly rather than silently disabling
+     confirmation.
    - The external interaction document's `1 or 2` quantity (and one-location demo note) is stale
      and must be corrected at source; no 1-tube dispatch support is planned.
 
@@ -428,6 +433,9 @@ For the TLC Lab Logistic panel:
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
 - TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row,
   contiguous columns, starting at column 1.
+- A TLC selection containing only one sample type (only pure or only crude) cannot be confirmed,
+  and the surface explains the missing pairing requirement (which type is missing, pure-left /
+  crude-right order) instead of silently disabling the confirm control.
 - A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
@@ -534,6 +542,12 @@ For the TLC Lab Logistic panel:
 - Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-11 (later): Rule 9 pairing requirement made explicit (Wenlong ruling, BIC-meta#239):
+  a valid TLC selection must contain both pure and crude tubes, pure-left / crude-right —
+  deliberate chemistry design. Single-type selections cannot be confirmed and the surface must
+  explain the unmet requirement instead of silently disabling the confirm control. Matching
+  acceptance criterion added; portal explanation fix lands with BIC-meta#239.
 
 - 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
   download entry until the final result is confirmed instead of showing an
