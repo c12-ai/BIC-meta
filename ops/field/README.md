@@ -159,3 +159,25 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
   `./deploy.sh down && ./deploy.sh up`.
 - **MIND_HOST is a bare host** (`192.168.12.104`), port goes in `MIND_PORT` (8002);
   BE builds `http://{host}:{port}` itself (config.py `mcp_address`).
+
+## Mock robot (on-demand, mutually exclusive with the real robot)
+
+`robot-mock/` runs `mars_interface_mock` as a container on the shared
+`robot.exchange`. It is NOT part of `deploy.sh up` — start/stop it only via:
+
+```bash
+cd ~/bic-v2/robot-mock
+./mock.sh up       # REFUSES if ${ROBOT_ID}.cmd already has a consumer (real robot live)
+./mock.sh status   # container state + cmd-queue consumer count
+./mock.sh down     # run this BEFORE the robot team brings up mars_interface
+./mock.sh logs
+```
+
+Switching to the REAL robot = `./mock.sh down`, then the robot team starts
+`mars_interface` (their `~/bic/robot_service` assets) against the same
+`bic-rabbitmq`. Zero V2 changes; verify with
+`docker exec bic-rabbitmq rabbitmqctl list_queues name consumers | grep cmd`.
+
+Default TLC fixture is a single passing plate (`tlc_plate_med02.jpg`, Rf ≈0.481);
+set `MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg` in
+`.env` for the fail→retry→pass demo.
