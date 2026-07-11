@@ -122,12 +122,33 @@ Core scenarios:
    - The report content is a deterministic aggregation of the experiment's confirmed
      data; no AI engine is involved in producing it.
 
-11. **Agent message feedback**
-   - The portal must allow the chemist to provide positive or negative feedback on persisted assistant replies within the active session.
+11. **User-facing language consistency**
+   - The portal must support Chinese and English for user-facing workflow surfaces,
+     including session chrome, forms, material preparation, execution progress,
+     result evidence, and lab spatial / maintenance views.
+   - Agent Service must carry the current UI language through user turns,
+     confirmation events, workflow narration, and specialist prompts so LLM-produced
+     chemist-facing prose follows the selected language.
+   - Deterministic backend text should preserve stable machine fields and expose
+     display metadata or localizable fields for the portal instead of requiring
+     downstream consumers to parse English labels.
+   - Lab Service must keep stable inventory/material keys as the business authority
+     while exposing localized display names for physical materials, rack areas, and
+     preparation surfaces.
+   - Chemistry identifiers, reagent names, abbreviations, units, SMILES, IDs,
+     structured payload keys, and tool/protocol names remain unchanged unless the
+     underlying business data explicitly provides a localized name.
+
+12. **Agent message feedback**
+   - The portal must allow the chemist to provide positive or negative feedback on
+     persisted assistant replies within the active session.
    - Positive feedback should be submittable without additional text.
    - Negative feedback must require an improvement suggestion from the chemist.
-   - Feedback must remain traceable to the current session, user, target assistant reply, turn, and persisted event.
-   - The system must preserve enough workflow context from the target assistant reply time to support later quality analysis by experiment stage, specialist, task, and issue pattern.
+   - Feedback must remain traceable to the current session, user, target assistant
+     reply, turn, and persisted event.
+   - The system must preserve enough workflow context from the target assistant reply
+     time to support later quality analysis by experiment stage, specialist, task, and
+     issue pattern.
 
 ## Core Concepts
 
@@ -457,11 +478,19 @@ For the TLC Lab Logistic panel:
   are placeholdered, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
-- Users can provide positive feedback on a persisted assistant reply without entering text.
-- Users can provide negative feedback on a persisted assistant reply after entering an improvement suggestion.
-- Feedback can be traced back to the original assistant reply, session event, and workflow context.
-- Updating feedback on the same assistant reply updates the existing feedback record rather than creating duplicate ratings.
-- Stored feedback context reflects the workflow state at the time of the target assistant reply, not only the later state when the user submits feedback.
+- Chinese Portal mode covers deterministic UI text, Lab Service-provided display
+  names, and Agent Service LLM narration / final replies while preserving chemistry
+  identifiers and machine-readable payload fields.
+- Users can provide positive feedback on a persisted assistant reply without entering
+  text.
+- Users can provide negative feedback on a persisted assistant reply after entering an
+  improvement suggestion.
+- Feedback can be traced back to the original assistant reply, session event, and
+  workflow context.
+- Updating feedback on the same assistant reply updates the existing feedback record
+  rather than creating duplicate ratings.
+- Stored feedback context reflects the workflow state at the time of the target
+  assistant reply, not only the later state when the user submits feedback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -502,6 +531,7 @@ For the TLC Lab Logistic panel:
 
 - Agent Service Project PRD: `BIC-agent-service/docs/project-prd.md`
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
+- Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
 
@@ -547,6 +577,10 @@ For the TLC Lab Logistic panel:
   disabled everywhere; final-surface disable-until-confirmed and the Agent Service
   conflict gate are unchanged. Matching acceptance criterion updated. Portal change
   tracked in BIC-meta#77.
+
+- 2026-07-08: Added requirement 11 for user-facing language consistency across
+  Portal UI, Agent Service LLM/deterministic event text, and Lab Service localized
+  display names, with acceptance coverage for Chinese-mode workflow verification.
 
 - 2026-07-08: Refined requirement 10 per BIC-agent-service #55: named BIC-chem-service
   as the molecular-weight enrichment source, covered all its failure modes
