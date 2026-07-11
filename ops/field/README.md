@@ -114,3 +114,48 @@ V2's new dbs/buckets are harmless to leave; V1 keeps its own `labrun_db` /
 3. Confirm the field-only values before `up`: `MIND_HOST` (real ChemEngine
    endpoint), `BE_LLM_DEFAULT_MODEL` / `BE_LLM_API_KEY` (host :8000 model),
    and that the derived shared creds match the real `~/bic/.env` key names.
+
+---
+
+## Updating the deployment after code changes (routine redeploy)
+
+One service changed (typical):
+
+```bash
+# 1. build the new image (from your Mac; repo = the changed service)
+gh workflow run docker-build.yml --repo c12-ai/BIC-agent-service --ref main
+gh run watch --repo c12-ai/BIC-agent-service   # wait for green
+# portal needs the field build-args variant — pass the same inputs used for field-<sha>
+
+# 2. on orin (or via ssh): pull + recreate ONLY the changed service
+cd ~/bic-v2
+./deploy.sh login
+docker compose -f agent-service/docker-compose.yml --env-file .env pull
+docker compose -f agent-service/docker-compose.yml --env-file .env up -d
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8800/health   # gate
+```
+
+Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
+(Keycloak/DB state persists in `keycloak_db`; realm re-import is skipped.)
+
+### Ready-to-paste Claude prompt (hand this to a Claude Code session)
+
+> 现场更新部署：BIC V2 跑在 orin-tail（ssh orin-tail，~/bic-v2，方案与 runbook 见
+> BIC-meta PR#231 与 ops/field/README.md）。请为 <REPO 名> 的最新 main 做一次滚动更新：
+> ① gh workflow run docker-build.yml 构建镜像并等绿（portal 用 field build-args 出
+> field-<sha> tag，OIDC authority=http://192.168.12.150:18080/realms/bic）；
+> ② ssh 到 orin-tail 在 ~/bic-v2 对该服务 pull + up -d 并 health-gate；
+> ③ 只动目标服务，绝不碰共享基建（bic-postgres/redis/minio/rabbitmq）和其它 V2 容器；
+> ④ 若 health 不过：docker logs 留证 → 回滚该服务到上一 tag（compose 里改 IMAGE_TAG
+> 为上一个 sha- tag 再 up -d）→ 报告而不是重试到死。
+> 完成后报：镜像 tag/digest、health 证据、变更前后容器 ID。
+
+## Known operational notes (from the 2026-07-11 first deployment)
+
+- **V1 containers are renamed, not removed**: `bic-*-v1` (stopped). V2 reuses the
+  original container names; rollback recreates V1 by name from its untouched images.
+- **preflight self-idempotency gap**: a HALF-deployed V2 (e.g. keycloak+chem up
+  after an aborted `up`) makes preflight flag its own ports as occupied. Workaround:
+  `./deploy.sh down && ./deploy.sh up`.
+- **MIND_HOST is a bare host** (`192.168.12.104`), port goes in `MIND_PORT` (8002);
+  BE builds `http://{host}:{port}` itself (config.py `mcp_address`).

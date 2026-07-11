@@ -55,7 +55,7 @@ services:
 
       # --- ChemEngine / Mind (real field endpoint, ruling 2026-07-11) ---
       MCP_HOST: ${MIND_HOST:?set MIND_HOST to the field ChemEngine endpoint}
-      MCP_PORT: ${MIND_PORT:-8003}
+      MCP_PORT: ${MIND_PORT:-8002}
       MIND_MOCK_MODE: ${MIND_MOCK_MODE:-false}
       MIND_TIMEOUT_SEC: ${MIND_TIMEOUT_SEC:-120}
 
