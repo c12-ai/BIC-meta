@@ -30,6 +30,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 2. BIC-agent-portal: agent frontend. (No BFF anymore) @/Users/drakezhou/Development/BIC/BIC-agent-portal
 3. BIC-lab-service: (Nexus) manage lab status (LIMS), orch and report exp task, communicate with robot and backend using MQ. @/Users/drakezhou/Development/BIC/BIC-lab-service
 4. BIC-shared-types: Defined cross team shared object type @/Users/drakezhou/Development/BIC/BIC-shared-types
+5. BIC-chem-service: stateless RDKit molecular-weight calculator used by Agent Service ELN report enrichment. Optional for the main workflow; if absent, ELN downloads still work but FW/mole fields are omitted.
 
 ## Local Dev Infra:
 
@@ -46,14 +47,17 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
    ```
    `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. `BIC_ROOT` is autodetected for both known layouts — service repos nested inside this repo, or this repo cloned next to them — so no override is needed on a standard checkout. The scripts encode every trap below (retired-5433 listener check, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
 
+   BIC-chem-service is **optional** and only affects ELN enrichment (FW / moles / compound-name fill-ins). The main workflow still runs without it; missing enrichment fields are omitted from the report. Current port authority is `:8010` (the old infra `:8810` was retired). Host-mode Agent Service config is `CHEM_SERVICE_HOST=127.0.0.1`, `CHEM_SERVICE_PORT=8010`; an infra/docker network deployment should point `CHEM_SERVICE_HOST` at the service DNS name but still keep port `8010`.
+
    <details><summary>Manual fallback (if <code>make</code> is unavailable / debugging a single step)</summary>
 
    1. `open -a Docker`, wait for daemon, then `docker start bic-postgres bic-rabbitmq bic-minio bic-keycloak` (bic-redis auto-starts). Keycloak `:18080` is a hard dep now (BE only accepts Bearer JWT); its issuer must match BE `KEYCLOAK_ISSUER_URL` + portal `VITE_OIDC_AUTHORITY` — all three `http://localhost:18080/realms/bic` (see `ops/run-latest-2026-07-10.md` §5).
    2. each repo after `git checkout main`: sync deps first — portal `pnpm install`, BE/lab `uv sync` (the Keycloak batch added `react-oidc-context`; skipping `pnpm install` white-screens the portal with an import error).
-   3. pane `0.0` lab: `cd BIC-lab-service && make dev` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
-   4. pane `0.1` agent BE: `cd BIC-agent-service && make dev`
-   5. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev`
-   6. pane `0.3` robot mock: `cd mars_interface_mock && uv run mars-interface-mock`
+   3. Optional for ELN enrichment only: start chem-service on `:8010`. `make up` / `make restart-chem` use the local `BIC-chem-service` checkout when present; the infra image path is `cd BIC-infra && make chem-up && make chem-smoke`, and `make chem-smoke` verifies `/health/readiness` plus `POST /molecular-weight`.
+   4. pane `0.0` lab: `cd BIC-lab-service && make dev` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
+   5. pane `0.1` agent BE: `cd BIC-agent-service && make dev`
+   6. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev`
+   7. pane `0.3` robot mock: `cd mars_interface_mock && uv run mars-interface-mock`
    `curl` health checks need `--noproxy '*'` (local 127.0.0.1:7890 proxy masks localhost). Portal health ≠ `:5173` HTTP 200 alone (dev server up ≠ page compiles) — also confirm a real load: `curl --noproxy '*' http://localhost:5173/src/main.tsx` returns JS (not an error), or open the page.
    </details>
 
