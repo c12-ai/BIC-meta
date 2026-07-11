@@ -1,0 +1,19 @@
+# BIC V2 field — portal (static nginx SPA). VITE_* (BE/lab/issuer URLs) are BAKED
+# INTO THE IMAGE at build time, so this container has no runtime config — it just
+# serves the field-<sha> bundle on :15173. Use the `field` image variant built
+# with the on-site VITE_* build-args (see the portal repo docker-build.yml).
+services:
+  portal:
+    image: ghcr.io/c12-ai/bic-agent-portal:${PORTAL_IMAGE_TAG:?set PORTAL_IMAGE_TAG (field-<sha>) in the field .env}
+    container_name: ${PORTAL_CONTAINER_NAME:-bic-agent-portal}
+    restart: unless-stopped
+    # Host 15173 (5173+10000); the nginx container listens on 80 internally.
+    ports:
+      - "${PORTAL_PORT:-15173}:80"
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}
