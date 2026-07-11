@@ -39,7 +39,11 @@ services:
       REDIS_DB: ${BE_REDIS_DB:-3}
 
       # --- S3 / MinIO (TLC plate images) ---
-      S3_ENDPOINT_URL: http://${MINIO_CONTAINER:-bic-minio}:9000
+      # LAN address ON PURPOSE (not the container name): BE presigns plate URLs
+      # for Mind/browsers, and the signature binds the Host header — a URL signed
+      # against bic-minio:9000 is unreachable AND 403s if the host is rewritten
+      # (hit live 2026-07-11: field TLC recognition failed on exactly this).
+      S3_ENDPOINT_URL: ${BE_S3_ENDPOINT_URL:-http://${FIELD_HOST:-192.168.12.150}:9000}
       S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}
       S3_REGION: ${S3_REGION:-us-east-1}
