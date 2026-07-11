@@ -8,9 +8,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$HERE/../.env}"
 [ -f "$ENV_FILE" ] || { echo "ERROR: $ENV_FILE not found (run deploy.sh init-env first)"; exit 1; }
 
-# shellcheck disable=SC1090
-MQ_CONTAINER=$(grep -m1 '^MQ_CONTAINER=' "$ENV_FILE" | cut -d= -f2-); MQ_CONTAINER=${MQ_CONTAINER:-bic-rabbitmq}
-ROBOT_ID=$(grep -m1 '^MOCK_ROBOT_ID=' "$ENV_FILE" | cut -d= -f2-); ROBOT_ID=${ROBOT_ID:-talos.001}
+# grep exits 1 on no-match; `|| true` keeps set -e from killing us — absent
+# keys fall through to the defaults.
+MQ_CONTAINER=$(grep -m1 '^MQ_CONTAINER=' "$ENV_FILE" | cut -d= -f2- || true); MQ_CONTAINER=${MQ_CONTAINER:-bic-rabbitmq}
+ROBOT_ID=$(grep -m1 '^MOCK_ROBOT_ID=' "$ENV_FILE" | cut -d= -f2- || true); ROBOT_ID=${ROBOT_ID:-talos.001}
 CMD_QUEUE="${ROBOT_ID}.cmd"
 
 compose() { docker compose -f "$HERE/docker-compose.yml" --env-file "$ENV_FILE" "$@"; }
