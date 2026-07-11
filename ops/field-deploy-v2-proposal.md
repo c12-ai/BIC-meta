@@ -106,7 +106,7 @@
 
 ### 7. 开放问题（需拍板/外部）
 
-1. **LLM 供给**：V2 BE 在现场用云 API（需现场外网/代理）还是宿主 :8000 本地模型（V1 方式）？影响 `.env` 与网络出口。
+1. **LLM 供给 —— 已裁定（Wenlong 2026-07-11）**：与 V1 相同，用宿主 :8000 本地模型。V2 BE `.env` 沿用 `BASE_URL=http://host.docker.internal:8000/v1`，无需现场外网出口。
 2. **Mind ChemEngine 现场端点**（#127 内网部署未落）：requirement 8 的 fail-loud 意味着没有 Mind 时参数推荐/结果分析会可见地报错——P3 验收范围要不要含 Mind 链路，取决于 Mind 侧进度。
 3. **portal 对外端口**：:15173 是我的建议（+10000 惯例）；若现场用户习惯 :8080，需要先退役 V1 frontend 且推翻 canon 禁用口——不建议。
 4. **GHCR org 权限**：c12-ai packages 的可见性/PAT 发放（谁的账号、最小权限 read:packages）。
