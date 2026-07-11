@@ -313,9 +313,15 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      empty slot; the Feishu document must be corrected at source.
 
 9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05; pairing added 2026-07-11)
-   - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row,
-     contiguous columns, starting at column 1 (the shape rule applies within the box the robot
-     carries).
+   - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row, any
+     distinct columns within the box (columns 1–5) — column gaps and non-column-1 starts are
+     allowed (the shape rule applies within the box the robot carries). The earlier "contiguous
+     columns, starting at column 1" constraint is RETIRED (BIC-meta#244, 2026-07-11): the robot
+     team's own v6 FINAL reference run spots tubes at A1+A4 (non-contiguous) and the 6-channel
+     whole-row aspirate is anchored at column 1, so no column-1 anchor tube is physically
+     required; lab `_validate_tlc_objects` + portal `tubeSelectionProblem` were relaxed to match
+     on 2026-07-09 (Drake ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
+     remain invalid.
    - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (Wenlong
      ruling 2026-07-11, BIC-meta#239; revised same day to B2): the pairing is deliberate chemistry
      design. The earlier pure-left / crude-right ordering constraint is RETIRED — it originated in
@@ -433,8 +439,9 @@ For the TLC Lab Logistic panel:
 - TLC inventory state has no records with both `location_id` and `parent_object_id` missing.
 - The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
-- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row,
-  contiguous columns, starting at column 1.
+- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row, any
+  distinct columns within the box (columns 1–5); column gaps and non-column-1 starts are allowed,
+  matching the robot's v6 reference run (A1+A4) — no contiguity or start-at-column-1 constraint.
 - A TLC selection containing only one sample type (only pure or only crude) cannot be confirmed,
   and the surface explains which type is missing instead of silently disabling the confirm
   control; no ordering constraint applies between pure and crude columns.
@@ -544,6 +551,20 @@ For the TLC Lab Logistic panel:
 - Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+  investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
+  with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
+  starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
+  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, Drake 2026-07-09) spots tubes at
+  A1+A4 (non-contiguous), reproduced op-for-op by the lab planner golden test; the 6-channel
+  whole-row aspirate is anchored at column 1 (`planner.py`), so no column-1 anchor tube is
+  physically required. lab `_validate_tlc_objects` and portal `tubeSelectionProblem` were already
+  relaxed to match on 2026-07-09 (Drake ruling, robot-confirmed, BIC-lab-service PR#95) — the root
+  PRD was the stale layer. No code change (lab/portal already correct); only the doc is reconciled.
+  Matching acceptance criterion updated. Resolves the #244 three-way conflict on the shape
+  dimension. Residual flagged for @root: non-column-1 start has mechanism + landed-contract support
+  but no standalone robot reference file (v6 starts at A1).
 
 - 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (Wenlong ruling,
   BIC-meta#239): a valid TLC selection must contain both pure and crude tubes — deliberate
