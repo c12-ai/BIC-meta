@@ -41,6 +41,11 @@ services:
       MQ_PASSWORD: ${MQ_PASSWORD:?set MQ_PASSWORD in the field .env}
       MQ_VHOST: ${MQ_VHOST:-/}
       MQ_EXCHANGE: ${MQ_EXCHANGE:-robot.exchange}
+      # Field/demo default: fast-forward the RE end_evaporation wait to 10s
+      # (the real wait = sum of the RE program's air_pressure durations, which
+      # is realistic but painful for walkthroughs). Raise/remove for production
+      # pacing; the knob is native lab-service config (core/config.py).
+      RE_END_EVAPORATION_DELAY_SECONDS: ${RE_END_EVAPORATION_DELAY_SECONDS:-10}
       MQ_RESULT_QUEUE: ${MQ_RESULT_QUEUE:-results}
       MQ_LOG_QUEUE: ${MQ_LOG_QUEUE:-logs}
       MQ_HEARTBEAT_QUEUE: ${MQ_HEARTBEAT_QUEUE:-hb}
