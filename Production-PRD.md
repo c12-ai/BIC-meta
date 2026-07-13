@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-12
+- Last updated: 2026-07-13
 
 ## Scope
 
@@ -48,6 +48,10 @@ Core scenarios:
 2. **Human-controlled confirmation**
    - The chemist must confirm workflow and execution parameters before the system dispatches execution.
    - The system must not silently execute authority-sensitive actions on behalf of the chemist.
+   - A downstream step stays locked until the upstream step's result is confirmed
+     (accepted) by the chemist. Before that confirmation the downstream step must not
+     enter a queued or executable state; the fail-accept auto-advance is an
+     after-accept behavior and never applies before accept (BIC-meta#223).
 
 3. **Dedicated form collaboration**
    - The copilot collaborates with the chemist through dedicated forms for the current phase/job.
@@ -67,6 +71,13 @@ Core scenarios:
    - The portal must show execution progress across the active workflow.
    - Result evidence should remain visible and traceable after it is produced.
    - The chemist should be able to review final outputs without losing workflow context.
+   - A single step's failure does not roll up to experiment-level failure. A TLC
+     single- or multi-round failure that the chemist fail-accepts (and the workflow
+     then continues into downstream steps) leaves the experiment-level status
+     reflecting workflow progress (in-progress / completed, optionally noting an
+     out-of-spec step), not "failed". Only a genuinely aborted or fully-failed
+     workflow (no accept, or terminated) shows experiment-level failure
+     (BIC-meta#216).
 
 7. **Cross-service consistency**
    - Portal, Agent Service, and Lab Service must agree on workflow/session/task identifiers required to connect planning, execution, and result review.
@@ -142,6 +153,24 @@ Core scenarios:
    - Chemistry identifiers, reagent names, abbreviations, units, SMILES, IDs,
      structured payload keys, and tool/protocol names remain unchanged unless the
      underlying business data explicitly provides a localized name.
+   - User-facing narration must not leak internal model role names: the reactant
+     `role=baseline` internal value must never surface as "基线" / "baseline" in
+     chemist-facing prose; use the business term (主反应物 / main reactant). Audit
+     the narration context/prompt source rather than string-patching the output
+     (BIC-meta#255).
+   - User-facing narration must not expose internal 0-based step/job indices. A
+     completion or summary narration lists stage names (TLC, 过柱, 组分收集, 旋转蒸发)
+     with no "步骤 n" / "step n" annotation. Result-surface stage numbering
+     (TLC=1/CC=2/FP=3, 1-based) is a deliberate product design and is unaffected
+     (BIC-meta#227).
+   - User-facing narration and form section titles must not expose backend schema
+     field names (e.g. `sample_quantity`, `temperature_c`, `air_pressure[].pressure_mbar`).
+     The narrator context must carry business/display labels, not raw schema keys
+     (BIC-meta#240, BIC-meta#226).
+   - User-facing numeric values must be deterministically formatted before they reach
+     narration; raw full-precision floats (e.g. an unrounded Rf) must never render in
+     chemist-facing prose. The formatting is a single deterministic source applied to
+     every surface that shows the value (BIC-meta#240).
 
 12. **Agent message feedback**
    - The portal must allow the chemist to provide positive or negative feedback on
@@ -356,8 +385,9 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
 
 9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05)
    - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box and one row, with
-     at least one pure tube and one crude tube and every pure-tube column left of every crude-tube
-     column. Columns need not be contiguous and need not start at column 1.
+     at least one pure tube and one crude tube. Columns need not be contiguous and need not start
+     at column 1, and pure/crude columns may appear in any order (the pure-left/crude-right
+     ordering constraint was retired 2026-07-11, BIC-meta#239).
    - The external interaction document's `1 or 2` quantity (and one-location demo note) is stale
      and must be corrected at source; no 1-tube dispatch support is planned.
 
@@ -408,6 +438,12 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       defaults to 500 ml. Multi-flask is supported by the model; operationally a single flask
       is configured until the robot team confirms multi-flask capability (BIC-lab-service
       issue #81).
+    - **Well-id normalization.** The upstream CC result addresses tubes in rack-style
+      notation (A1–A8 etc.), and that is the authoritative display form the chemist and
+      Mind see. FP container pre-fill and `update_fp_containers` validation must treat
+      rack-style well ids as valid and normalize between the rack-style display id and
+      the integer physical tube number (`collect_config` prefix, 1..N serpentine grid).
+      A rack-style id must never be rejected as a format error (BIC-meta#275).
     - **Result rules.** The FP result is a container → tube mapping table with peak
       classification (主峰 / 边缘峰 / 杂质 / 混合). Volume math: 1 tube = 15 ml (5 tubes
       collected = 75 ml, 3 discarded = 45 ml); the result shows collected vs discarded totals
@@ -542,8 +578,8 @@ For the TLC Lab Logistic panel:
 - The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
 - TLC selection and dispatch use 2–4 tubes in ONE shelf sample-tube box and one row, including at
-  least one pure and one crude tube, with pure tubes left of crude tubes; columns need not be
-  contiguous or start at column 1.
+  least one pure and one crude tube; columns need not be contiguous or start at column 1, and
+  pure/crude columns may appear in any order (ordering constraint retired 2026-07-11, BIC-meta#239).
 - A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
@@ -687,6 +723,22 @@ For the TLC Lab Logistic panel:
   report) is not stood up yet. Until it exists and is configured, ELN reports render
   with FW/moles omitted (the designed degrade). Tracked in BIC-agent-service issue #54.
 
+- Silica-cartridge consumable page ↔ robot consumption fidelity (BIC-lab-service issue
+  #128, traced 2026-07-13). The consumable / material-prep page presents silica as
+  managed inventory, but for silica — a non-specific / robot auto-pick material — the
+  page location neither steers which cartridge the robot picks nor tracks which one it
+  consumed. Dispatch sends the robot no silica identity (`SetupCartridges*` carries only
+  the sample cartridge), and the robot's silica update carries no location, so Lab
+  Service cannot reconcile a specific silica `consume` row after use. This is invisible
+  with one seeded silica cartridge (only one row can flip to `used`) and surfaces the
+  moment a second is added. Readiness still counts silica by spec correctly. Resolution
+  is a service ↔ robot (Mars) contract decision — either make silica location-identified
+  end to end (Option A: send the silica's starting location at dispatch, robot reports
+  against it, Lab reconciles by location) or accept a count-only gate and keep seeded
+  silica at 1 (Option B). Non-blocking for the demo (single pre-staged silica). Contrast:
+  the specific/manual sample cartridge is correctly location-connected end to end.
+  Related: issue #121 (CC silica spec / demo-40g alignment).
+
 ## Related Project PRDs
 
 - Agent Service Project PRD: `BIC-agent-service/docs/project-prd.md`
@@ -695,7 +747,40 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-12 (latest): Rule 13 revised to PER-ROUND tank allocation (robot-refined TLC
+- 2026-07-13 (latest): Added an open question on silica-cartridge consumable-page ↔ robot
+  consumption fidelity (BIC-lab-service issue #128). Silica is a non-specific auto-pick
+  material that is location-blind end to end — the page location neither steers nor tracks
+  the robot's silica pick, so the page cannot faithfully reflect silica consumption; the gap
+  is invisible with one seeded cartridge and surfaces when a second is added. Recorded under
+  Dependencies / Open Questions as a service ↔ robot (Mars) contract decision (location-
+  identified silica vs. count-only gate); non-blocking for the single-silica demo. No new
+  requirement or acceptance criterion — the resolution is pending the cross-team decision.
+
+- 2026-07-13: Narration-governance and status-semantics rulings folded into the
+  PRD from the 2026-07-11 bench findings (all "已实现待复测"). req 11 gains four user-facing
+  narration rules: no internal role name "基线/baseline" (use 主反应物, BIC-meta#255); no
+  internal 0-based "步骤 n" index in narration, list stage names instead — result-surface
+  1-based numbering unaffected (BIC-meta#227); no backend schema field names in narration or
+  form titles (`sample_quantity`, `temperature_c`, BIC-meta#240/#226); deterministic numeric
+  formatting before narration, no raw full-precision floats like an unrounded Rf
+  (BIC-meta#240). req 2 gains a downstream-lock rule: a downstream step stays locked until the
+  upstream result is accepted; fail-accept auto-advance is after-accept only (BIC-meta#223).
+  req 6 gains a status-rollup rule: a single step's (fail-accepted) failure does not roll up to
+  experiment-level failure (BIC-meta#216). rule 11 (FP) gains a well-id normalization rule:
+  rack-style ids (A1–A8) are valid and normalized against the integer tube number, never
+  rejected as a format error (BIC-meta#275). These are product rulings; the matching
+  implementation bugs (#229 ELN TLC-figure collection, #268 placeholder i18n, #237/#239/#197
+  material-validation parity) are code fixes against already-stated rules, not new PRD text.
+
+- 2026-07-13: Rule 9 ordering constraint retirement (2026-07-11 B2 ruling, BIC-meta#239)
+  applied to the body: the pure-left/crude-right column-order requirement is removed from the
+  rule 9 dispatch contract and its acceptance criterion — the Change Log had recorded the
+  retirement but the rule text and criterion still hard-coded it. The pure+crude pairing
+  requirement is retained. Also: added the missing Change Log entry for the "Right-panel
+  consistency across jobs (revised 2026-07-10)" body revision (same physical projection per
+  job; item action changes only editability), which had no prior Change Log record.
+
+- 2026-07-12: Rule 13 revised to PER-ROUND tank allocation (robot-refined TLC
   choreography, 4-file op set adopted lab-side): each round's ratio binds its own tank, a
   retry re-binds to a matching prefilled tank (demo PASS: 5:1 → tank A, then 2:1 → tank B),
   and observation follows the latest round's tank. Demo seed now carries TWO contents-bearing
@@ -754,11 +839,6 @@ For the TLC Lab Logistic panel:
   and direct cell-click models are retired. Added the cross-job add-item chrome UI requirement,
   updated matching acceptance criteria, and added rule 12's staged-restore note.
 
-- 2026-07-10: Added rule 12 (assignment-time persistence of manual lab-logistics
-  selections): the Agent Service durably persists the experiment params draft's
-  lab-logistics section per assignment; reload/restart before dispatch restores the
-  selection reconciled against live lab inventory; readiness stays ephemeral. Matching
-  acceptance criteria added. Task 07-10-persist-lab-logistics-selection.
 - 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
@@ -783,10 +863,6 @@ For the TLC Lab Logistic panel:
   with BIC-meta#239. The shape-rule drift (root PRD contiguous-from-col-1 vs labrun v5 relaxed)
   is tracked separately in BIC-meta#244.
 
-- 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
-  download entry until the final result is confirmed instead of showing an
-  unclickable hint or disabled button before the report is ready.
-
 - 2026-07-11 (late): Requirement 10 degrade rendering refined (Wenlong ruling): unobtainable
   report fields switch from silent omission to explicit placeholders ("—"/"未提供"/
   "not reported") — real value or visible placeholder, never fabricated, never silently
@@ -801,6 +877,16 @@ For the TLC Lab Logistic panel:
   on portal PR#46 (restoring #188 CC semantics in the same pass); main's destructive
   deselect gets an interim hotfix.
 
+- 2026-07-10: Added rule 12 (assignment-time persistence of manual lab-logistics
+  selections): the Agent Service durably persists the experiment params draft's
+  lab-logistics section per assignment; reload/restart before dispatch restores the
+  selection reconciled against live lab inventory; readiness stays ephemeral. Matching
+  acceptance criteria added. Task 07-10-persist-lab-logistics-selection.
+
+- 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
+  download entry until the final result is confirmed instead of showing an
+  unclickable hint or disabled button before the report is ready.
+
 - 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
   index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
   contract and acceptance criteria reworded; the referenced-list-parallel construction is
@@ -812,14 +898,14 @@ For the TLC Lab Logistic panel:
   advisory pre-fill, not an assignment gate. Matching acceptance criterion updated.
   Portal change tracked in BIC-meta#176.
 
-- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
-  is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
-  entries left as written.
-
 - 2026-07-10: Revised TLC sample-tube assignment to the experiment-specific add-and-bind flow,
   retained read-only sample-tube stock in Consumable Maintenance, added the single type selector +
   Add interaction and item type badges, and reconciled the non-contiguous purity-order dispatch
   contract.
+
+- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
+  is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
+  entries left as written.
 
 - 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
   round-bottom flask row removed — it moved to FP's `flasks` task parameter with
@@ -852,26 +938,37 @@ For the TLC Lab Logistic panel:
   math with RE basis auto-fill), the FP Parameter Design panel UI requirements, matching
   acceptance criteria, and the #81 multi-flask open question; closed rule 10's FP deferral
   (RE's remains). FP is implemented across Agent Service and Portal.
+
 - 2026-07-07: Added agent message feedback product requirements and acceptance criteria.
+
 - 2026-07-05: Added rule 10 (per-experiment task material sets from the reviewed 配置表 清单) and
   the right-panel selection-vs-maintenance consistency requirement; flagged the missing
   solvent-group readiness tracking as an open question.
+
 - 2026-07-05: Consistency pass after implementation — config source scope excludes robot-internal
   parking slots; the 配置表 follow-up no longer asks for a bench-box row.
+
 - 2026-07-05: Added requirement 8 (AI-engine backed intelligence): ChemEngine (Algo
   Team) as the authority for parameter recommendation / result analysis, presigned-URL
   image transfer with dual AWS-S3/MinIO store support, Mars (Robot Team) ownership of RE
   realtime analysis, and matching acceptance criteria. Backend transport behavior
   (mock/real switch) is refined in the Agent Service Project PRD.
+
 - 2026-07-05: Revised rule 7 per the robot protocol (mars_doc tlc-api-reference): the chemist
   maintains AND selects sample tubes on the supply shelf; the robot carries the 2ml/50ml/tip
   boxes shelf→bench itself with coordinates resolved from inventory placement; bench = robot
   parking. Acceptance criteria updated to match.
+
 - 2026-07-05: Closed the tube-quantity (2–4 confirmed) and assignment-semantics
   (maintain-then-select) open questions; added the TLC shelf-stock / bench-dispatch-box inventory
   model, two-tier specificity terminology, and matching acceptance criteria.
+
 - 2026-07-05: Added material preparation/consumable maintenance separation, task material card responsibilities, auto-pick confirmation rules, and open questions from the Feishu interaction document.
+
 - 2026-07-05: Added TLC physical inventory integrity rules for location/containment validity, tip boxes, waste-tip bins, developing tanks, and removal of invalid readiness placeholders.
+
 - 2026-07-05: Expanded generic consumable and experiment-specific lab item maintenance rules.
+
 - 2026-07-05: Added core experiment concepts, TLC execution flow, item management rules, and TLC Lab Logistic UI requirements.
+
 - 2026-07-05: Reframed this file as the business Production PRD and moved PRD-governance guidance to the `prd` skill.
