@@ -140,6 +140,242 @@ def js_test_body(content: str, start: int) -> str:
     return content[body_start:body_end]
 
 
+def safe_static_path(
+    node: ast.AST,
+    test_path: Path,
+    path_values: dict[str, Path],
+) -> Path | None:
+    """Resolve a deliberately small subset of local Path expressions."""
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return test_path
+        return path_values.get(node.id)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return Path(node.value)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left = safe_static_path(node.left, test_path, path_values)
+        if left is None or not isinstance(node.right, ast.Constant) or not isinstance(node.right.value, str):
+            return None
+        return left / node.right.value
+    if isinstance(node, ast.Attribute):
+        base = safe_static_path(node.value, test_path, path_values)
+        if base is not None and node.attr == "parent":
+            return base.parent
+        return None
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute):
+        base = safe_static_path(node.value.value, test_path, path_values)
+        index = node.slice.value if isinstance(node.slice, ast.Constant) else None
+        if base is not None and node.value.attr == "parents" and isinstance(index, int) and index >= 0:
+            try:
+                return base.parents[index]
+            except IndexError:
+                return None
+    if isinstance(node, ast.Call):
+        called = dotted_name(node.func)
+        if called in {"Path", "pathlib.Path"} and len(node.args) == 1:
+            return safe_static_path(node.args[0], test_path, path_values)
+        if called == "str" and len(node.args) == 1:
+            return safe_static_path(node.args[0], test_path, path_values)
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {"resolve", "absolute"} and not node.args:
+            base = safe_static_path(node.func.value, test_path, path_values)
+            return base.resolve() if base is not None else None
+    return None
+
+
+def module_static_paths(tree: ast.Module, test_path: Path) -> dict[str, Path]:
+    values: dict[str, Path] = {}
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+            target, value = statement.targets[0], statement.value
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            target, value = statement.target, statement.value
+        if target is None or value is None:
+            continue
+        resolved = safe_static_path(value, test_path, values)
+        if resolved is not None:
+            if not resolved.is_absolute():
+                resolved = (test_path.parent / resolved).resolve()
+            values[target.id] = resolved
+    return values
+
+
+def dynamic_module_paths(
+    tree: ast.Module,
+    test_path: Path,
+    path_values: dict[str, Path],
+) -> dict[str, Path]:
+    specs: dict[str, Path] = {}
+    modules: dict[str, Path] = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name) or not isinstance(statement.value, ast.Call):
+            continue
+        called = dotted_name(statement.value.func)
+        if called.endswith("spec_from_file_location") and len(statement.value.args) >= 2:
+            resolved = safe_static_path(statement.value.args[1], test_path, path_values)
+            if resolved is not None:
+                specs[target.id] = resolved.resolve()
+        elif called.endswith("module_from_spec") and statement.value.args:
+            spec_arg = statement.value.args[0]
+            if isinstance(spec_arg, ast.Name) and spec_arg.id in specs:
+                modules[target.id] = specs[spec_arg.id]
+    return modules
+
+
+def static_argument(node: ast.AST, bindings: dict[str, str]) -> str | dict[str, str] | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool)):
+        return str(node.value)
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id, {"parameter": node.id})
+    return None
+
+
+class FunctionStaticFacts(ast.NodeVisitor):
+    """Collect calls from one function body without descending into nested defs."""
+
+    def __init__(
+        self,
+        test_path: Path,
+        path_values: dict[str, Path],
+        module_paths: dict[str, Path],
+        known_helpers: set[str],
+    ) -> None:
+        self.test_path = test_path
+        self.path_values = path_values
+        self.module_paths = module_paths
+        self.known_helpers = known_helpers
+        self.targets: list[dict[str, Any]] = []
+        self.helpers: list[dict[str, Any]] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        return
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        return
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            module_path = self.module_paths.get(node.func.value.id)
+            if module_path is not None:
+                self.targets.append({
+                    "path": str(module_path),
+                    "symbols": [node.func.attr],
+                    "argv": [],
+                    "source": "dynamic-module",
+                })
+
+        called = dotted_name(node.func)
+        if called == "subprocess.run" and node.args and isinstance(node.args[0], (ast.List, ast.Tuple)):
+            command = list(node.args[0].elts)
+            for index, item in enumerate(command):
+                if isinstance(item, ast.Starred):
+                    continue
+                target = safe_static_path(item, self.test_path, self.path_values)
+                if target is None or target.suffix.lower() != ".py":
+                    continue
+                if not target.is_absolute():
+                    target = (self.test_path.parent / target).resolve()
+                argv = [
+                    value
+                    for value in (
+                        static_argument(arg, {})
+                        for arg in command[index + 1:]
+                        if not isinstance(arg, ast.Starred)
+                    )
+                    if value is not None
+                ]
+                self.targets.append({
+                    "path": str(target.resolve()),
+                    "symbols": [],
+                    "argv": argv,
+                    "source": "subprocess-entrypoint",
+                })
+                break
+
+        helper_name = ""
+        if isinstance(node.func, ast.Name):
+            helper_name = node.func.id
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in {"self", "cls"}
+        ):
+            helper_name = node.func.attr
+        if helper_name in self.known_helpers:
+            self.helpers.append({
+                "name": helper_name,
+                "args": [static_argument(arg, {}) for arg in node.args],
+            })
+        self.generic_visit(node)
+
+
+def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[dict[str, Any]]]:
+    path_values = module_static_paths(tree, test_path)
+    module_paths = dynamic_module_paths(tree, test_path, path_values)
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    summaries: dict[str, dict[str, Any]] = {}
+    for name, node in functions.items():
+        visitor = FunctionStaticFacts(test_path, path_values, module_paths, set(functions))
+        for statement in node.body:
+            visitor.visit(statement)
+        parameters = [arg.arg for arg in node.args.args if arg.arg not in {"self", "cls"}]
+        summaries[name] = {
+            "parameters": parameters,
+            "targets": visitor.targets,
+            "helpers": visitor.helpers,
+        }
+
+    def resolve(
+        name: str,
+        bindings: dict[str, str],
+        stack: tuple[str, ...] = (),
+    ) -> list[dict[str, Any]]:
+        if name in stack or name not in summaries:
+            return []
+        summary = summaries[name]
+        resolved: list[dict[str, Any]] = []
+        for target in summary["targets"]:
+            argv: list[str] = []
+            for value in target.get("argv", []):
+                if isinstance(value, dict) and value.get("parameter"):
+                    bound = bindings.get(value["parameter"])
+                    if bound is not None:
+                        argv.append(bound)
+                elif isinstance(value, str):
+                    argv.append(value)
+            resolved.append({**target, "argv": argv})
+        for helper in summary["helpers"]:
+            callee = summaries[helper["name"]]
+            callee_bindings: dict[str, str] = {}
+            for parameter, value in zip(callee["parameters"], helper["args"]):
+                if isinstance(value, str):
+                    callee_bindings[parameter] = value
+                elif isinstance(value, dict) and value.get("parameter") in bindings:
+                    callee_bindings[parameter] = bindings[value["parameter"]]
+            resolved.extend(resolve(helper["name"], callee_bindings, (*stack, name)))
+        unique: dict[tuple[str, tuple[str, ...], tuple[str, ...], str], dict[str, Any]] = {}
+        for item in resolved:
+            key = (
+                item["path"], tuple(item.get("symbols", [])),
+                tuple(item.get("argv", [])), item.get("source", ""),
+            )
+            unique[key] = item
+        return list(unique.values())
+
+    return {name: resolve(name, {}) for name in functions}
+
+
 def parse_python_test(path: Path) -> dict[str, Any]:
     content = path.read_text(encoding="utf-8", errors="ignore")
     try:
@@ -149,6 +385,7 @@ def parse_python_test(path: Path) -> dict[str, Any]:
             "imports": [], "referenced_identifiers": [], "test_names": [],
             "scenario_names": [], "assertions": [], "disabled_tests": [],
             "test_cases": [], "has_active_test_with_assertion": False,
+            "target_calls": [],
             "parse_warning": "python syntax could not be parsed",
         }
 
@@ -172,6 +409,7 @@ def parse_python_test(path: Path) -> dict[str, Any]:
         elif isinstance(node, ast.Attribute):
             identifiers.add(node.attr)
 
+    targets_by_function = function_target_calls(tree, path)
     test_cases: list[dict[str, Any]] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
@@ -205,6 +443,7 @@ def parse_python_test(path: Path) -> dict[str, Any]:
             "assertions": assertions,
             "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
+            "target_calls": targets_by_function.get(node.name, []),
         })
 
     test_names = sorted({case["name"] for case in test_cases})
@@ -218,6 +457,9 @@ def parse_python_test(path: Path) -> dict[str, Any]:
         "assertions": assertions,
         "disabled_tests": disabled_tests,
         "test_cases": test_cases,
+        "target_calls": [
+            target for case in test_cases for target in case.get("target_calls", [])
+        ],
         "has_active_test_with_assertion": any(
             not case["disabled"] and bool(case["assertions"])
             for case in test_cases

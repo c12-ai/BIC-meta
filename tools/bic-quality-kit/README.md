@@ -9,6 +9,8 @@ It is intentionally read-only:
 - It combines explicit BIC module rules with repository-relative structural modules.
 - It inspects concrete tests and relates them to changed source objects by
   repository and functional module.
+- It recognizes local Python modules loaded through `importlib` and asserted
+  test helpers that launch a local Python entrypoint, without executing either.
 - After the Diff identifies affected repositories, it scans their open GitHub
   Issues, preserves strong PR/commit/branch links, and generates an
   evidence-backed pre-test Risk Matrix from Issue, Diff, contract-boundary,

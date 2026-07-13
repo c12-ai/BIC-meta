@@ -114,7 +114,11 @@ If the user asks to execute tests, state that this skill only provides read-only
    the changed files.
 5. Use discovered concrete test files first. Read imports, referenced objects,
    scenario names, assertions, and disabled state without importing project
-   code. Treat `config/test-inventory.yaml` as an optional semantic relation,
+   code. Statically resolve local Python modules loaded through `importlib` and
+   local Python entrypoints reached through asserted `subprocess.run` helpers;
+   follow only the selected command branch and its local call graph. Never
+   evaluate path expressions, command strings, or analyzed code. Treat
+   `config/test-inventory.yaml` as an optional semantic relation,
    mainly for E2E and cross-repository flows. Module identity is
    `(repo, module_scope)`: `relates_modules` applies only to the entry's own
    repository, while `relates_repository_modules` is the only allowed explicit

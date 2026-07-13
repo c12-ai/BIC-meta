@@ -74,6 +74,14 @@ repository or test directory is added.
   references, safe one-hop or explicitly configured relations, and weaker
   scenario/path candidates must remain distinguishable in raw analysis and the
   default brief without confidence scores.
+- Recognize Python tests that load a local module through
+  `importlib.util.spec_from_file_location` and tests that reach a local Python
+  entrypoint through an asserted helper wrapping `subprocess.run`. Preserve the
+  exact target path and directly called dynamic-module objects without executing
+  any analyzed code or command string.
+- Treat imports made by a proven local entrypoint as safe one-hop relations, but
+  do not claim object-level coverage unless the object call or static source
+  reference is concrete.
 - Separate relation facts from the need to add tests. A changed object with no
   object-specific test relation needs a new test. Disabled, assertion-free, or
   object-specific filename candidates need strengthening. Active direct,
@@ -140,6 +148,12 @@ repository or test directory is added.
 - [x] Every affected `(repo, module_scope)` reports changed files/objects,
       directly or indirectly related tests, possible candidates, and concrete
       missing-test guidance.
+- [x] Dynamic `importlib` calls establish exact local file/object relations, and
+      asserted test helpers wrapping `subprocess.run` establish their local
+      entrypoint relation without executing the target.
+- [x] A proven local entrypoint can establish safe one-hop relations to its
+      statically imported changed modules, while assertion-free or disabled
+      cases cannot clear a missing-test gap.
 - [x] Add-test guidance distinguishes tests to add, tests to strengthen, and
       modules with no obvious static gap without emitting risk, confidence,
       priority, or evidence labels.

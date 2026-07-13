@@ -142,6 +142,16 @@ symbol references first, then safe one-hop or explicit relations, then
 scenario/path candidates. Filename or directory similarity alone never proves
 that a changed behavior has a test.
 
+Python test parsing also records two bounded static facts. First, it resolves
+simple local `Path(__file__)` expressions used by
+`importlib.util.spec_from_file_location`, then associates calls on the resulting
+module alias with the exact target file and object. Second, it follows local
+test-helper calls to a `subprocess.run` argv list and records only local `.py`
+targets. These expressions and command strings are parsed as AST data and are
+never evaluated or executed. A proven entrypoint may contribute safe one-hop
+relations through its static imports; an active assertion in the originating
+test case is still required to clear a gap.
+
 Relation facts and add-test guidance are separate. Each affected repository and
 module retains its changed files and objects plus directly related tests,
 indirectly related tests, and possible candidates. Missing active assertions

@@ -80,6 +80,11 @@ and root/unusual files remain visible.
   importing project code, retaining a file-level fallback.
 - Inspect concrete test files for imports, references, scenario names,
   assertions, and disabled state.
+- Parse simple local `Path(__file__)` constants, dynamic `importlib` aliases,
+  and local helper calls that wrap `subprocess.run`; attach exact target/object
+  facts to the originating test case without executing analyzed content.
+- Use proven local Python entrypoints as safe one-hop import sources while
+  retaining assertion and object-specific evidence requirements.
 - Merge explicit repository-qualified inventory relations with discovered
   assets; reserve explicit cross-repository targets for deliberate E2E flows.
 - Analyze direct, safe one-hop/explicit, and possible scenario relationships per
@@ -97,7 +102,9 @@ imports/references, assertions, disabled tests, unrelated same-name files,
 frontend tests, empty directories, explicit cross-repository inventory, and
 repository isolation. Regression fixtures must also prove that test-named
 implementation modules are not test assets and documentation-only changes do
-not create missing-test guidance.
+not create missing-test guidance. Dynamic-import and subprocess-helper fixtures
+must prove exact target mapping, one-hop entrypoint imports, assertion gating,
+and that a target which would write a marker is never executed.
 
 ## 4. Skill and Documentation
 
@@ -122,6 +129,11 @@ Controlled 62-Issue benchmark against commit `68be270`: final assessment JSON
 decreased from 5,767,436 bytes to 179,034 bytes, and three-run median wall time
 decreased from 4.58 seconds to 2.97 seconds. Both versions made 12 fixture `gh`
 calls; the optimized assessment still hydrated all 10 shortlisted candidates.
+
+Dynamic-test-relation forward check on the current worktree: the fixed review
+prompt completed in 4.88 seconds. Missing-test guidance decreased from the prior
+65 add plus 80 strengthen items to 22 add plus 0 strengthen items, while 139
+changed objects gained active direct or safe-indirect assertion evidence.
 
 - Run syntax/config validation and the temporary behavior fixture suite.
 - Run the full `verify-install.sh` chain after installation.

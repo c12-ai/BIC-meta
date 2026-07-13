@@ -7,6 +7,7 @@ import json
 import importlib.util
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -22,11 +23,27 @@ SKILL_FILE = KIT_DIR / "skill/bic-quality-guan-ping-ce/SKILL.md"
 OPENAI_YAML = KIT_DIR / "skill/bic-quality-guan-ping-ce/agents/openai.yaml"
 DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables.md"
 ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
+TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
+TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
+
+SCRIPTS_DIR = str(ANALYZER.parent)
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 ISSUE_SPEC = importlib.util.spec_from_file_location("bic_quality_issue_context", ISSUE_CONTEXT)
 assert ISSUE_SPEC and ISSUE_SPEC.loader
 ISSUE_MODULE = importlib.util.module_from_spec(ISSUE_SPEC)
 ISSUE_SPEC.loader.exec_module(ISSUE_MODULE)
+
+TEST_ASSETS_SPEC = importlib.util.spec_from_file_location("bic_quality_test_assets", TEST_ASSETS)
+assert TEST_ASSETS_SPEC and TEST_ASSETS_SPEC.loader
+TEST_ASSETS_MODULE = importlib.util.module_from_spec(TEST_ASSETS_SPEC)
+TEST_ASSETS_SPEC.loader.exec_module(TEST_ASSETS_MODULE)
+
+TEST_RELATIONS_SPEC = importlib.util.spec_from_file_location("bic_quality_test_relations", TEST_RELATIONS)
+assert TEST_RELATIONS_SPEC and TEST_RELATIONS_SPEC.loader
+TEST_RELATIONS_MODULE = importlib.util.module_from_spec(TEST_RELATIONS_SPEC)
+TEST_RELATIONS_SPEC.loader.exec_module(TEST_RELATIONS_MODULE)
 
 
 def run(command: list[str], cwd: Path) -> str:
@@ -1132,6 +1149,235 @@ raise SystemExit(2)
         self.assertEqual(scan["shortlisted_count"], 10)
         self.assertEqual(scan["hydration_attempted_count"], 10)
         self.assertEqual(scan["hydration_succeeded_count"], 10)
+
+    def test_dynamic_import_and_helper_entrypoint_are_parsed_without_execution(self) -> None:
+        fixture = Path(self.temp.name) / "dynamic-parser"
+        target = fixture / "target.py"
+        entrypoint = fixture / "entrypoint.py"
+        marker = fixture / "executed.txt"
+        test_file = fixture / "tests/test_dynamic.py"
+        write(
+            target,
+            "def helper_behavior():\n    return 'ok'\n\n"
+            "def changed_behavior():\n    return helper_behavior()\n\n"
+            "def unrelated_behavior():\n    return 'unrelated'\n",
+        )
+        write(
+            entrypoint,
+            "from dependency import dependent_behavior\n"
+            f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\n",
+        )
+        write(fixture / "dependency.py", "def dependent_behavior():\n    return 'dependency'\n")
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import importlib.util\n"
+            "import subprocess\n"
+            "ROOT = Path(__file__).resolve().parents[1]\n"
+            "TARGET = ROOT / 'target.py'\n"
+            "ENTRYPOINT = ROOT / 'entrypoint.py'\n"
+            "SPEC = importlib.util.spec_from_file_location('target_fixture', TARGET)\n"
+            "MODULE = importlib.util.module_from_spec(SPEC)\n"
+            "SPEC.loader.exec_module(MODULE)\n"
+            "def run_entrypoint(command):\n"
+            "    return subprocess.run(['python3', str(ENTRYPOINT), command])\n"
+            "def test_dynamic_behavior():\n"
+            "    result = MODULE.changed_behavior()\n"
+            "    run_entrypoint('collect')\n"
+            "    assert result == 'ok'\n",
+        )
+
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        case = facts["test_cases"][0]
+        calls = {
+            (item["path"], tuple(item["symbols"]), tuple(item.get("argv", [])))
+            for item in case["target_calls"]
+        }
+        self.assertIn((str(target.resolve()), ("changed_behavior",), ()), calls)
+        self.assertIn((str(entrypoint.resolve()), (), ("collect",)), calls)
+        self.assertFalse(marker.exists(), "static analysis must not execute the discovered entrypoint")
+
+    def test_dynamic_relations_are_exact_and_entrypoint_imports_are_one_hop(self) -> None:
+        workspace = Path(self.temp.name) / "dynamic-relations"
+        target = workspace / "target.py"
+        entrypoint = workspace / "entrypoint.py"
+        dependency = workspace / "dependency.py"
+        test_file = workspace / "tests/test_dynamic.py"
+        write(
+            target,
+            "def helper_behavior():\n    return 'ok'\n\n"
+            "def changed_behavior():\n    return helper_behavior()\n\n"
+            "def unrelated_behavior():\n    return 'unrelated'\n",
+        )
+        write(dependency, "def dependent_behavior():\n    return 'dependency'\n")
+        write(entrypoint, "from dependency import dependent_behavior\n\ndef main():\n    return dependent_behavior()\n")
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import importlib.util\n"
+            "import subprocess\n"
+            "ROOT = Path(__file__).resolve().parents[1]\n"
+            "TARGET = ROOT / 'target.py'\n"
+            "ENTRYPOINT = ROOT / 'entrypoint.py'\n"
+            "SPEC = importlib.util.spec_from_file_location('target_fixture', TARGET)\n"
+            "MODULE = importlib.util.module_from_spec(SPEC)\n"
+            "def run_entrypoint():\n"
+            "    return subprocess.run(['python3', str(ENTRYPOINT)])\n"
+            "def test_dynamic_behavior():\n"
+            "    MODULE.changed_behavior()\n"
+            "    run_entrypoint()\n"
+            "    assert True\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        paths = ["target.py", "entrypoint.py", "dependency.py"]
+        scope = {
+            "changed_files": [
+                {"repo": "BIC-meta", "path": path, "change_types": ["added"]}
+                for path in paths
+            ],
+            "file_mappings": [
+                {"repo": "BIC-meta", "path": path, "mapping": {"module_scope": "meta/tooling"}}
+                for path in paths
+            ],
+        }
+        symbols = [
+            {
+                "path": "target.py",
+                "symbols": [
+                    {"name": "helper_behavior", "kind": "function"},
+                    {"name": "changed_behavior", "kind": "function"},
+                    {"name": "unrelated_behavior", "kind": "function"},
+                ],
+            },
+            {"path": "entrypoint.py", "symbols": [{"name": "main", "kind": "function"}]},
+            {"path": "dependency.py", "symbols": [{"name": "dependent_behavior", "kind": "function"}]},
+        ]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_dynamic.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        result = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )
+        module = result["modules"][0]
+        direct = module["directly_related_tests"][0]
+        indirect = module["indirectly_related_tests"][0]
+        self.assertEqual(set(direct["related_files"]), {"target.py", "entrypoint.py"})
+        self.assertEqual(direct["related_symbols"], ["changed_behavior", "helper_behavior"])
+        self.assertEqual(indirect["related_files"], ["dependency.py"])
+        self.assertEqual(indirect["related_symbols"], ["dependent_behavior"])
+        self.assertTrue(any("changed_behavior" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("helper_behavior" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("dependent_behavior" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("unrelated_behavior" in item for item in module["add_tests"]))
+        self.assertTrue(any("function main" in item for item in module["add_tests"]))
+
+    def test_subprocess_command_maps_only_the_selected_entrypoint_branch(self) -> None:
+        workspace = Path(self.temp.name) / "command-entrypoint"
+        entrypoint = workspace / "entrypoint.py"
+        test_file = workspace / "tests/test_entrypoint.py"
+        write(
+            entrypoint,
+            "import argparse\n\n"
+            "def collect_helper():\n    return 'collected'\n\n"
+            "def collect_context():\n    return collect_helper()\n\n"
+            "def unrelated_command():\n    return 'unrelated'\n\n"
+            "def main():\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('command')\n"
+            "    args = parser.parse_args()\n"
+            "    if args.command == 'collect':\n"
+            "        return collect_context()\n"
+            "    return unrelated_command()\n",
+        )
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import subprocess\n"
+            "ENTRYPOINT = Path(__file__).resolve().parents[1] / 'entrypoint.py'\n"
+            "def run_entrypoint(command):\n"
+            "    return subprocess.run(['python3', str(ENTRYPOINT), command])\n"
+            "def test_collect():\n"
+            "    result = run_entrypoint('collect')\n"
+            "    assert result is not None\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        scope = {
+            "changed_files": [{"repo": "BIC-meta", "path": "entrypoint.py", "change_types": ["added"]}],
+            "file_mappings": [{"repo": "BIC-meta", "path": "entrypoint.py", "mapping": {"module_scope": "meta/tooling"}}],
+        }
+        symbols = [{
+            "path": "entrypoint.py",
+            "symbols": [
+                {"name": "collect_helper", "kind": "function"},
+                {"name": "collect_context", "kind": "function"},
+                {"name": "unrelated_command", "kind": "function"},
+                {"name": "main", "kind": "function"},
+            ],
+        }]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_entrypoint.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        result = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )
+        module = result["modules"][0]
+        direct = module["directly_related_tests"][0]
+        self.assertEqual(
+            set(direct["related_symbols"]),
+            {"main", "collect_context", "collect_helper"},
+        )
+        self.assertTrue(any("collect_context" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("collect_helper" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("unrelated_command" in item for item in module["add_tests"]))
+
+    def test_dynamic_relation_without_assertion_does_not_clear_gap(self) -> None:
+        workspace = Path(self.temp.name) / "dynamic-no-assertion"
+        target = workspace / "target.py"
+        test_file = workspace / "tests/test_dynamic.py"
+        write(target, "def changed_behavior():\n    return 'ok'\n")
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import importlib.util\n"
+            "TARGET = Path(__file__).resolve().parents[1] / 'target.py'\n"
+            "SPEC = importlib.util.spec_from_file_location('target_fixture', TARGET)\n"
+            "MODULE = importlib.util.module_from_spec(SPEC)\n"
+            "def test_dynamic_behavior():\n"
+            "    MODULE.changed_behavior()\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        scope = {
+            "changed_files": [
+                {"repo": "BIC-meta", "path": "target.py", "change_types": ["added"]},
+            ],
+            "file_mappings": [
+                {"repo": "BIC-meta", "path": "target.py", "mapping": {"module_scope": "meta/tooling"}},
+            ],
+        }
+        symbols = [
+            {"path": "target.py", "symbols": [{"name": "changed_behavior", "kind": "function"}]},
+        ]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_dynamic.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        result = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )
+        module = result["modules"][0]
+        self.assertFalse(module["no_obvious_test_gaps"])
+        self.assertTrue(any("changed_behavior" in item for item in module["strengthen_tests"]))
 
     def test_configured_module_relation_is_repository_qualified(self) -> None:
         module = "app/inference"

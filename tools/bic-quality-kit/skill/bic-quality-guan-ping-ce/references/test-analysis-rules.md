@@ -45,7 +45,10 @@ valid test remains a test asset.
 
 ## Correspondence
 
-- Direct: an active test imports or references a changed file or object.
+- Direct: an active test imports or references a changed file or object. For
+  Python, this also includes a local file resolved through
+  `importlib.util.spec_from_file_location` or a local `.py` entrypoint passed to
+  `subprocess.run`, including through a local test helper.
 - Indirect: a test imports a local source entry that imports/references the
   changed object, or an explicit inventory relation links the test to the
   changed module/object.
@@ -55,6 +58,14 @@ valid test remains a test asset.
 Filename or directory similarity alone never establishes coverage. Repository
 names and generic directories such as `src`, `tests`, `stores`, `api`, and
 `services` cannot create a direct relation.
+
+Resolve only a small static subset of `Path(__file__)`, parent, join, and local
+helper expressions. Never evaluate an expression or execute a discovered
+target. When an asserted test invokes a local Python entrypoint with a literal
+command, follow only that command's selected branch and the statically reachable
+local functions/constants. A directly called dynamic-module function may also
+establish relations to its statically reachable local helpers. Do not mark
+unselected command branches or unrelated same-file objects as tested.
 
 ## Add-test guidance
 
