@@ -264,6 +264,13 @@ KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
 KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-bic_local_dev}"
 KC_REALM="${KC_REALM:-bic}"
 KC_CLIENT="${KC_CLIENT:-bic-portal}"
+# bic-agent-service confidential client that up.sh seeds (service account for
+# agent-service -> lab-service machine tokens). Dev-default secret matches the
+# ${BIC_AGENT_SERVICE_CLIENT_SECRET:...} fallback in BIC-infra
+# keycloak/realm-bic.json; production overrides via env.
+KC_SERVICE_CLIENT="${KC_SERVICE_CLIENT:-bic-agent-service}"
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_SERVICE_CLIENT_SECRET="${BIC_AGENT_SERVICE_CLIENT_SECRET:-bic-agent-service-dev-secret}"
 
 # git_sha <dir> -> short sha or "-"
 git_sha() { git -C "$1" rev-parse --short HEAD 2>/dev/null || echo "-"; }
