@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-08
+- Last updated: 2026-07-12
 
 ## Scope
 
@@ -296,15 +296,61 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      never editable there (rule 1 vs rule 2 separation).
    - The product surface must explain that the robot fetches the box from the shelf itself, so
      the chemist never hand-stocks the robot bench.
+   - Workbench chemist surface (refined 2026-07-11): on the TLC workbench the chemist controls
+     only the developing tank, the developing-tank lid, and silica plates; everything else on
+     the workbench (tube boxes, tip boxes, bench parking) is robot territory. Lab Service
+     rejects chemist maintenance writes on workbench tube-box/tip-box slots and no longer
+     presents them as chemist areas. The maintenance UI shows only the tank and silica areas;
+     the lid stays in the lab model read-only and is hidden from the maintenance UI (D8,
+     portal #29 ratified 2026-07-11 — lids are not inventory; they sit on their tanks).
 
-8. **Assignment semantics: explicit item-owned assignment** (revised 2026-07-10)
-   - CC assignment selects an already-maintained sample column and does not create inventory.
+8. **Assignment semantics: explicit item-owned assignment, staged until Confirm** (re-revised
+   2026-07-11: keeps the 07-10 item-card interaction; adopts the #206 staged write timing)
+   - CC assignment is insert-and-assign on an EMPTY cartridge slot (Drake ruling 2026-07-12,
+     restoring the 07-10 v2-prototype contract; supersedes the interim #188 select-existing
+     wording): the chemist adds a sample-cartridge item, arms its Assign Slot action, and
+     chooses one empty slot in the cartridge rack area — the chemist physically places their
+     own sample cartridge there. Occupied slots are inert read-only stock. The lab record is
+     created by the Confirm reconcile (fill-only; see the material-generic bullet below).
    - TLC Material Preparation uses an explicit add-and-bind flow for experiment-specific tubes:
-     the chemist chooses Pure tube or Crude tube, adds a local unassigned item, invokes that item's
-     Assign Slot action, and then chooses one empty cell in an existing supply-shelf 2 ml box.
-   - TLC Add alone performs no inventory or form write and does not arm the physical surface. The
-     cell write occurs only after the item's Assign/Reassign action, and the task assignment uses
-     the real tube ID returned by Lab Service.
+     the chemist picks the type (Pure tube / Crude tube) in the add control, adds a local
+     unassigned item, invokes that item's Assign Slot action, and then chooses one empty cell in
+     an existing supply-shelf 2 ml box.
+   - TLC Add alone performs no inventory or form write and does not arm the physical surface.
+   - An Assign/Reassign choice STAGES the placement (visibly pending on the item and the cell);
+     it performs no Lab Service write. The experiment's params draft is the single staging area:
+     every stage, move, and removal updates the draft's lab-logistics selection and persists it
+     to the Agent Service (rule 12) immediately.
+   - Confirm (Validate Readiness) is the single lab commit point: it reconciles Lab Service to
+     the draft — creates tubes for pending entries (binding the returned real tube IDs into the
+     task assignment), relocates tubes the chemist reassigned (a reassign is a MOVE: the item
+     keeps its identity in the draft AND in the lab — Lab Service performs the relocation as
+     one atomic location update that preserves the tube's ID, decided 2026-07-11), and removes
+     the tubes this trial previously created that are no longer in the draft (tube records are
+     stamped with the trial at creation, so the removal diff can never touch another round's
+     tubes) — and then validates readiness.
+   - The reconcile is executed by the Agent Service on the portal's behalf (decided
+     2026-07-11): Validate Readiness is ONE portal→Agent Service call carrying the current
+     draft; the Agent Service saves it, performs the lab reconcile, refuses any confirm/dispatch
+     while pending placeholder IDs remain, and returns the updated params plus the readiness
+     result. The portal performs no direct lab inventory writes.
+   - The reconcile mechanism is material-generic: every manual/specific material kind declares
+     its assignment executor. Both current kinds are create-and-bind (revised 2026-07-12): TLC
+     tubes — pending entries become trial-stamped lab tube records at reconcile; CC sample
+     cartridge — an empty selected slot is filled with a sample-cartridge record at reconcile
+     (fill-only, idempotent when already occupied, NEVER clears a slot — cartridge records
+     carry no trial stamp, so ghost records from reassignment follow the accepted demo
+     lifecycle, like prior-round tubes). Future kinds (e.g. FP flasks, if they become
+     physical assignable items) join by declaring an executor, without changing the flow. A
+     mid-flush failure surfaces loudly and skips validation. Pending
+     placeholder IDs never reach readiness validation, dispatch, or any lab payload.
+   - Closing Material Preparation performs zero lab writes and KEEPS the staged selection
+     (final ruling 2026-07-11): it stays persisted in the params draft and survives reopen and
+     reload alike (rule 12); the item's Remove action is the undo. This deliberately supersedes
+     the #206 Option A cancel-discards clause (rule 8 (d)) — Wenlong to be notified. No
+     interaction in the panel may delete or fabricate already-maintained shelf stock; the #206
+     root defect (immediate write-through on every click, deselect = hard-delete) stays
+     retired.
    - The general Consumable Maintenance page continues to show experiment-specific sample-tube
      stock read-only; this TLC task flow is not a generic maintenance mode.
 
@@ -369,6 +415,53 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       recommendation basis (volume + solvents/ratio parsed from the solvent system; unknown
       solvents leave the fields empty rather than fabricating).
 
+12. **Assignment-time persistence of manual lab-logistics selections** (decided 2026-07-10)
+    - A manual/specific assignment made in Material Preparation (TLC sample tubes, CC sample
+      column) is durably persisted by the Agent Service when the assignment is made, not only
+      at dispatch confirmation. The experiment's params draft — including its lab-logistics
+      section — is the persistence home, consistent with how agent-proposed parameters are
+      already stored.
+    - Reloading the portal, or restarting the Agent Service, before dispatch confirmation must
+      restore the chemist's manual selection: item count, per-item type (pure/crude for TLC),
+      and assigned physical position. Custom item display names are session-local presentation
+      and may be replaced by deterministic default labels after restore.
+    - The restored selection must be reconciled against live Lab Service inventory: an item
+      whose physical record no longer exists (e.g. after a lab reset) is pruned from the
+      restored selection rather than shown as a ghost.
+    - Readiness confirmation is deliberately NOT persisted: after any reload, Validate
+      Readiness must be re-run before dispatch. Persistence never advances workflow phase;
+      params confirmation remains the only phase-advancing action.
+    - Under rule 8's staged write timing (2026-07-11): a staged placement that was never
+      Confirmed restores as staged. Reconciliation prunes restored items whose lab record no
+      longer exists and un-stages placements whose target cell is no longer empty.
+
+13. **Developing-tank contents and solvent reuse** (decided 2026-07-10/11)
+    - Lab Service may record a developing tank's contents — solvent system components and
+      ratio — on the tank's TLC inventory record (the same properties mechanism as sample-tube
+      purity). A tank without recorded contents behaves as unknown/empty, which stays the
+      default for anything not seeded.
+    - Contents exist only in seed/reset test data for now: there is no chemist declaration
+      surface, and the system does not write contents back after a robot solvent-prep run.
+      Tank contents are never sent to ChemEngine.
+    - At TLC dispatch, tank allocation is tiered: a tank whose recorded contents exactly match
+      the run's target solvent system and ratio is preferred and reused; otherwise a tank with
+      no recorded contents is bound for solvent prep; a contents-bearing tank that does not
+      match is never bound for a prep round (the robot must not dispense into a tank recorded
+      as full). If no eligible tank exists, dispatch fails loudly. Within a tier the leftmost
+      tank (lowest slot position) wins; object identity never decides.
+    - Matching is exact and order-sensitive on both components and ratio — no tolerance band,
+      no chemistry judgment in code. Allocation runs PER ROUND (revised 2026-07-12,
+      robot-refined choreography): each round's ratio binds its own tank — a retry whose ratio
+      exactly matches another prefilled tank re-binds to and reuses THAT tank; a retry matching
+      no tank binds a contents-less tank for full prep; with neither, the round is refused
+      loudly. The between-rounds observation always targets the latest round's tank. (This
+      supersedes the earlier "falls back to full prep in the trial's bound tank" clause.)
+    - A reused tank is used where it stands: the dispatch contains no solvent-prep ops and no
+      tank/lid movement before the develop step. The first-round four-box carry is unchanged
+      (Robot-team agreement 2026-07-11). The fill-skipped op program is a BIC proposal pending
+      the Robot team's op-level verification (`docs/proposals/tlc-following-phases/` on the
+      lab-service proposal branch).
+
 ## UI Interaction Requirements
 
 Right-panel consistency across jobs (revised 2026-07-10):
@@ -379,6 +472,20 @@ Right-panel consistency across jobs (revised 2026-07-10):
 - TLC reuses the supply-shelf sample-tube box projection shown read-only in Consumable Maintenance;
   CC uses its sample-column rack area; FP/RE retain their no-manual-placement surfaces. Material
   Preparation has no separate generic maintenance-mode surface.
+
+Material Preparation add-item consistency across jobs (decided 2026-07-11):
+
+- Every job with manual/specific items uses the same left-side add control: one type drop-down
+  plus one Add button. The drop-down lists the specific-item types addable for the current job —
+  TLC: Pure tube / Crude tube; CC: Sample cartridge.
+- Add creates a local item card only. Each item card shows a localized type badge (pure/crude
+  for TLC) and owns its actions: Assign Slot on an unassigned item, Reassign Slot on an assigned
+  one, and Remove. Clicking Assign/Reassign arms the right panel for exactly that one item;
+  empty cells/slots are inert at all other times.
+- Staged (not yet Confirmed) placements are visually distinct from flushed assignments on both
+  the item card and the right-panel cell (rule 8 write timing).
+- Direct cell-click interaction models (clicking grid cells to select/place without an owning
+  item card) are retired for manual/specific items.
 
 For the FP Parameter Design panel (2026-07-07; revised 2026-07-10):
 
@@ -412,8 +519,19 @@ For the TLC Lab Logistic panel:
 - Generic consumables can be configured through Consumable Maintenance by entering maintenance mode from the upper-right button, clicking slot icons, and exiting edit mode to persist changes.
 - The Material Preparation special-item module is available from Parameter Design and owns the
   experiment-specific Add, Assign/Reassign, and Remove actions required by the current task.
-- A successful TLC cell assignment/removal persists through Lab Service immediately; there is no
-  separate special-item maintenance-mode exit step.
+- TLC cell placements, moves, and removals stage client-side and flush to Lab Service only at
+  Confirm (Validate Readiness); closing the panel before Confirm leaves lab inventory untouched.
+  There is no separate special-item maintenance-mode exit step.
+- Closing Material Preparation before Confirm fires zero Lab Service writes and keeps staged
+  work: reopening or reloading shows it intact (rule 12); item Remove is the undo; a mis-click
+  can never delete existing shelf stock.
+- A Validate Readiness removal only ever deletes tubes stamped with the current trial; another
+  round's tubes can never be removed by the reconcile.
+- Readiness validation, dispatch, and lab payloads never contain pending placeholder tube IDs;
+  the Confirm reconcile replaces them with real Lab Service IDs first.
+- The portal performs no direct Lab Service inventory writes: Validate Readiness is one
+  portal→Agent Service call, the Agent Service executes the reconcile, and it refuses
+  confirm/dispatch while pending placeholder IDs remain in the draft.
 - Dispatch material validation can route the user back to Material Preparation when task material state is incomplete or invalid.
 - Material Preparation task cards separate manual/specific items from robot auto-pick items.
 - Robot auto-pick materials show available stock against capacity and cannot be confirmed when required stock is unavailable.
@@ -430,11 +548,46 @@ For the TLC Lab Logistic panel:
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
   is read-only there.
-- CC task assignment selects existing inventory. TLC Material Preparation is the explicit
-  exception: Add creates only a local typed item, and the item's Assign/Reassign action may create
-  and bind a pure/crude tube in an empty cell of an existing shelf 2 ml box through Lab Service.
+- The TLC Workspace maintenance surface presents only the developing tank and silica plate
+  areas; the tank lid stays read-only in the lab model and hidden in the portal, and Lab
+  Service rejects chemist maintenance writes on workbench tube-box/tip-box slots (rule 7,
+  D8).
+- A developing-tank inventory record can persist contents (solvent system + ratio); records
+  without contents behave as unknown/empty. Seed/reset data mirrors the demo PASS
+  (2026-07-12): BOTH developing tanks carry contents — PE/EA 5:1 (round 1's system) and
+  PE/EA 2:1 (the retry system) — so both demo rounds exercise the reuse branch and the retry
+  re-binds to the second tank; the fresh-prep branch is exercised by tests (no contents-less
+  tank remains in seed).
+- Dispatching TLC with a workbench tank whose recorded contents exactly match the run's
+  target solvent system and ratio binds that tank at its own slot and produces a program
+  with no solvent-prep ops and no tank/lid movement before develop; the first-round
+  four-box carry is unchanged.
+- With no matching tank, a contents-less tank is bound and the full solvent-prep sequence
+  is emitted; a retry round whose ratio differs re-binds per the same tiering — a matching
+  prefilled tank is reused in place, else a contents-less tank takes full prep (per-round
+  allocation, 2026-07-12).
+- When only non-matching contents-bearing tanks exist, dispatch fails loudly rather than
+  dispensing into a tank recorded as full; among same-tier candidates the lowest slot
+  position wins regardless of object id.
+- No portal surface accepts tank-contents input, and no write-back occurs after a robot
+  solvent-prep run (rule 13).
+- Both TLC and CC Material Preparation are insert-and-assign (2026-07-12): Add creates only a
+  local typed item; the item's Assign/Reassign action stages a placement on an EMPTY physical
+  position (TLC: an empty cell of an existing shelf 2 ml box; CC: an empty cartridge-rack
+  slot); occupied positions are inert read-only stock; and the Confirm reconcile creates the
+  lab record (TLC: trial-stamped tube bound by real ID; CC: fill-only sample-cartridge record).
+- The Material Preparation panel exposes no maintenance mode and performs no direct Lab
+  Service write of any kind (2026-07-12; the archived 07-10 v2-prototype acceptance —
+  "the dialog has no maintenance mode" — is restored as the standing contract).
+- The TLC Material Preparation right panel renders the FULL TLC-rack sample-tube-box
+  projection: both shelf layers with every box position, including empty box slots shown as
+  inert placeholders (2026-07-12; a partial present-boxes-only or flattened view is a defect).
 - TLC Material Preparation exposes one type selector (Pure tube / Crude tube) and one Add action;
   pending and assigned items show a visible localized type badge.
+- Every job's manual-item add control follows the same drop-down + Add pattern; the drop-down
+  lists that job's addable specific-item types (TLC: Pure tube / Crude tube; CC: Sample
+  cartridge), and assignment runs through the item card's Assign/Reassign action, not direct
+  cell clicks.
 - Each experiment's Material Preparation card shows exactly the rule-10 material set, with manual
   and auto-pick items separated; readiness quantity gates match the rule-10 counts (TLC sample
   tubes 2–4).
@@ -477,6 +630,12 @@ For the TLC Lab Logistic panel:
 - A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
   molecule) does not block the ELN report download; only the affected enrichment fields
   are placeholdered, and no error surfaces to the chemist for the enrichment miss.
+- A manual assignment made in Material Preparation survives a portal reload and an Agent
+  Service restart that happen before dispatch confirmation: the manual item cards are
+  reconstructed (default labels acceptable) with correct type and position, and their
+  reassign/remove actions still work.
+- A restored selection never contradicts live lab inventory: physically removed items are
+  pruned, and readiness must be re-validated after every reload before dispatch.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
 - Chinese Portal mode covers deterministic UI text, Lab Service-provided display
@@ -536,7 +695,71 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+- 2026-07-12 (latest): Rule 13 revised to PER-ROUND tank allocation (robot-refined TLC
+  choreography, 4-file op set adopted lab-side): each round's ratio binds its own tank, a
+  retry re-binds to a matching prefilled tank (demo PASS: 5:1 → tank A, then 2:1 → tank B),
+  and observation follows the latest round's tank. Demo seed now carries TWO contents-bearing
+  tanks (5:1 + 2:1, Drake ruling) and no contents-less tank; the fresh-prep branch moves to
+  test coverage. Matching acceptance criteria updated. The robot's refined choreography
+  (deferred spot-teardown into cleanup, headless retry rounds, lab-side develop wait before
+  observation) is engineering-spec scope, recorded in the lab-service spec and HANDOVER.
+  Same day (robot slot ruling): the TLC observation stand is a standalone position OUTSIDE the
+  tank-row numbering — tank and silica-plate slot spaces are exactly 1–3; the lab model's
+  off-by-one layout (a phantom 4th slot) is renumbered accordingly (engineering scope).
+
+- 2026-07-12: CC assignment corrected to insert-and-assign on an EMPTY cartridge
+  slot (Drake ruling, restoring the archived 07-10 v2-prototype contract that the #206/#188
+  interim wording had displaced): both manual kinds are now create-and-bind executors in the
+  agent reconcile (CC = fill-only slot record, idempotent, never clears; no trial stamp on
+  cartridges — ghosts follow the demo lifecycle). Also ratified: the Material Preparation
+  panel has NO maintenance mode and performs zero direct lab writes, and the TLC right panel
+  renders the full two-layer TLC-rack sample-tube-box projection including empty box slots.
+  Rule 8 bullets and acceptance criteria updated.
+
+- 2026-07-11: Reconcile ownership moved to the Agent Service (Drake): Validate
+  Readiness is one portal→Agent Service call (draft in the body, save-then-reconcile-then-
+  validate); the portal performs no direct lab inventory writes, and the pending-ID dispatch
+  guard becomes server-side. The mechanism is material-generic via two assignment semantics
+  (select-existing / create-and-bind), covering CC cartridges today and future kinds (FP
+  flasks etc.) without flow changes. Same day: reassignment relocates via a new atomic Lab
+  Service location-update endpoint (tube ID preserved; no delete+recreate), and readiness
+  validation reuses lab's existing preparations-validate route — no new lab validation
+  endpoint. Rule 8 bullets and acceptance criteria extended.
+
+- 2026-07-11: Added rule 13 (developing-tank contents + solvent reuse: seed-only properties,
+  exact order-sensitive match, tiered leftmost-first allocation, fail-loud on full-only tanks,
+  reuse-in-place with no solvent-prep ops, no write-back, never sent to ChemEngine) and the
+  rule-7 workbench chemist-surface refinement (tank/lid/silica only; lid read-only + hidden
+  per D8/portal #29; server rejects workbench tube-box/tip-box writes). Robot-team agreement
+  2026-07-11 recorded (four-box carry unchanged; fill-skipped op program is a BIC proposal
+  pending op-level verification). Matching acceptance criteria added. Task
+  07-10-tlc-rack-tubebox-and-tank-solvent-reuse.
+
+- 2026-07-11 (later): Rule 8 staging model simplified (Drake): the trial params draft is the
+  single staging area — every stage/move/removal persists to the Agent Service draft
+  immediately; Confirm (Validate Readiness) reconciles Lab Service to the draft (create +
+  remove within the current trial's scope) and then validates. Close semantics (Drake final
+  ruling, same day): closing keeps staged work — it stays in the params draft and survives
+  reopen/reload; Remove is the undo (deliberately supersedes #206 Option A rule 8 (d);
+  Wenlong to be notified). The removal diff is trial-stamped: tubes carry their trial in
+  properties at creation, so reconcile removals can never touch another round's tubes.
+  Zero-lab-writes-before-Confirm unchanged. Matching acceptance criteria updated;
+  pending-placeholder-ID guard added.
+
+- 2026-07-11: Rule 8 re-revised after the #206 fix (Wenlong staged-placement ruling + Drake UI
+  ruling): the item-owned add-and-bind interaction (type drop-down + Add, per-item type badge,
+  item-owned Assign Slot / Reassign Slot) is restored as the product interaction for every
+  job's manual items, while adopting #206's staged write timing — Confirm (Validate Readiness)
+  is the sole Lab Service commit point, Cancel discards staged changes with zero lab writes,
+  and direct cell-click models are retired. Added the cross-job add-item chrome UI requirement,
+  updated matching acceptance criteria, and added rule 12's staged-restore note.
+
+- 2026-07-10: Added rule 12 (assignment-time persistence of manual lab-logistics
+  selections): the Agent Service durably persists the experiment params draft's
+  lab-logistics section per assignment; reload/restart before dispatch restores the
+  selection reconciled against live lab inventory; readiness stays ephemeral. Matching
+  acceptance criteria added. Task 07-10-persist-lab-logistics-selection.
+- 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run

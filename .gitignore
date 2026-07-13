@@ -31,5 +31,6 @@ CLAUDE.local.md
 /tech_design/
 /tlc-op-builder/
 
+.trellis/tasks
 /BIC-infra/
 .bic-env
