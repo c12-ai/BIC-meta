@@ -140,18 +140,26 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
 
 ### Ready-to-paste Claude prompt (hand this to a Claude Code session)
 
-> 现场更新部署：BIC V2 跑在 orin（ssh orin，~/bic-v2，方案与 runbook 见
-> BIC-meta PR#231 与 ops/field/README.md）。请为 <REPO 名> 的最新 main 做一次滚动更新：
-> ① gh workflow run docker-build.yml 构建镜像并等绿。portal 的 field 构建必须显式传全三个 URL：
-> gh workflow run docker-build.yml --repo c12-ai/BIC-agent-portal --ref main -f image_variant=field \
->   -f vite_api_base_url=http://192.168.12.150:8800 -f vite_lab_api_base_url=http://192.168.12.150:8192 \
->   -f vite_oidc_authority=http://192.168.12.150:18080/realms/bic
-> （漏传会被 CI 守卫直接打红——localhost 烘焙进 field 镜像会把浏览器送去操作员本机）；
-> ② ssh 到 orin 在 ~/bic-v2 对该服务 pull + up -d 并 health-gate；
-> ③ 只动目标服务，绝不碰共享基建（bic-postgres/redis/minio/rabbitmq）和其它 V2 容器；
-> ④ 若 health 不过：docker logs 留证 → 回滚该服务到上一 tag（compose 里改 IMAGE_TAG
-> 为上一个 sha- tag 再 up -d）→ 报告而不是重试到死。
-> 完成后报：镜像 tag/digest、health 证据、变更前后容器 ID。
+> # 任务：BIC V2 现场（orin）例行更新到各仓 main 最新
+>
+> ## 环境事实
+> - 现场机：orin（ssh 别名 `orin`=LAN / `orin-tail`=tailscale，先测哪个通用哪个），部署目录 ~/bic-v2
+> - 五服务：bic-keycloak(:18080)/bic-chem-service(:8010)/bic-lab-service(:8192)/bic-agent-service(:8800)/bic-agent-portal(:15173)
+> - 镜像 ghcr.io/c12-ai/<repo>，现场已 docker login（~/.config/bic-v2/ghcr.token）
+> - 权威文档：本 README + BIC-meta PR#231 部署台账
+>
+> ## 铁律
+> - 绝不动共享基建（bic-postgres/redis/minio/rabbitmq/phoenix/日志栈）与 bic-sa-*、bic-*-v1
+> - 不跑 lab reset、不删数据；.env 只按 .env.example 新增 key 补值，绝不回显秘密
+> - 每步有证据（sha/digest/health 码）；失败如实报并停下，不重试到死
+>
+> ## 步骤
+> 1. 盘点：五仓 git fetch 后比较现场运行版本 vs origin/main；PR 合并通知≠进 main（gh pr view --json baseRefName 核对）；纯 CI/docs 变更跳过。
+> 2. 兼容性预检（lab/shared-types 变更时必做）：mock 的 shared-types pin 与新技能 handler 先适配再滚 lab；diff compose 与 .env.example，新增 env knob 先定值。
+> 3. 构建：变更仓 gh workflow run docker-build.yml --ref main 等绿；portal 必须 -f image_variant=field 且带三个显式 URL（api=http://192.168.12.150:8800 / lab=…:8192 / authority=…:18080/realms/bic），漏传会被 CI 守卫打红。
+> 4. 滚更：逐服务 pull + up -d（portal 先改 .env PORTAL_IMAGE_TAG=field-<新sha>），每服务 health-gate（40×2s 内 200）；全栈才用 deploy.sh down && up。
+> 5. 验证：deploy.sh status 全 healthy；BE 滚更后 rabbitmqctl 确认 agent.task.status/results/hb 消费者归位（启动见 lab_task_lost absorbed WARN 属正常自愈）；portal 滚更后断言 bundle 0 处 localhost:18080 且现场 authority 在场；关键修复容器内 grep 符号自证。
+> 6. 报告：旧 sha→新 sha、digest、health 证据、失败项如实；回滚=IMAGE_TAG 固定回上一 sha- tag 再 up -d。
 
 ## Known operational notes (from the 2026-07-11 first deployment)
 
