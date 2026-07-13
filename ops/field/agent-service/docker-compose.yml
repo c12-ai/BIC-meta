@@ -43,9 +43,12 @@ services:
       # for Mind/browsers, and the signature binds the Host header — a URL signed
       # against bic-minio:9000 is unreachable AND 403s if the host is rewritten
       # (hit live 2026-07-11: field TLC recognition failed on exactly this).
+      # Cloud-Mind sites (a1) override endpoint+creds to real AWS S3 so presigned
+      # URLs are public-internet reachable (S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY
+      # in .env; default stays local MinIO).
       S3_ENDPOINT_URL: ${BE_S3_ENDPOINT_URL:-http://${FIELD_HOST:-192.168.12.150}:9000}
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET_NAME: ${BE_S3_BUCKET:-tlc-images}
 
@@ -66,6 +69,15 @@ services:
       # --- Keycloak (issuer must equal browser iss AND be reachable here) ---
       KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://192.168.12.150:18080/realms/bic}
       KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-bic-portal}
+      # Machine identity for outbound lab-service calls (BE #97; lab enforces
+      # JWT since lab #112 — an empty secret means 401s against a current lab).
+      # Same value the Keycloak realm import bakes into the bic-agent-service
+      # client (keycloak/docker-compose.yml).
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-bic-agent-service}
+      KEYCLOAK_CLIENT_SECRET: ${BIC_AGENT_SERVICE_CLIENT_SECRET:?set BIC_AGENT_SERVICE_CLIENT_SECRET in the field .env (init-env generates it)}
+      # Browser-origin allowlist (BE #135 dropped wildcard CORS): the portal's
+      # real origin — field portals call the BE cross-origin with absolute URLs.
+      CORS_ALLOW_ORIGINS: ${BE_CORS_ALLOW_ORIGINS:-http://${FIELD_HOST:-192.168.12.150}:15173}
 
       # --- RabbitMQ (agent side of the robot bus) ---
       MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}

@@ -305,12 +305,15 @@ cmd_init_env() {
     warn "no $src — all shared creds left as placeholders (set V1_ENV_FILE=... or edit $ENV_FILE)"
     missing=$((missing+1))
   fi
-  # V2-new secret: keycloak admin password (generated, on-site only)
+  # V2-new secrets: keycloak admin password + BE service-client secret
+  # (generated, on-site only)
   if command -v openssl >/dev/null 2>&1; then
     set_env_key KEYCLOAK_ADMIN_PASSWORD "$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
     ok "KEYCLOAK_ADMIN_PASSWORD generated on-site"
+    set_env_key BIC_AGENT_SERVICE_CLIENT_SECRET "$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)"
+    ok "BIC_AGENT_SERVICE_CLIENT_SECRET generated on-site"
   else
-    warn "openssl absent — set KEYCLOAK_ADMIN_PASSWORD by hand"; missing=$((missing+1))
+    warn "openssl absent — set KEYCLOAK_ADMIN_PASSWORD and BIC_AGENT_SERVICE_CLIENT_SECRET by hand"; missing=$((missing+1))
   fi
   chmod 600 "$ENV_FILE"
   ok "wrote $ENV_FILE (600)"

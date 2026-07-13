@@ -1,4 +1,7 @@
-# BIC V2 field deployment (orin (192.168.12.150, LAN direct))
+# BIC V2 field deployment (orin 192.168.12.150 · a1 192.168.12.239)
+
+Two sites share this package. The body below is written against **orin** (the
+original site); **a1** differs only by the knobs in the "Site: a1" section.
 
 Self-contained package to deploy the BIC V2 stack (Keycloak · chem · lab · agent ·
 portal) on orin. After transfer, the field action collapses to
@@ -170,6 +173,54 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
   `./deploy.sh down && ./deploy.sh up`.
 - **MIND_HOST is a bare host** (`192.168.12.104`), port goes in `MIND_PORT` (8002);
   BE builds `http://{host}:{port}` itself (config.py `mcp_address`).
+
+## Site: a1 (192.168.12.239) — cloud-Mind / AWS-S3 口径 (2026-07-13)
+
+a1 (`ssh a1`, hostname `standby`, x86_64, runs the standby V1 stack + other
+tenants — layer-craft/artemis/logging are UNTOUCHABLE). Same shared infra +
+`infra-net` topology as orin; the switch window stops only the four V1 app
+containers (`bic-agent-frontend`, `bic-agent-copilot-bff`, `bic-agent-backend`,
+`bic-lab-service`). Differences from orin:
+
+| Knob | orin | a1 |
+|---|---|---|
+| ssh / `FIELD_HOST` | `orin-tail` / 192.168.12.150 | `a1` / 192.168.12.239 |
+| V1 env for init-env | `~/bic/.env` | `V1_ENV_FILE=~/BIC-infra-deploy/.env` — its MQ creds are `RABBITMQ_DEFAULT_USER/PASS`, map to `MQ_USER/MQ_PASSWORD` by hand |
+| Mind / ChemEngine | LAN host (`MIND_HOST` bare, `MIND_PORT`) | cloud: `MIND_HOST=52.83.119.132`, `MIND_PORT=8010` |
+| S3 | local MinIO (defaults) | real AWS S3 — uncomment the cloud-Mind block in `.env.example`; creds on a1 at `~/.config/bic-v2/s3-bic.env` (IAM user `bic-a1-s3`, scoped to the one shared bucket) |
+| LLM | host `:8000` model server | DashScope: `BE_LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`, model `qwen3.7-plus-2026-05-26` |
+| Portal image | `field-<sha>` | `field-a1-<sha>` (build with a1 URLs; tags must not share a prefix across sites — the bundle bakes absolute URLs) |
+| Robot | mock or real | mock only for now; `TLC_DEVELOP_WAIT_SECONDS=30` (restore 180 on a real robot) |
+
+Routine updates: `FIELD_SSH=a1 FIELD_HOST_IP=192.168.12.239 PORTAL_VARIANT=field-a1 ./update.sh`
+
+Why AWS S3: Mind is cloud-side, so presigned image URLs must be public-internet
+reachable — a LAN MinIO presign dies at 52.83.119.132. All four S3 writers (BE,
+lab, chem, mock) share ONE bucket; the services have no key-prefix knob, object
+keys carry UUIDs (collision risk accepted, ruling 2026-07-13).
+
+## Lab-auth flip (lab #112 + BE #97/#135) — BOTH sites, read before rolling
+
+Current mains enforce auth end-to-end: lab validates Bearer JWTs
+(`LAB_AUTH_MODE=enforce`) and the BE calls lab with a service-account token.
+Deploying/rolling to these mains REQUIRES:
+
+1. `BIC_AGENT_SERVICE_CLIENT_SECRET` in the field `.env` (init-env generates it).
+2. The `bic-agent-service` confidential client in the realm. A FRESH realm
+   import (a1) gets it from realm-bic.json automatically. An ALREADY-imported
+   realm (orin) must add it once (realm import is skipped on existing DBs):
+
+   ```bash
+   docker exec bic-keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+     --server http://localhost:8080 --realm master --user admin --password '<KEYCLOAK_ADMIN_PASSWORD>'
+   docker exec bic-keycloak /opt/keycloak/bin/kcadm.sh create clients -r bic \
+     -s clientId=bic-agent-service -s enabled=true -s publicClient=false \
+     -s serviceAccountsEnabled=true -s standardFlowEnabled=false \
+     -s directAccessGrantsEnabled=false -s 'secret=<BIC_AGENT_SERVICE_CLIENT_SECRET>'
+   ```
+
+3. Lab now also needs `KEYCLOAK_ISSUER_URL` + portal-origin CORS — the compose
+   files default both from `FIELD_HOST`, so a correct `.env` needs no new keys.
 
 ## Mock robot (on-demand, mutually exclusive with the real robot)
 
