@@ -36,6 +36,10 @@ acceptance item and a changed module, file, or object. If exactly one candidate
 meets that standard, use it for final Issue alignment. If none or several remain,
 show the candidates and keep the overall result `unassessed`.
 
+Treat `scan-failed` and `partial-scan` as unavailable or incomplete Issue
+evidence, never as proof that no open Issue exists. Keep overall risk
+`unassessed` unless a separately preserved strong reference resolves and aligns.
+
 ## Deterministic floor
 
 `assess-risk-matrix.sh` emits rows for Issue clarity, impact breadth,

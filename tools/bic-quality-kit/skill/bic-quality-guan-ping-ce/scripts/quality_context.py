@@ -526,6 +526,9 @@ def assess_quality(
         payload["context"]["issue_context"],
         load_json_yaml(CONFIG_DIR / "risk-model.yaml"),
     )
+    # The raw inventory is an internal/diagnostic artifact. The Agent-facing
+    # assessment only needs the derived correspondence and risk contracts.
+    payload.pop("test_inventory", None)
     return payload
 
 

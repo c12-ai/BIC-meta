@@ -20,6 +20,7 @@ BIC 质量简报
 
 需求与问题单
 - 发现方式：
+- 扫描状态：<succeeded, scan-failed, partial-scan, or scan-not-run>
 - 受影响仓库 Issue 扫描：
 - 候选初筛：
 - 初筛排除：
@@ -88,12 +89,19 @@ brief concise:
   `issue-123` branch. Scan at most 100 metadata records per affected repository,
   compare them with modules and changed objects, and retain at most 10 ordinary
   shortlist candidates. Read every shortlisted body before semantic alignment;
-  do not perform a second five-body or metadata-only cutoff. Report scanned,
-  shortlisted, excluded, hydration attempted/succeeded/failed, and strong
-  overflow counts plus categorized reasons. Show why candidates do or do not
-  correspond. Leave risk `unassessed` when more than one candidate remains
-  plausible; do not infer identity from repository membership, a general
-  keyword, or filename similarity alone.
+  do not perform a second five-body or metadata-only cutoff. Use bounded `gh`
+  timeouts and at most three concurrent body lookups while preserving shortlist
+  order. Report per-repository and aggregate scan status, scanned, shortlisted,
+  excluded, hydration attempted/succeeded/failed, and strong overflow counts
+  plus categorized reasons. Use `scan-failed` when every attempted scan fails,
+  `partial-scan` when only some repositories succeed, and `no-candidates` only
+  after successful empty scans. Show why candidates do or do not correspond.
+  Leave risk `unassessed` when more than one candidate remains plausible; do not
+  infer identity from repository membership, a general keyword, or filename
+  similarity alone.
+- Do not include the raw `test_inventory` in the final `assess` payload or
+  brief. Use derived test correspondence and risk evidence. Raw inventory
+  remains available through the standalone inventory/suggest diagnostics.
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.
 - Do not emit confidence, priority, evidence-type, coverage-percentage,

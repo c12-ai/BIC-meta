@@ -28,6 +28,12 @@ staged, untracked, rename, delete, missing-base, and child-repository behavior.
 - Attempt to read every shortlisted body; do not introduce a separate five-body
   cutoff. Continue after individual lookup failures and expose per-candidate
   hydration status. Preserve strong-reference overflow as ambiguity.
+- Add explicit timeouts to current-PR lookup, repository Issue listing, and Issue
+  body lookup. Hydrate the shortlist through a fixed-size thread pool, preserve
+  input order, and isolate timeout/failure warnings per candidate.
+- Record per-repository scan status and derive aggregate `succeeded`, `failed`,
+  `partial`, or `not-run` state. Map failed/partial scans to distinct analysis
+  statuses and never emit a successful-empty message for failed queries.
 - Preserve repository-qualified candidates, scan counts, source priority,
   selection reason, query failures, and ambiguity instead of choosing
   arbitrarily. Keep explicit references as overrides.
@@ -41,7 +47,9 @@ Validation: fixtures cover a 100-record scan limit, a 10-candidate shortlist,
 all-shortlist hydration, repository diversity, strong-link precedence and
 overflow, ambiguity, per-candidate query failure, exclusion accounting, and one
 Issue-list call per affected repository during an end-to-end assessment without
-mutating Git state. A real GitHub list receives a read-only smoke check.
+mutating Git state. Add timeout, ordered limited-concurrency, `scan-failed`,
+`partial-scan`, and successful-empty fixtures. A real GitHub list receives a
+read-only smoke check when authentication is available.
 
 ## 2. Repository and Module Mapping
 
@@ -90,9 +98,16 @@ repository isolation.
   read-only boundary.
 - Add Issue Context and an evidence-backed pre-test Risk Matrix without implying
   that any verification command ran.
+- Remove raw `test_inventory` from the final `assess` payload after correspondence
+  and risk derivation; retain it in standalone inventory/suggest diagnostics.
 - Reinstall source to `.agents` and `.claude` only after source verification.
 
 ## 5. Final Verification
+
+Controlled 62-Issue benchmark against commit `68be270`: final assessment JSON
+decreased from 5,767,436 bytes to 179,034 bytes, and three-run median wall time
+decreased from 4.58 seconds to 2.97 seconds. Both versions made 12 fixture `gh`
+calls; the optimized assessment still hydrated all 10 shortlisted candidates.
 
 - Run syntax/config validation and the temporary behavior fixture suite.
 - Run the full `verify-install.sh` chain after installation.

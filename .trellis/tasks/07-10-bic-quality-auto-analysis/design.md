@@ -65,6 +65,23 @@ snapshot through Issue, module, test, and risk analysis. Intermediate wrappers
 remain diagnostic entry points and may perform their own standalone collection.
 No persistent live-Issue cache or repository artifact is introduced.
 
+All `gh` subprocesses have bounded timeouts. Metadata/PR lookup and full-body
+lookup may use different timeout constants, but no request may block the whole
+analysis indefinitely. Body hydration uses a fixed-size thread pool and
+`executor.map`-style ordered collection so at most a small number of read-only
+requests run concurrently while output remains in shortlist order. A timeout or
+lookup failure becomes candidate-local warning data and does not cancel the
+remaining shortlist.
+
+The snapshot records a per-repository scan status in addition to counts. A
+successful empty response is `succeeded` with zero candidates. A request error
+or timeout is `failed`. The aggregate status is `failed` when every attempted
+repository fails, `partial` when success and failure coexist, `succeeded` when
+all attempted scans succeed, and `not-run` when no GitHub repository can be
+identified. Final Issue analysis maps those states to `scan-failed`,
+`partial-scan`, normal semantic review, or `no-candidates` without conflating
+query failure with an empty repository.
+
 ## Repository and Module Mapping
 
 Repository identity comes from the discovered Git worktree and is not inferred
@@ -119,6 +136,12 @@ object-specific direct, safe-one-hop, or explicitly object-mapped test with an
 assertion produces a statement that no obvious static gap was found. A
 module-only configured relation or broad scenario candidate cannot clear every
 changed object. None of these conclusions proves execution or pass/fail.
+
+The complete discovered inventory is an internal intermediate for `suggest` and
+`assess`. The standalone `inventory` wrapper and `suggest` diagnostic output
+retain it. After `assess` derives test correspondence and risk, it removes the
+raw inventory from its public payload and returns only the correspondence and
+risk contracts needed by the Agent-facing final analysis.
 
 ## Compatibility
 

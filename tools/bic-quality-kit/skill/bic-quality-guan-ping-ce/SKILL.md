@@ -73,8 +73,12 @@ If the user asks to execute tests, state that this skill only provides read-only
    deterministically shortlist at most 10 ordinary candidates using repository,
    module, object, label, and stable update-order signals. Read the full body of
    every shortlisted candidate with `gh issue view`; do not apply a second
-   metadata-only body cutoff. Preserve repository diversity, exclusion counts
-   and reasons, hydration failures, and strong-reference overflow.
+   metadata-only body cutoff. Bound all `gh` calls with timeouts and hydrate
+   bodies with at most three concurrent workers while preserving shortlist
+   order. Preserve repository diversity, exclusion counts and reasons,
+   hydration failures, and strong-reference overflow. Distinguish a successful
+   empty scan from `scan-failed` and multi-repository `partial-scan`; never claim
+   that no open Issue exists when the query failed.
    Repository membership or keyword overlap alone cannot select an Issue;
    require concrete agreement between its goal/acceptance items and the changed
    module or object. Keep multiple plausible candidates visible and mark Issue
@@ -91,10 +95,10 @@ If the user asks to execute tests, state that this skill only provides read-only
    - `references/test-analysis-rules.md` for changed-object and test correspondence rules.
    - `references/risk-model.md` for Issue alignment and pre-test risk rules.
    - `references/deliverables.md` for output format.
-3. Report affected-repository Issue scan counts, shortlist/exclusion counts and
-   reasons, hydration attempted/succeeded/failed counts, relevant candidates and
-   their Diff/module correspondence, selection reason, selected Issue metadata
-   and acceptance items, then comparison metadata
+3. Report affected-repository Issue scan status and counts, shortlist/exclusion
+   counts and reasons, hydration attempted/succeeded/failed counts, relevant
+   candidates and their Diff/module correspondence, selection reason, selected
+   Issue metadata and acceptance items, then comparison metadata
    (`base_ref`, `merge_base`, change sources, and warnings) before module mapping.
 4. Use repository identity from Git discovery. Report `affected_repositories`,
    group module evidence under `modules_by_repository`, and expose only the
@@ -111,7 +115,10 @@ If the user asks to execute tests, state that this skill only provides read-only
    mainly for E2E and cross-repository flows. Module identity is
    `(repo, module_scope)`: `relates_modules` applies only to the entry's own
    repository, while `relates_repository_modules` is the only allowed explicit
-   cross-repository declaration.
+   cross-repository declaration. Use the full inventory internally, but keep it
+   out of the final `assess` JSON after correspondence and risk are derived. Run
+   `scripts/inspect-test-inventory.sh` or the `suggest` diagnostic only when raw
+   test-asset details are needed.
 6. Keep relation facts separate from add-test guidance. Report direct and safe
    indirect relations, possible candidates, tests to add, tests to strengthen,
    and modules with no obvious static gap. Possible candidates are search clues,

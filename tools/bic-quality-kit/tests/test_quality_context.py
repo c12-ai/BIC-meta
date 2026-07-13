@@ -8,6 +8,8 @@ import importlib.util
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -400,6 +402,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
     def test_suggest_contract_uses_scope_and_module_names_only(self) -> None:
         suggested = self.analyze("suggest")
         self.assertIn("scope", suggested)
+        self.assertIn("test_inventory", suggested)
         self.assertNotIn("impact", suggested)
         serialized = json.dumps(suggested)
         for removed_key in ("capability_scope", "aggregate_risk", "upgrade_suggested", "verification_scope", "confidence", "evidence_type", "coverage_gaps", "coverage_unconfirmed"):
@@ -420,6 +423,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("风险结论：", public_template)
         self.assertIn("模块映射", public_template)
         self.assertIn("需求与问题单", public_template)
+        self.assertIn("扫描状态：", public_template)
         self.assertIn("受影响仓库 Issue 扫描：", public_template)
         self.assertIn("候选初筛：", public_template)
         self.assertIn("初筛排除：", public_template)
@@ -500,6 +504,8 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
         issue = assessed["context"]["issue_context"]
         risk = assessed["risk_assessment"]
+        self.assertNotIn("test_inventory", assessed)
+        self.assertIn("test_correspondence", assessed)
         self.assertEqual(issue["title"], "Keep SSE feedback targets aligned")
         self.assertEqual(issue["repository"], "c12-ai/BIC-meta")
         self.assertEqual(issue["item_type"], "issue")
@@ -676,6 +682,20 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         ):
             failed_scan = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
         self.assertTrue(any("auth failed" in warning for warning in failed_scan["warnings"]))
+        self.assertEqual(failed_scan["analysis_status"], "scan-failed")
+        self.assertEqual(failed_scan["issue_scan"]["scan_status"], "failed")
+        self.assertFalse(any("No open Issue was found" in warning for warning in failed_scan["warnings"]))
+
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=None),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(ISSUE_MODULE, "list_repository_issues", return_value=([], None)),
+        ):
+            empty_scan = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+        self.assertEqual(empty_scan["analysis_status"], "no-candidates")
+        self.assertEqual(empty_scan["issue_scan"]["scan_status"], "succeeded")
+        self.assertTrue(any("No open Issue was found" in warning for warning in empty_scan["warnings"]))
 
     def test_repository_issue_listing_is_read_only_bounded_and_warns(self) -> None:
         payload = [{
@@ -703,6 +723,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("c12-ai/BIC-meta", command)
         self.assertIn("open", command)
         self.assertIn("100", command)
+        self.assertEqual(
+            run_mock.call_args.kwargs["timeout"],
+            ISSUE_MODULE.GH_METADATA_TIMEOUT_SECONDS,
+        )
 
         failure = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="auth failed",
@@ -716,6 +740,102 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             )
         self.assertEqual(issues, [])
         self.assertIn("auth failed", warning)
+
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(
+                ISSUE_MODULE.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["gh", "issue", "list"], 15),
+            ),
+        ):
+            issues, warning = ISSUE_MODULE.list_repository_issues(
+                "c12-ai/BIC-meta", self.root,
+            )
+        self.assertEqual(issues, [])
+        self.assertIn("timed out", warning)
+
+    def test_all_github_lookups_have_bounded_timeouts(self) -> None:
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(
+                ISSUE_MODULE.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["gh", "pr", "view"], 15),
+            ) as pr_run,
+        ):
+            warnings: list[str] = []
+            payload = ISSUE_MODULE.current_pr_payload(self.root, warnings)
+        self.assertIsNone(payload)
+        self.assertTrue(any("timed out" in warning for warning in warnings))
+        self.assertEqual(pr_run.call_args.kwargs["timeout"], ISSUE_MODULE.GH_METADATA_TIMEOUT_SECONDS)
+
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(
+                ISSUE_MODULE.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["gh", "issue", "view"], 10),
+            ) as issue_run,
+        ):
+            resolved = ISSUE_MODULE.resolve_github_issue("c12-ai/BIC-meta#150", self.root)
+        self.assertFalse(resolved["resolved"])
+        self.assertTrue(any("timed out" in warning for warning in resolved["warnings"]))
+        self.assertEqual(issue_run.call_args.kwargs["timeout"], ISSUE_MODULE.GH_BODY_TIMEOUT_SECONDS)
+
+    def test_issue_scan_reports_partial_repository_failure(self) -> None:
+        repositories = [
+            {
+                "name": "BIC-meta", "path": str(self.root), "branch": "feature",
+                "merge_base": "abc123", "change_count": 1,
+            },
+            {
+                "name": "BIC-agent-service", "path": str(self.child), "branch": "feature",
+                "merge_base": "def456", "change_count": 1,
+            },
+        ]
+        issue_payload = {
+            "number": 150,
+            "title": "Quality analysis",
+            "url": "https://github.com/c12-ai/BIC-meta/issues/150",
+            "state": "OPEN",
+            "labels": [{"name": "quality"}],
+            "updatedAt": "2026-07-10T00:00:00Z",
+        }
+
+        def list_issues(repository: str, _cwd: Path, limit: int = 100):
+            self.assertEqual(limit, 100)
+            if repository == "c12-ai/BIC-meta":
+                return [issue_payload], None
+            return [], "Could not scan open Issues for c12-ai/BIC-agent-service: timed out"
+
+        resolved = ISSUE_MODULE.normalize_issue(
+            {**issue_payload, "body": "## Acceptance Criteria\n- [ ] Analyze quality"},
+            "c12-ai/BIC-meta#150",
+            "github-cli",
+        )
+        with (
+            mock.patch.object(
+                ISSUE_MODULE, "github_repository",
+                side_effect=["c12-ai/BIC-meta", "c12-ai/BIC-agent-service"],
+            ),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=None),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(ISSUE_MODULE, "list_repository_issues", side_effect=list_issues),
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=resolved),
+        ):
+            result = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+
+        self.assertEqual(result["analysis_status"], "partial-scan")
+        self.assertEqual(result["issue_scan"]["scan_status"], "partial")
+        self.assertEqual(
+            result["issue_scan"]["repository_scans"]["c12-ai/BIC-meta"]["status"],
+            "succeeded",
+        )
+        self.assertEqual(
+            result["issue_scan"]["repository_scans"]["c12-ai/BIC-agent-service"]["status"],
+            "failed",
+        )
 
     def test_issue_shortlist_hydrates_every_candidate_and_preserves_accounting(self) -> None:
         repository = "c12-ai/BIC-meta"
@@ -746,19 +866,33 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             "path": "workflow/baton.py",
             "symbols": [{"name": "WorkflowBaton", "kind": "class"}],
         }]
+        concurrency_lock = threading.Lock()
+        active_calls = 0
+        max_active_calls = 0
+        resolve_calls = 0
 
         def resolve(reference: str, _cwd: Path) -> dict:
-            if reference.endswith("#99"):
-                return ISSUE_MODULE.unresolved(reference, "github-cli", "temporary lookup failure")
-            number = int(reference.rsplit("#", 1)[1])
-            payload = next(item for item in payloads if item["number"] == number)
-            return ISSUE_MODULE.normalize_issue(
-                {**payload, "body": f"## Acceptance Criteria\n- [ ] Validate candidate {number}"},
-                reference,
-                "github-cli",
-            )
+            nonlocal active_calls, max_active_calls, resolve_calls
+            with concurrency_lock:
+                active_calls += 1
+                resolve_calls += 1
+                max_active_calls = max(max_active_calls, active_calls)
+            try:
+                time.sleep(0.01)
+                if reference.endswith("#99"):
+                    return ISSUE_MODULE.unresolved(reference, "github-cli", "temporary lookup failure")
+                number = int(reference.rsplit("#", 1)[1])
+                payload = next(item for item in payloads if item["number"] == number)
+                return ISSUE_MODULE.normalize_issue(
+                    {**payload, "body": f"## Acceptance Criteria\n- [ ] Validate candidate {number}"},
+                    reference,
+                    "github-cli",
+                )
+            finally:
+                with concurrency_lock:
+                    active_calls -= 1
 
-        with mock.patch.object(ISSUE_MODULE, "resolve_github_issue", side_effect=resolve) as resolve_mock:
+        with mock.patch.object(ISSUE_MODULE, "resolve_github_issue", new=resolve):
             result = ISSUE_MODULE.finalized_auto_issue_context(
                 self.root, snapshot, modules, changed_objects,
             )
@@ -770,7 +904,15 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(scan["shortlist_limit"], 10)
         self.assertEqual(scan["shortlisted_count"], 10)
         self.assertEqual(scan["hydration_attempted_count"], 10)
-        self.assertEqual(resolve_mock.call_count, 10)
+        self.assertEqual(resolve_calls, 10)
+        self.assertEqual(scan["hydration_max_workers"], 3)
+        self.assertGreaterEqual(max_active_calls, 2)
+        self.assertEqual(
+            [item["reference"] for item in result["candidates"]],
+            [item["reference"] for item in ISSUE_MODULE.shortlist_issue_candidates(
+                snapshot, modules, changed_objects,
+            )["candidates"]],
+        )
         self.assertEqual(scan["deduplicated_candidate_count"], 100)
         self.assertEqual(scan["excluded_count"], 90)
         self.assertEqual(scan["deduplicated_candidate_count"], scan["shortlisted_count"] + scan["excluded_count"])

@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,9 @@ BRANCH_ISSUE_RE = re.compile(r"(?:^|[/_-])issues?[-_/]?(?P<number>\d+)(?:$|[/_-]
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 ISSUE_METADATA_SCAN_LIMIT = 100
 ISSUE_SHORTLIST_LIMIT = 10
+GH_METADATA_TIMEOUT_SECONDS = 15
+GH_BODY_TIMEOUT_SECONDS = 10
+ISSUE_HYDRATION_MAX_WORKERS = 3
 STRONG_CANDIDATE_PRIORITY_MAX = 3
 SEARCH_STOP_WORDS = {
     "app", "apps", "src", "source", "lib", "libs", "service", "services",
@@ -272,16 +276,26 @@ def select_issue_candidate(
     return (strongest[0] if len(strongest) == 1 else None), ordered
 
 
-def current_pr_payload(repo: Path) -> dict[str, Any] | None:
+def current_pr_payload(
+    repo: Path, warnings: list[str] | None = None,
+) -> dict[str, Any] | None:
     if not shutil.which("gh"):
         return None
-    proc = subprocess.run(
-        [
-            "gh", "pr", "view", "--json",
-            "number,title,body,url,state,headRefName,baseRefName,closingIssuesReferences",
-        ],
-        cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "gh", "pr", "view", "--json",
+                "number,title,body,url,state,headRefName,baseRefName,closingIssuesReferences",
+            ],
+            cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=GH_METADATA_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        if warnings is not None:
+            warnings.append(
+                f"Current PR lookup timed out after {GH_METADATA_TIMEOUT_SECONDS} seconds for {repo}"
+            )
+        return None
     if proc.returncode != 0:
         return None
     try:
@@ -296,14 +310,21 @@ def list_repository_issues(
 ) -> tuple[list[dict[str, Any]], str | None]:
     if not shutil.which("gh"):
         return [], "GitHub CLI `gh` is not available; affected repository Issues were not scanned"
-    proc = subprocess.run(
-        [
-            "gh", "issue", "list", "--repo", repository,
-            "--state", "open", "--limit", str(limit),
-            "--json", "number,title,url,state,labels,updatedAt",
-        ],
-        cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                "gh", "issue", "list", "--repo", repository,
+                "--state", "open", "--limit", str(limit),
+                "--json", "number,title,url,state,labels,updatedAt",
+            ],
+            cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=GH_METADATA_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return [], (
+            f"Could not scan open Issues for {repository}: timed out after "
+            f"{GH_METADATA_TIMEOUT_SECONDS} seconds"
+        )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "GitHub CLI could not list Issues"
         return [], f"Could not scan open Issues for {repository}: {detail}"
@@ -409,10 +430,18 @@ def gh_issue_command(reference: str) -> list[str]:
 def resolve_github_issue(reference: str, cwd: Path) -> dict[str, Any]:
     if not shutil.which("gh"):
         return unresolved(reference, "github-cli", "GitHub CLI `gh` is not available")
-    proc = subprocess.run(
-        gh_issue_command(reference), cwd=cwd, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-    )
+    try:
+        proc = subprocess.run(
+            gh_issue_command(reference), cwd=cwd, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+            timeout=GH_BODY_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return unresolved(
+            reference,
+            "github-cli",
+            f"GitHub Issue lookup timed out after {GH_BODY_TIMEOUT_SECONDS} seconds",
+        )
     if proc.returncode != 0:
         warning = proc.stderr.strip() or "GitHub CLI could not resolve the issue"
         return unresolved(reference, "github-cli", warning)
@@ -430,6 +459,7 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
     strong_candidates: list[dict[str, Any]] = []
     repository_candidates: list[dict[str, Any]] = []
     repository_issue_counts: dict[str, int] = {}
+    repository_scans: dict[str, dict[str, Any]] = {}
     scan_warnings: list[str] = []
     affected_repositories: list[str] = []
     for repo_info in repositories:
@@ -443,7 +473,7 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
             )
             continue
         affected_repositories.append(repository)
-        pr_payload = current_pr_payload(repo)
+        pr_payload = current_pr_payload(repo, scan_warnings)
         if pr_payload:
             strong_candidates.extend(pr_reference_candidates(pr_payload, repository))
         strong_candidates.extend(closing_reference_candidates(
@@ -459,6 +489,11 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
         )
         if warning:
             scan_warnings.append(warning)
+        repository_scans[repository] = {
+            "status": "failed" if warning else "succeeded",
+            "scanned_count": len(issues),
+            "warning": warning,
+        }
         repository_issue_counts[repository] = len(issues)
         repository_candidates.extend(repository_issue_candidates(issues, repository))
 
@@ -468,6 +503,7 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
         "strong_candidates": strong_candidates,
         "repository_candidates": repository_candidates,
         "repository_issue_counts": repository_issue_counts,
+        "repository_scans": repository_scans,
         "warnings": scan_warnings,
     }
 
@@ -631,8 +667,24 @@ def hydrate_issue_candidates(
     hydrated: list[dict[str, Any]] = []
     warnings: list[str] = []
     succeeded = 0
-    for candidate in candidates:
-        resolved = resolve_github_issue(candidate["reference"], workspace_root)
+    max_workers = min(ISSUE_HYDRATION_MAX_WORKERS, len(candidates)) if candidates else 0
+
+    def resolve_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return resolve_github_issue(candidate["reference"], workspace_root)
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            return unresolved(
+                candidate["reference"], "github-cli",
+                f"GitHub Issue lookup failed unexpectedly: {exc}",
+            )
+
+    if max_workers:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            resolved_candidates = list(executor.map(resolve_candidate, candidates))
+    else:
+        resolved_candidates = []
+
+    for candidate, resolved in zip(candidates, resolved_candidates):
         item = dict(candidate)
         item.update({
             "hydration_status": "succeeded" if resolved.get("resolved") else "failed",
@@ -654,8 +706,28 @@ def hydrate_issue_candidates(
         "attempted_count": len(candidates),
         "succeeded_count": succeeded,
         "failed_count": len(candidates) - succeeded,
+        "max_workers": max_workers,
         "warnings": warnings,
     }
+
+
+def issue_scan_status(snapshot: dict[str, Any]) -> tuple[str, dict[str, dict[str, Any]]]:
+    scans = snapshot.get("repository_scans") or {
+        repository: {
+            "status": "succeeded",
+            "scanned_count": snapshot.get("repository_issue_counts", {}).get(repository, 0),
+            "warning": None,
+        }
+        for repository in snapshot.get("affected_repositories", [])
+    }
+    statuses = {scan.get("status") for scan in scans.values()}
+    if not statuses:
+        return "not-run", scans
+    if statuses == {"failed"}:
+        return "failed", scans
+    if "failed" in statuses:
+        return "partial", scans
+    return "succeeded", scans
 
 
 def finalized_auto_issue_context(
@@ -668,6 +740,7 @@ def finalized_auto_issue_context(
         snapshot, modules_by_repository, changed_objects, ISSUE_SHORTLIST_LIMIT,
     )
     hydration = hydrate_issue_candidates(shortlist["candidates"], workspace_root)
+    scan_status, repository_scans = issue_scan_status(snapshot)
     selected, strong_ordered = select_issue_candidate(snapshot.get("strong_candidates", []))
     hydrated_by_reference = {
         candidate["reference"]: candidate for candidate in hydration["candidates"]
@@ -679,20 +752,39 @@ def finalized_auto_issue_context(
                 "Multiple equally strong Issue references were found; compare them with the Diff or provide --issue"
             )
             discovery_mode = "auto-ambiguous"
+            analysis_status = "semantic-review-required"
+        elif scan_status == "failed":
+            warning = (
+                "Issue scanning failed for every affected GitHub repository; open-Issue availability is unknown"
+            )
+            discovery_mode = "affected-repository-scan"
+            analysis_status = "scan-failed"
+        elif scan_status == "partial":
+            warning = (
+                "Issue scanning succeeded for only some affected GitHub repositories; candidate analysis is incomplete"
+            )
+            discovery_mode = "affected-repository-scan"
+            analysis_status = "partial-scan"
         elif hydration["candidates"]:
             warning = (
                 "No strong Issue reference was found; shortlisted Issues require semantic comparison with "
                 "changed modules and objects"
             )
             discovery_mode = "affected-repository-scan"
+            analysis_status = "semantic-review-required"
+        elif scan_status == "not-run":
+            warning = "Issue scanning did not run because no affected GitHub repository was identified"
+            discovery_mode = "affected-repository-scan"
+            analysis_status = "scan-not-run"
         else:
             warning = "No open Issue was found for the affected repositories"
             discovery_mode = "affected-repository-scan"
+            analysis_status = "no-candidates"
         result = unresolved(None, "auto-discovery", warning)
         result.update({
             "discovery_mode": discovery_mode,
             "selection_reason": None,
-            "analysis_status": "semantic-review-required" if hydration["candidates"] else "no-candidates",
+            "analysis_status": analysis_status,
         })
         base_warnings = []
     else:
@@ -727,6 +819,8 @@ def finalized_auto_issue_context(
     result["candidates"] = hydration["candidates"]
     result["repository_issue_counts"] = snapshot.get("repository_issue_counts", {})
     result["issue_scan"] = {
+        "scan_status": scan_status,
+        "repository_scans": repository_scans,
         "metadata_limit_per_repository": snapshot.get("metadata_limit_per_repository", ISSUE_METADATA_SCAN_LIMIT),
         "scanned_count": sum(snapshot.get("repository_issue_counts", {}).values()),
         "shortlist_limit": shortlist["shortlist_limit"],
@@ -734,6 +828,9 @@ def finalized_auto_issue_context(
         "hydration_attempted_count": hydration["attempted_count"],
         "hydration_succeeded_count": hydration["succeeded_count"],
         "hydration_failed_count": hydration["failed_count"],
+        "hydration_max_workers": hydration["max_workers"],
+        "metadata_timeout_seconds": GH_METADATA_TIMEOUT_SECONDS,
+        "body_timeout_seconds": GH_BODY_TIMEOUT_SECONDS,
         "deduplicated_candidate_count": shortlist["deduplicated_candidate_count"],
         "duplicate_reference_count": shortlist["duplicate_reference_count"],
         "excluded_count": shortlist["excluded_count"],

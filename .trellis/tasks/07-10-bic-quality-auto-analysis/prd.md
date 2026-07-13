@@ -54,6 +54,17 @@ repository or test directory is added.
   Treat the final assessment wrapper as the primary Skill entry and the
   intermediate wrappers as diagnostics so module, test, and risk stages do not
   repeat live GitHub queries during one analysis.
+- Keep the end-to-end `assess` payload Agent-facing and bounded. Use the full
+  discovered test inventory internally, but omit it from the final assessment
+  JSON after test correspondence and risk have been derived. Keep the standalone
+  inventory wrapper as the raw diagnostic contract.
+- Bound every GitHub CLI call with an explicit timeout. Hydrate shortlisted Issue
+  bodies with a small fixed concurrency limit while preserving shortlist order,
+  per-candidate failure isolation, and the read-only boundary.
+- Distinguish a successful empty Issue scan from query failure. Report
+  `scan-failed` when no affected-repository scan succeeds and `partial-scan`
+  when only some scans succeed; never describe a failed scan as proof that no
+  open Issue exists.
 - Analyze test correspondence per `(repo, module_scope)`: direct code
   references, safe one-hop or explicitly configured relations, and weaker
   scenario/path candidates must remain distinguishable in raw analysis and the
@@ -143,6 +154,18 @@ repository or test directory is added.
 - [x] Issue scan output reports per-repository counts, shortlist and exclusion
       counts/reasons, hydration attempted/succeeded/failed counts, and protected
       strong-reference overflow without selecting from keyword rank alone.
+- [x] The `assess` payload omits raw `test_inventory` while retaining
+      `test_correspondence` and `risk_assessment`; the `inventory` and `suggest`
+      diagnostic contracts retain their detailed inventory output.
+- [x] Current-PR lookup, Issue listing, and Issue body lookup all use bounded
+      timeouts; shortlisted bodies hydrate with fixed limited concurrency and
+      preserve deterministic shortlist order.
+- [x] A timed-out or failed Issue scan reports `scan-failed`, a mixed multi-repo
+      result reports `partial-scan`, and only a successful empty scan reports
+      `no-candidates` / no open Issue.
+- [x] Regression fixtures prove timeout warnings, concurrent failure isolation,
+      final-payload reduction, and the three scan-status paths without live
+      GitHub access.
 - [x] The default brief includes an Issue-aware pre-test Risk Matrix with an
       evidence-backed risk floor and `unassessed` behavior when Issue context is
       missing.

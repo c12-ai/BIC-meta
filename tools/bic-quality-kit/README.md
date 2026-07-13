@@ -84,9 +84,12 @@ closing references, and a strong `issue-123` branch-name pattern take priority.
 Without a strong link, the Skill scans at most 100 metadata records per affected
 repository, compares them with changed modules and objects, shortlists at most
 10 ordinary candidates, and reads every shortlisted body before semantic
-alignment. It reports exclusion and hydration counts; ambiguous candidates
-remain visible and keep overall risk `unassessed`. An explicit reference is
-translated to `--issue` and overrides discovery.
+alignment. All GitHub calls have bounded timeouts; body hydration uses at most
+three concurrent workers and preserves shortlist order. It reports exclusion,
+hydration, and scan-status data; `scan-failed` and `partial-scan` remain distinct
+from a successful empty scan. Ambiguous or incomplete candidates keep overall
+risk `unassessed`. An explicit reference is translated to `--issue` and
+overrides discovery.
 
 An explicit local base can be supplied through conversation:
 
@@ -119,6 +122,11 @@ module, test, Issue, and risk stages share one live Issue snapshot:
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
 ```
+
+The assessment uses the complete test inventory internally but omits that raw,
+large intermediate from its final JSON. It returns derived test correspondence
+and risk evidence. Use the inventory or suggest diagnostics below only when raw
+test-asset details are required.
 
 The other bundled scripts are standalone diagnostic entry points. Do not chain
 all of them to build one final brief because separate processes perform separate
