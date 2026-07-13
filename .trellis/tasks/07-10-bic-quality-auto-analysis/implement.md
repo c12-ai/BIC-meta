@@ -17,21 +17,31 @@ staged, untracked, rename, delete, missing-base, and child-repository behavior.
 - After Diff collection, list open Issues for every affected GitHub repository.
   Keep current PR links/closing text, Diff commit messages, and a strong
   branch-name pattern as higher-priority association evidence.
+- Split Issue work into one metadata snapshot, deterministic shortlist, and
+  full-body hydration stages. Scan at most 100 metadata records per affected
+  repository and reuse the snapshot for the complete assessment.
+- After module mapping and changed-object extraction, merge duplicate references
+  and shortlist at most 10 ordinary candidates using explicit/strong references,
+  repository identity, module/object tokens, labels, stable update ordering, and
+  repository diversity. Preserve counts and exclusion reasons without returning
+  excluded Issue content.
+- Attempt to read every shortlisted body; do not introduce a separate five-body
+  cutoff. Continue after individual lookup failures and expose per-candidate
+  hydration status. Preserve strong-reference overflow as ambiguity.
 - Preserve repository-qualified candidates, scan counts, source priority,
   selection reason, query failures, and ambiguity instead of choosing
   arbitrarily. Keep explicit references as overrides.
-- Compare repository candidates with mapped modules and changed objects; read
-  full bodies only for plausible candidates and keep non-unique results
-  `unassessed`.
 - Extract Issue goals, labels, repository, and acceptance items.
 - Generate deterministic risk rows for Issue clarity, impact breadth,
   contract/state boundaries, test evidence, and change attribution.
 - Require semantic acceptance-item alignment in the Skill report and preserve
   `unassessed` when Issue context is unavailable.
 
-Validation: fixtures cover affected-repository scans, strong-link precedence,
-ambiguity, and query failure without mutating Git state; a real GitHub list
-receives a read-only smoke check.
+Validation: fixtures cover a 100-record scan limit, a 10-candidate shortlist,
+all-shortlist hydration, repository diversity, strong-link precedence and
+overflow, ambiguity, per-candidate query failure, exclusion accounting, and one
+Issue-list call per affected repository during an end-to-end assessment without
+mutating Git state. A real GitHub list receives a read-only smoke check.
 
 ## 2. Repository and Module Mapping
 

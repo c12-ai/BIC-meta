@@ -211,8 +211,9 @@ class QualityContextFixtureTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def analyze(self, command: str, *args: str) -> dict:
+    def analyze(self, command: str, *args: str, env_overrides: dict[str, str] | None = None) -> dict:
         env = {**os.environ, "BIC_WORKSPACE_ROOT": str(self.root)}
+        env.update(env_overrides or {})
         proc = subprocess.run(
             ["python3", str(ANALYZER), command, *args],
             cwd=self.root, env=env, text=True, capture_output=True, check=True,
@@ -420,6 +421,9 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("模块映射", public_template)
         self.assertIn("需求与问题单", public_template)
         self.assertIn("受影响仓库 Issue 扫描：", public_template)
+        self.assertIn("候选初筛：", public_template)
+        self.assertIn("初筛排除：", public_template)
+        self.assertIn("正文读取：", public_template)
         self.assertIn("候选对应分析：", public_template)
         self.assertIn("测试对应性", public_template)
         self.assertIn("直接相关测试：", public_template)
@@ -550,6 +554,29 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIsNone(ambiguous)
         self.assertEqual(len(ordered), 2)
 
+        explicit = ISSUE_MODULE.normalize_issue(
+            {
+                "number": 42,
+                "title": "Explicit Issue",
+                "body": "## Acceptance Criteria\n- [ ] Use the explicit override",
+                "url": "https://github.com/c12-ai/BIC-meta/issues/42",
+                "state": "OPEN",
+                "labels": [],
+            },
+            "c12-ai/BIC-meta#42",
+            "github-cli",
+        )
+        with (
+            mock.patch.object(ISSUE_MODULE, "collect_issue_snapshot") as snapshot_mock,
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=explicit) as resolve_mock,
+        ):
+            overridden = ISSUE_MODULE.collect_issue_context(
+                self.root, issue_ref="c12-ai/BIC-meta#42", repositories=[{"change_count": 1}],
+            )
+        self.assertTrue(overridden["resolved"])
+        snapshot_mock.assert_not_called()
+        resolve_mock.assert_called_once_with("c12-ai/BIC-meta#42", self.root)
+
     def test_issue_auto_discovery_scans_affected_repository_issues(self) -> None:
         repositories = [{
             "name": "BIC-meta",
@@ -577,11 +604,21 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             },
         ]
 
+        def resolved_candidate(reference: str, _cwd: Path) -> dict:
+            number = int(reference.rsplit("#", 1)[1])
+            payload = next(item for item in open_issues if item["number"] == number)
+            return ISSUE_MODULE.normalize_issue(
+                {**payload, "body": f"## Acceptance Criteria\n- [ ] Review Issue {number}"},
+                reference,
+                "github-cli",
+            )
+
         with (
             mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
             mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=None),
             mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
             mock.patch.object(ISSUE_MODULE, "list_repository_issues", return_value=(open_issues, None)),
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", side_effect=resolved_candidate) as resolve_mock,
         ):
             scanned = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
 
@@ -591,9 +628,13 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(scanned["repository_issue_counts"], {"c12-ai/BIC-meta": 2})
         self.assertEqual(
             [item["reference"] for item in scanned["candidates"]],
-            ["c12-ai/BIC-meta#149", "c12-ai/BIC-meta#150"],
+            ["c12-ai/BIC-meta#150", "c12-ai/BIC-meta#149"],
         )
-        self.assertEqual(scanned["candidates"][1]["labels"], ["quality"])
+        self.assertEqual(scanned["candidates"][0]["labels"], ["quality"])
+        self.assertEqual(resolve_mock.call_count, 2)
+        self.assertEqual(scanned["issue_scan"]["shortlisted_count"], 2)
+        self.assertEqual(scanned["issue_scan"]["hydration_attempted_count"], 2)
+        self.assertEqual(scanned["issue_scan"]["hydration_succeeded_count"], 2)
 
         linked_pr = {
             "url": "https://github.com/c12-ai/BIC-meta/pull/7",
@@ -604,20 +645,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
                 "repository": {"nameWithOwner": "c12-ai/BIC-meta"},
             }],
         }
-        resolved_issue = ISSUE_MODULE.normalize_issue(
-            {
-                **open_issues[0],
-                "body": "## Acceptance Criteria\n- [ ] Inspect Issues after mapping the Diff",
-            },
-            "c12-ai/BIC-meta#150",
-            "github-cli",
-        )
         with (
             mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
             mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=linked_pr),
             mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
             mock.patch.object(ISSUE_MODULE, "list_repository_issues", return_value=(open_issues, None)),
-            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=resolved_issue),
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", side_effect=resolved_candidate) as linked_resolve,
         ):
             selected = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
 
@@ -629,6 +662,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             if item["reference"] == "c12-ai/BIC-meta#150"
         )
         self.assertEqual(selected_candidate["title"], "Add repository-aware quality analysis")
+        self.assertEqual(linked_resolve.call_count, 2)
 
         with (
             mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
@@ -682,6 +716,201 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             )
         self.assertEqual(issues, [])
         self.assertIn("auth failed", warning)
+
+    def test_issue_shortlist_hydrates_every_candidate_and_preserves_accounting(self) -> None:
+        repository = "c12-ai/BIC-meta"
+        payloads = [
+            {
+                "number": number,
+                "title": "WorkflowBaton recovery" if number == 99 else f"Unrelated work {number}",
+                "url": f"https://github.com/{repository}/issues/{number}",
+                "state": "OPEN",
+                "labels": [{"name": "workflow"}] if number == 99 else [],
+                "updatedAt": f"2026-07-{(number % 28) + 1:02d}T00:00:00Z",
+            }
+            for number in range(1, 101)
+        ]
+        snapshot = {
+            "metadata_limit_per_repository": 100,
+            "affected_repositories": [repository],
+            "strong_candidates": [],
+            "repository_candidates": ISSUE_MODULE.repository_issue_candidates(payloads, repository),
+            "repository_issue_counts": {repository: 100},
+            "warnings": [],
+        }
+        modules = {
+            "BIC-meta": [{"module_scope": "workflow/runtime", "name": "Workflow Runtime"}],
+        }
+        changed_objects = [{
+            "repo": "BIC-meta",
+            "path": "workflow/baton.py",
+            "symbols": [{"name": "WorkflowBaton", "kind": "class"}],
+        }]
+
+        def resolve(reference: str, _cwd: Path) -> dict:
+            if reference.endswith("#99"):
+                return ISSUE_MODULE.unresolved(reference, "github-cli", "temporary lookup failure")
+            number = int(reference.rsplit("#", 1)[1])
+            payload = next(item for item in payloads if item["number"] == number)
+            return ISSUE_MODULE.normalize_issue(
+                {**payload, "body": f"## Acceptance Criteria\n- [ ] Validate candidate {number}"},
+                reference,
+                "github-cli",
+            )
+
+        with mock.patch.object(ISSUE_MODULE, "resolve_github_issue", side_effect=resolve) as resolve_mock:
+            result = ISSUE_MODULE.finalized_auto_issue_context(
+                self.root, snapshot, modules, changed_objects,
+            )
+
+        scan = result["issue_scan"]
+        self.assertFalse(result["resolved"])
+        self.assertEqual(result["analysis_status"], "semantic-review-required")
+        self.assertEqual(scan["scanned_count"], 100)
+        self.assertEqual(scan["shortlist_limit"], 10)
+        self.assertEqual(scan["shortlisted_count"], 10)
+        self.assertEqual(scan["hydration_attempted_count"], 10)
+        self.assertEqual(resolve_mock.call_count, 10)
+        self.assertEqual(scan["deduplicated_candidate_count"], 100)
+        self.assertEqual(scan["excluded_count"], 90)
+        self.assertEqual(scan["deduplicated_candidate_count"], scan["shortlisted_count"] + scan["excluded_count"])
+        self.assertTrue(any(item["reference"].endswith("#99") for item in result["candidates"]))
+        self.assertEqual(scan["hydration_failed_count"], 1)
+        self.assertTrue(any("temporary lookup failure" in warning for warning in result["warnings"]))
+        self.assertTrue(all("body" in item for item in result["candidates"]))
+        self.assertEqual(
+            scan["hydration_succeeded_count"] + scan["hydration_failed_count"],
+            scan["hydration_attempted_count"],
+        )
+
+    def test_issue_shortlist_preserves_repository_diversity_and_reports_strong_overflow(self) -> None:
+        repositories = ["c12-ai/repo-a", "c12-ai/repo-b"]
+        repository_candidates = []
+        for repository in repositories:
+            payloads = [
+                {
+                    "number": number,
+                    "title": f"Candidate {number}",
+                    "url": f"https://github.com/{repository}/issues/{number}",
+                    "state": "OPEN",
+                    "labels": [],
+                    "updatedAt": f"2026-07-{number:02d}T00:00:00Z",
+                }
+                for number in range(1, 9)
+            ]
+            repository_candidates.extend(ISSUE_MODULE.repository_issue_candidates(payloads, repository))
+        snapshot = {
+            "affected_repositories": repositories,
+            "strong_candidates": [],
+            "repository_candidates": repository_candidates,
+            "repository_issue_counts": {repository: 8 for repository in repositories},
+            "warnings": [],
+        }
+        shortlist = ISSUE_MODULE.shortlist_issue_candidates(snapshot)
+        self.assertEqual(shortlist["shortlisted_count"], 10)
+        self.assertEqual(
+            {item["repository"] for item in shortlist["candidates"]},
+            set(repositories),
+        )
+        self.assertEqual(set(shortlist["shortlisted_by_repository"]), set(repositories))
+        self.assertEqual(sum(shortlist["excluded_by_repository"].values()), 6)
+
+        strong_snapshot = {
+            "affected_repositories": ["c12-ai/repo-a"],
+            "strong_candidates": [
+                {
+                    "reference": f"c12-ai/repo-a#{number}",
+                    "source": "current-pr-linked-issue",
+                    "priority": 0,
+                    "evidence": "current PR",
+                }
+                for number in range(1, 12)
+            ],
+            "repository_candidates": [],
+            "repository_issue_counts": {"c12-ai/repo-a": 0},
+            "warnings": [],
+        }
+        overflow = ISSUE_MODULE.shortlist_issue_candidates(strong_snapshot)
+        self.assertEqual(overflow["shortlisted_count"], 10)
+        self.assertEqual(overflow["strong_candidate_overflow_count"], 1)
+        self.assertEqual(overflow["exclusion_reasons"], {"strong-reference-overflow": 1})
+
+    def test_assess_reuses_one_issue_snapshot_and_hydrates_the_complete_shortlist(self) -> None:
+        workspace = Path(self.temp.name) / "single-workspace" / "BIC-meta"
+        init_repo(workspace)
+        write(workspace / "AGENTS.md", "fixture\n")
+        write(workspace / "Production-PRD.md", "fixture\n")
+        write(workspace / "app/workflow/base.py", "def base(): ...\n")
+        git(workspace, "add", ".")
+        git(workspace, "commit", "-m", "base")
+        git(workspace, "remote", "add", "origin", "https://github.com/c12-ai/BIC-meta.git")
+        git(workspace, "switch", "-c", "feature/quality-shortlist")
+        write(workspace / "app/workflow/baton.py", "class WorkflowBaton: ...\n")
+        git(workspace, "add", ".")
+        git(workspace, "commit", "-m", "add workflow baton")
+
+        fake_bin = Path(self.temp.name) / "fake-bin"
+        log_path = Path(self.temp.name) / "gh-calls.jsonl"
+        fake_gh = fake_bin / "gh"
+        write(
+            fake_gh,
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+with open(os.environ["GH_CALL_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(args) + "\\n")
+if args[:2] == ["pr", "view"]:
+    raise SystemExit(1)
+if args[:2] == ["issue", "list"]:
+    repository = args[args.index("--repo") + 1]
+    print(json.dumps([
+        {
+            "number": number,
+            "title": "WorkflowBaton behavior" if number == 12 else f"Candidate {number}",
+            "url": f"https://github.com/{repository}/issues/{number}",
+            "state": "OPEN",
+            "labels": [{"name": "workflow"}] if number == 12 else [],
+            "updatedAt": f"2026-07-{number:02d}T00:00:00Z",
+        }
+        for number in range(1, 13)
+    ]))
+    raise SystemExit(0)
+if args[:2] == ["issue", "view"]:
+    number = int(args[2])
+    repository = args[args.index("--repo") + 1]
+    print(json.dumps({
+        "number": number,
+        "title": "WorkflowBaton behavior" if number == 12 else f"Candidate {number}",
+        "body": f"## Acceptance Criteria\\n- [ ] Validate candidate {number}",
+        "url": f"https://github.com/{repository}/issues/{number}",
+        "state": "OPEN",
+        "labels": [{"name": "workflow"}] if number == 12 else [],
+    }))
+    raise SystemExit(0)
+raise SystemExit(2)
+""",
+        )
+        fake_gh.chmod(0o755)
+        payload = self.analyze(
+            "assess",
+            env_overrides={
+                "BIC_WORKSPACE_ROOT": str(workspace),
+                "GH_CALL_LOG": str(log_path),
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            },
+        )
+        calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+        issue_lists = [call for call in calls if call[:2] == ["issue", "list"]]
+        issue_views = [call for call in calls if call[:2] == ["issue", "view"]]
+        scan = payload["context"]["issue_context"]["issue_scan"]
+        self.assertEqual(len(issue_lists), 1)
+        self.assertEqual(len(issue_views), 10)
+        self.assertEqual(scan["shortlisted_count"], 10)
+        self.assertEqual(scan["hydration_attempted_count"], 10)
+        self.assertEqual(scan["hydration_succeeded_count"], 10)
 
     def test_configured_module_relation_is_repository_qualified(self) -> None:
         module = "app/inference"

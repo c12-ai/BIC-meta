@@ -45,6 +45,12 @@ If the user asks to execute tests, state that this skill only provides read-only
 ## Workflow
 
 1. Collect context with bundled scripts when available:
+   - Use `scripts/assess-risk-matrix.sh` once as the primary entry for a normal
+     end-to-end Quality review. It reuses one Issue snapshot across context,
+     module, test, and risk analysis.
+   - Treat the other wrappers as standalone diagnostics; do not run all wrappers
+     sequentially for one final brief because each diagnostic invocation may
+     perform its own live metadata collection.
    - `scripts/collect-quality-context.sh`
    - `scripts/detect-impact-scope.sh`
    - `scripts/inspect-test-inventory.sh`
@@ -62,8 +68,13 @@ If the user asks to execute tests, state that this skill only provides read-only
    order: the current PR's linked/closing Issue, a `Fixes/Closes/Resolves`
    reference in the PR body, the same strong reference in Diff commits, then an
    `issue-123` branch-name pattern. A unique strong link is authoritative. When
-   no strong link exists, compare affected-repository Issue titles and labels,
-   then read the full body of only plausible candidates with `gh issue view`.
+   no strong link exists, scan at most 100 open-Issue metadata records per
+   affected repository. After module mapping and changed-object extraction,
+   deterministically shortlist at most 10 ordinary candidates using repository,
+   module, object, label, and stable update-order signals. Read the full body of
+   every shortlisted candidate with `gh issue view`; do not apply a second
+   metadata-only body cutoff. Preserve repository diversity, exclusion counts
+   and reasons, hydration failures, and strong-reference overflow.
    Repository membership or keyword overlap alone cannot select an Issue;
    require concrete agreement between its goal/acceptance items and the changed
    module or object. Keep multiple plausible candidates visible and mark Issue
@@ -80,9 +91,10 @@ If the user asks to execute tests, state that this skill only provides read-only
    - `references/test-analysis-rules.md` for changed-object and test correspondence rules.
    - `references/risk-model.md` for Issue alignment and pre-test risk rules.
    - `references/deliverables.md` for output format.
-3. Report affected-repository Issue scan counts, relevant candidates and their
-   Diff/module correspondence, selection reason, selected Issue metadata and
-   acceptance items, then comparison metadata
+3. Report affected-repository Issue scan counts, shortlist/exclusion counts and
+   reasons, hydration attempted/succeeded/failed counts, relevant candidates and
+   their Diff/module correspondence, selection reason, selected Issue metadata
+   and acceptance items, then comparison metadata
    (`base_ref`, `merge_base`, change sources, and warnings) before module mapping.
 4. Use repository identity from Git discovery. Report `affected_repositories`,
    group module evidence under `modules_by_repository`, and expose only the
@@ -105,8 +117,8 @@ If the user asks to execute tests, state that this skill only provides read-only
    and modules with no obvious static gap. Possible candidates are search clues,
    not proof of coverage. Do not output confidence, risk, priority,
    evidence-type, or coverage-percentage labels.
-7. Run `scripts/assess-risk-matrix.sh` with the same Diff and Issue arguments.
-   Treat its result as a deterministic risk floor. Compare every Issue
+7. Treat the `scripts/assess-risk-matrix.sh` result from step 1 as the
+   deterministic risk floor; do not run the wrapper again. Compare every Issue
    acceptance item semantically with concrete Diff and test evidence, add an
    Issue-alignment row for each item, and only raise the floor when evidence is
    missing. If repository scanning yields exactly one semantically supported

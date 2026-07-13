@@ -28,11 +28,13 @@ closing reference, Diff-commit reference, or strong branch reference remains
 authoritative.
 
 When no strong link exists, use Issue titles and labels only to shortlist. Read
-the full body of plausible candidates and require repository identity plus a
-concrete match between the Issue goal or acceptance item and a changed module,
-file, or object. If exactly one candidate meets that standard, use it for final
-Issue alignment. If none or several remain, show the candidates and keep the
-overall result `unassessed`.
+at most 100 metadata records per affected repository, reduce ordinary candidates
+to at most 10 after module and changed-object mapping, and read the full body of
+every shortlisted candidate. Do not select a smaller body subset from metadata.
+Require repository identity plus a concrete match between the Issue goal or
+acceptance item and a changed module, file, or object. If exactly one candidate
+meets that standard, use it for final Issue alignment. If none or several remain,
+show the candidates and keep the overall result `unassessed`.
 
 ## Deterministic floor
 

@@ -43,6 +43,17 @@ repository or test directory is added.
   Without a strong link, retain repository Issue candidates for semantic
   comparison with changed modules and objects. Accept an explicit reference
   only as an override. All GitHub access is read-only through local `gh`.
+- Keep affected-repository Issue discovery bounded and auditable: scan at most
+  100 open-Issue metadata records per repository, reduce ordinary candidates to
+  a deterministic shortlist of at most 10 after module/object mapping, then
+  attempt to read every shortlisted body before semantic alignment. Do not add
+  a second metadata-only body-selection cutoff. Preserve scan, exclusion, and
+  hydration counts plus categorized warnings without returning excluded Issue
+  content to the Agent context.
+- Reuse one immutable Issue snapshot throughout a normal end-to-end assessment.
+  Treat the final assessment wrapper as the primary Skill entry and the
+  intermediate wrappers as diagnostics so module, test, and risk stages do not
+  repeat live GitHub queries during one analysis.
 - Analyze test correspondence per `(repo, module_scope)`: direct code
   references, safe one-hop or explicitly configured relations, and weaker
   scenario/path candidates must remain distinguishable in raw analysis and the
@@ -121,6 +132,17 @@ repository or test directory is added.
 - [x] When no strong reference exists, every affected GitHub repository is
       scanned for open Issues and returns repository-qualified candidate
       metadata plus query warnings for semantic Diff/module comparison.
+- [x] Each affected repository scans at most 100 open-Issue metadata records;
+      ordinary Agent-facing candidates are deterministically shortlisted to at
+      most 10 after module/object mapping, and excluded Issue content is omitted.
+- [x] Every shortlisted candidate is attempted with a read-only full-body lookup;
+      lookup failures remain visible and do not stop hydration of other candidates.
+- [x] One complete `assess` invocation lists Issues once per affected repository,
+      reuses that snapshot through module/test/risk analysis, and does not apply
+      a separate five-body cutoff.
+- [x] Issue scan output reports per-repository counts, shortlist and exclusion
+      counts/reasons, hydration attempted/succeeded/failed counts, and protected
+      strong-reference overflow without selecting from keyword rank alone.
 - [x] The default brief includes an Issue-aware pre-test Risk Matrix with an
       evidence-backed risk floor and `unassessed` behavior when Issue context is
       missing.

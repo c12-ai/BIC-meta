@@ -311,6 +311,7 @@ def collect_context(
     worktree_only: bool = False,
     issue_ref: str | None = None,
     issue_file: str | None = None,
+    collect_issues: bool = True,
 ) -> dict[str, Any]:
     discovered = discover_repositories()
     child_paths = {repo["relative_path"] for repo in discovered if repo["relative_path"] != "."}
@@ -324,19 +325,22 @@ def collect_context(
     _, branch = run_git(["branch", "--show-current"], WORKSPACE_ROOT)
     _, root_status = run_git(["status", "--short"], WORKSPACE_ROOT)
     _, root_diff_stat = run_git(["diff", "--stat"], WORKSPACE_ROOT)
-    return {
+    context = {
         "workspace_root": str(WORKSPACE_ROOT),
         "branch": branch or None,
         "analysis_mode": "worktree-only" if worktree_only else "complete-local-changeset",
         "requested_base_ref": base_ref,
-        "issue_context": collect_issue_context(
-            WORKSPACE_ROOT, issue_ref, issue_file, repositories,
-        ),
+        "issue_context": None,
         "repositories": repositories,
         "changed_files": sorted(changed, key=lambda item: item["path"]),
         "root_git_status_short": root_status.splitlines() if root_status else [],
         "root_diff_stat": root_diff_stat.splitlines() if root_diff_stat else [],
     }
+    if collect_issues:
+        context["issue_context"] = collect_issue_context(
+            WORKSPACE_ROOT, issue_ref, issue_file, repositories,
+        )
+    return context
 
 
 def load_json_yaml(path: Path) -> Any:
@@ -457,13 +461,25 @@ def inspect_tests(context: dict[str, Any] | None = None) -> dict[str, Any]:
     return {"workspace_root": str(WORKSPACE_ROOT), "tests": entries, "discovered_assets": discovered}
 
 
-def recommend_tests(context: dict[str, Any], scope: dict[str, Any], tests: dict[str, Any]) -> dict[str, Any]:
+def changed_source_symbols(
+    context: dict[str, Any], tests: dict[str, Any],
+) -> list[dict[str, Any]]:
     test_paths = {
         asset["path"] for asset in tests["discovered_assets"]
         if asset.get("asset_kind") == "test-file"
     }
     changed_sources = [item for item in context["changed_files"] if item["path"] not in test_paths]
-    symbols = extract_changed_symbols(WORKSPACE_ROOT, changed_sources)
+    return extract_changed_symbols(WORKSPACE_ROOT, changed_sources)
+
+
+def recommend_tests(
+    context: dict[str, Any],
+    scope: dict[str, Any],
+    tests: dict[str, Any],
+    symbols: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if symbols is None:
+        symbols = changed_source_symbols(context, tests)
     return analyze_test_relations(WORKSPACE_ROOT, scope, symbols, tests["discovered_assets"], tests["tests"])
 
 
@@ -473,15 +489,26 @@ def suggest_scope(
     issue_ref: str | None = None,
     issue_file: str | None = None,
 ) -> dict[str, Any]:
-    context = collect_context(base_ref, worktree_only, issue_ref, issue_file)
+    context = collect_context(
+        base_ref, worktree_only, issue_ref, issue_file, collect_issues=False,
+    )
     scope = map_modules(context)
     tests = inspect_tests(context)
+    symbols = changed_source_symbols(context, tests)
+    context["issue_context"] = collect_issue_context(
+        WORKSPACE_ROOT,
+        issue_ref,
+        issue_file,
+        context["repositories"],
+        scope["modules_by_repository"],
+        symbols,
+    )
     return {
         "workspace_root": str(WORKSPACE_ROOT),
         "context": context,
         "scope": scope,
         "test_inventory": tests,
-        "test_correspondence": recommend_tests(context, scope, tests),
+        "test_correspondence": recommend_tests(context, scope, tests, symbols),
     }
 
 

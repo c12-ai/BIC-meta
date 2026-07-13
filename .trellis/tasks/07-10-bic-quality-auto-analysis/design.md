@@ -39,15 +39,31 @@ source, and warnings.
 
 ## Issue Context
 
-Issue collection is Diff-driven. After change collection identifies repositories
-with `change_count > 0`, the collector lists open Issues for each corresponding
-GitHub repository. It retains repository, number, title, labels, URL, and update
-time for bounded semantic analysis. Current-PR links, PR closing text, Diff
-commit references, and a strong `issue-123` branch pattern remain authoritative
-when uniquely present. Without a strong link, the Skill compares candidates
-with mapped modules and changed objects and reads only plausible Issue bodies.
-An explicit number, URL, or `owner/repo#number` overrides discovery. Query
-failure or ambiguity remains visible rather than producing a guessed Issue.
+Issue collection is Diff-driven and staged. After change collection identifies
+repositories with `change_count > 0`, `collect_issue_snapshot` lists at most 100
+open-Issue metadata records per corresponding GitHub repository and captures
+current-PR links, PR closing text, Diff-commit references, and strong
+`issue-123` branch references in the same immutable analysis snapshot.
+
+Module mapping and changed-object extraction run before candidate reduction.
+`shortlist_issue_candidates` merges duplicate references, protects explicit and
+strong association evidence, applies deterministic repository/module/object/
+label ordering, preserves repository diversity, and returns at most 10 ordinary
+candidates. It reports excluded counts and categorized reasons without carrying
+excluded Issue titles or bodies into Agent-facing JSON. Keyword or repository
+membership remains a search hint and never selects an Issue.
+
+`hydrate_issue_candidates` attempts a read-only full-body lookup for every
+shortlisted candidate. There is no second five-body selection gate. Per-candidate
+failure remains visible while other lookups continue. Strong-reference overflow
+is reported as ambiguity rather than silently discarded or automatically
+selected. An explicit number, URL, `owner/repo#number`, or local Issue file
+continues to override discovery.
+
+The normal Skill path uses the end-to-end assessment wrapper once and reuses the
+snapshot through Issue, module, test, and risk analysis. Intermediate wrappers
+remain diagnostic entry points and may perform their own standalone collection.
+No persistent live-Issue cache or repository artifact is introduced.
 
 ## Repository and Module Mapping
 

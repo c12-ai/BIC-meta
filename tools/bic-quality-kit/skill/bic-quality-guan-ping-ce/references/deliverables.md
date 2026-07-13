@@ -21,6 +21,9 @@ BIC 质量简报
 需求与问题单
 - 发现方式：
 - 受影响仓库 Issue 扫描：
+- 候选初筛：
+- 初筛排除：
+- 正文读取：
 - 候选 Issue：
 - 候选对应分析：
 - 选择依据：
@@ -82,11 +85,15 @@ brief concise:
   claim about executed verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
   Prefer strong links from the current PR, PR closing text, Diff commits, or an
-  `issue-123` branch. Without a strong link, compare repository candidates with
-  modules and changed objects, then read only plausible Issue bodies. Show why
-  candidates do or do not correspond. Leave risk `unassessed` when more than one
-  candidate remains plausible; do not infer identity from repository membership,
-  a general keyword, or filename similarity alone.
+  `issue-123` branch. Scan at most 100 metadata records per affected repository,
+  compare them with modules and changed objects, and retain at most 10 ordinary
+  shortlist candidates. Read every shortlisted body before semantic alignment;
+  do not perform a second five-body or metadata-only cutoff. Report scanned,
+  shortlisted, excluded, hydration attempted/succeeded/failed, and strong
+  overflow counts plus categorized reasons. Show why candidates do or do not
+  correspond. Leave risk `unassessed` when more than one candidate remains
+  plausible; do not infer identity from repository membership, a general
+  keyword, or filename similarity alone.
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.
 - Do not emit confidence, priority, evidence-type, coverage-percentage,

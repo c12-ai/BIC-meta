@@ -81,8 +81,10 @@ An explicit Issue remains available as an override:
 By default the Skill first identifies repositories changed by the Diff, then
 scans open Issues in each affected repository. Current PR links, PR/commit
 closing references, and a strong `issue-123` branch-name pattern take priority.
-Without a strong link, the Skill compares repository candidates with changed
-modules and objects and reads only plausible Issue bodies. Ambiguous candidates
+Without a strong link, the Skill scans at most 100 metadata records per affected
+repository, compares them with changed modules and objects, shortlists at most
+10 ordinary candidates, and reads every shortlisted body before semantic
+alignment. It reports exclusion and hydration counts; ambiguous candidates
 remain visible and keep overall risk `unassessed`. An explicit reference is
 translated to `--issue` and overrides discovery.
 
@@ -110,15 +112,23 @@ visible; the report does not add a general next-step recommendation.
 
 ## Read-only Scripts
 
-The bundled scripts can be run directly for debugging:
+For a normal end-to-end review, run the assessment entry once so context,
+module, test, Issue, and risk stages share one live Issue snapshot:
+
+```bash
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
+```
+
+The other bundled scripts are standalone diagnostic entry points. Do not chain
+all of them to build one final brief because separate processes perform separate
+metadata collections:
 
 ```bash
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/collect-quality-context.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/detect-impact-scope.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/inspect-test-inventory.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/suggest-test-scope.sh
-tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
-tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
 ```
 
 All wrappers accept `--base-ref <local-ref>` or `--worktree-only`; Issue-aware
