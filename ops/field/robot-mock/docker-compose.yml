@@ -28,7 +28,7 @@ services:
       # Default: a single passing plate (Rf ~0.481, inside the usual 0.4–0.6
       # window). For the fail→retry→pass demo use:
       #   MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg
-      TLC_FIXTURE_SEQUENCE: ${MOCK_TLC_FIXTURE_SEQUENCE:-tlc_plate_med02.jpg}
+      TLC_FIXTURE_SEQUENCE: ${MOCK_TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}
       TZ: ${TZ:-Asia/Shanghai}
     networks:
       - infra-net

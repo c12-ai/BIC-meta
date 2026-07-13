@@ -257,9 +257,9 @@ start_cmd_for() {
     # nor the full-real bench store (192.168.12.150, which real Mind must reach).
     # minimal profile -> local infra MinIO; anything else -> the 150 store.
     mock)   if [ "${BIC_PROFILE}" = "minimal" ]; then
-              printf 'cd %q && S3_ENDPOINT=localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-mock uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
+              printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-mock uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
             else
-              printf 'cd %q && S3_ENDPOINT=192.168.12.150:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-images uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
+              printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=192.168.12.150:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-images uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
             fi ;;
     chem)   printf 'cd %q && uv run uvicorn app.main:app --host 127.0.0.1 --port 8010' "${CHEM_DIR}" ;;
   esac
