@@ -14,8 +14,10 @@ from pathlib import Path
 
 
 KIT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = KIT_DIR.parents[1]
 ANALYZER = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/quality_context.py"
 SKILL_FILE = KIT_DIR / "skill/bic-quality-guan-ping-ce/SKILL.md"
+OPENAI_YAML = KIT_DIR / "skill/bic-quality-guan-ping-ce/agents/openai.yaml"
 DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables.md"
 ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
 
@@ -440,6 +442,51 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertNotIn("下一步建议：", public_template)
         self.assertIn("do not print it in the default brief", skill)
         self.assertIn("Start with the concise `核心结论`", skill)
+
+    def test_skill_discovery_metadata_and_sop_entry_are_consistent(self) -> None:
+        self.assertTrue(OPENAI_YAML.is_file())
+        metadata_lines = OPENAI_YAML.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(metadata_lines[0], "interface:")
+
+        interface: dict[str, str] = {}
+        for line in metadata_lines[1:]:
+            self.assertTrue(line.startswith("  "), line)
+            key, raw_value = line.strip().split(": ", 1)
+            self.assertTrue(raw_value.startswith('"') and raw_value.endswith('"'), line)
+            interface[key] = json.loads(raw_value)
+
+        self.assertEqual(
+            set(interface),
+            {"display_name", "short_description", "default_prompt"},
+        )
+        self.assertEqual(interface["display_name"], "BIC Quality Review")
+        self.assertGreaterEqual(len(interface["short_description"]), 25)
+        self.assertLessEqual(len(interface["short_description"]), 64)
+
+        skill_text = SKILL_FILE.read_text(encoding="utf-8")
+        skill_name = next(
+            line.removeprefix("name: ").strip()
+            for line in skill_text.splitlines()
+            if line.startswith("name: ")
+        )
+        default_prompt = interface["default_prompt"]
+        self.assertIn(f"${skill_name}", default_prompt)
+        self.assertEqual(default_prompt.count("."), 1)
+        self.assertTrue(default_prompt.endswith("."))
+
+        instructions = (ROOT_DIR / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(instructions.count(f"| `{skill_name}` |"), 1)
+        self.assertIn(
+            "@tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md",
+            instructions,
+        )
+        sop_row = next(
+            line for line in instructions.splitlines()
+            if line.startswith(f"| `{skill_name}` |")
+        )
+        for trigger_term in ("test correspondence", "missing tests", "risk"):
+            self.assertIn(trigger_term, skill_text.lower())
+            self.assertIn(trigger_term, sop_row.lower())
 
     def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
         without_issue = self.analyze("assess")

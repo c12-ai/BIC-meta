@@ -91,3 +91,22 @@ repository isolation.
   intended task and kit edits.
 - Confirm public test-analysis JSON contains no confidence fields,
   `evidence_type`, `coverage_gaps`, or `coverage_unconfirmed`.
+
+## 6. Skill Discoverability
+
+- Generate `agents/openai.yaml` in the source Skill with `display_name`,
+  `short_description`, and a one-sentence `$bic-quality-guan-ping-ce` default
+  prompt. Do not add unprovided icons, branding, MCP dependencies, or an
+  unnecessary implicit-invocation override.
+- Add one root SOP Index entry that points to the committed source Skill, not
+  `.agents/skills` or `.claude/skills` generated copies.
+- Document explicit and implicit invocation plus the responsibilities of
+  `SKILL.md`, `agents/openai.yaml`, the SOP Index, and the installer.
+- Add contract tests for metadata shape, Skill-name consistency, description
+  length, default-prompt invocation, and the stable SOP route.
+- Extend installation verification to require `agents/openai.yaml` in the
+  source and in both installed copies.
+
+Validation: run the unit suite, install the Skill, run the complete
+`verify-install.sh` chain, run Skill Creator validation, and finish with
+`git diff --check`.

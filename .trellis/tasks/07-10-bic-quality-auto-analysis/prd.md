@@ -68,6 +68,13 @@ repository or test directory is added.
   Require semantic Issue-acceptance alignment in the final brief; missing Issue
   context must produce `unassessed`, not a guessed low risk.
 - Keep source and installed Claude/Codex skill copies synchronized.
+- Add Codex-facing discovery metadata under `agents/openai.yaml` with a stable
+  display name, short description, and explicit `$bic-quality-guan-ping-ce`
+  default prompt.
+- Add one root SOP Index entry that routes quality review requests to the
+  committed source-of-truth Skill rather than a generated installed copy.
+- Verify discovery metadata, SOP routing, and installed-copy synchronization so
+  missing or stale metadata fails the quality-kit verification chain.
 
 ## Acceptance Criteria
 
@@ -121,6 +128,13 @@ repository or test directory is added.
       delete, missing-base, and dynamic child-repository behavior.
 - [x] Verification confirms the analyzer leaves Git state unchanged.
 - [x] `verify-install.sh` passes for source, Codex, and Claude skill copies.
+- [x] Codex discovery metadata exposes a human-facing name, a 25-64 character
+      short description, and a one-sentence default prompt containing the exact
+      `$bic-quality-guan-ping-ce` invocation.
+- [x] The root SOP Index contains one quality Skill entry that links to
+      `tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md`.
+- [x] Tests and `verify-install.sh` reject missing, inconsistent, or unsynchronized
+      discovery metadata.
 
 ## Notes
 

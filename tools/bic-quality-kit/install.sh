@@ -40,6 +40,8 @@ install_one() {
   fi
 
   cp -R "$SOURCE_DIR" "$target_dir"
+  find "$target_dir" -type d -name "__pycache__" -prune -exec rm -rf {} +
+  find "$target_dir" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
   echo "Installed $SKILL_NAME -> $target_dir"
 }
 

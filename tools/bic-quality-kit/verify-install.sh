@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PYTHONDONTWRITEBYTECODE=1
+
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$KIT_DIR/../.." && pwd)"
 SKILL_NAME="bic-quality-guan-ping-ce"
@@ -39,15 +41,17 @@ if root != expected:
 
 compare_skill_copy() {
   local target="$1"
-  if ! diff -qr "$SOURCE_DIR" "$target" >/dev/null; then
+  if ! diff -qr -x "__pycache__" -x "*.pyc" -x "*.pyo" "$SOURCE_DIR" "$target" >/dev/null; then
     echo "Installed skill differs from source: $target" >&2
-    diff -qr "$SOURCE_DIR" "$target" >&2 || true
+    diff -qr -x "__pycache__" -x "*.pyc" -x "*.pyo" "$SOURCE_DIR" "$target" >&2 || true
     exit 1
   fi
 }
 
 check_dir "$SOURCE_DIR"
 check_file "$SOURCE_DIR/SKILL.md"
+check_dir "$SOURCE_DIR/agents"
+check_file "$SOURCE_DIR/agents/openai.yaml"
 check_file "$SOURCE_DIR/config/scope-taxonomy.yaml"
 check_file "$SOURCE_DIR/config/test-inventory.yaml"
 check_file "$SOURCE_DIR/config/risk-model.yaml"
@@ -79,6 +83,7 @@ check_workspace_root "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
 if [[ -d "$ROOT_DIR/.agents/skills/$SKILL_NAME" ]]; then
   echo "Codex project skill installed: $ROOT_DIR/.agents/skills/$SKILL_NAME"
   compare_skill_copy "$ROOT_DIR/.agents/skills/$SKILL_NAME"
+  check_file "$ROOT_DIR/.agents/skills/$SKILL_NAME/agents/openai.yaml"
   check_workspace_root "$ROOT_DIR/.agents/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
 else
   echo "Codex project skill not installed yet. Run install.sh if desired."
@@ -87,6 +92,7 @@ fi
 if [[ -d "$ROOT_DIR/.claude/skills/$SKILL_NAME" ]]; then
   echo "Claude project skill installed: $ROOT_DIR/.claude/skills/$SKILL_NAME"
   compare_skill_copy "$ROOT_DIR/.claude/skills/$SKILL_NAME"
+  check_file "$ROOT_DIR/.claude/skills/$SKILL_NAME/agents/openai.yaml"
   check_workspace_root "$ROOT_DIR/.claude/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
 else
   echo "Claude project skill not installed yet. Run install.sh if desired."

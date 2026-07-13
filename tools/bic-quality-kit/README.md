@@ -38,12 +38,26 @@ Those installed copies are local tool state. The source of truth remains under `
 Existing installed copies and legacy in-directory backups are preserved under
 `.trellis/.runtime/skill-backups/`, outside Codex and Claude skill discovery.
 
+Skill discovery has three complementary entry points:
+
+- `SKILL.md` defines the workflow and its natural-language trigger description.
+- `agents/openai.yaml` defines the Codex UI name, short description, and default
+  prompt.
+- The root `AGENTS.md` / `CLAUDE.md` SOP Index provides a stable project route
+  to the committed source Skill.
+
 ## Use
 
 In Claude or Codex, ask:
 
 ```text
 用 BIC quality 看下当前 diff
+```
+
+Codex also supports explicit Skill invocation:
+
+```text
+Use $bic-quality-guan-ping-ce to review the current BIC diff.
 ```
 
 or:
