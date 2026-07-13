@@ -178,12 +178,31 @@ else
   warn "no container publishes 18080 (issuer check below is the source of truth)"
 fi
 issuer="$(http_body "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-configuration" | jq -r .issuer 2>/dev/null || true)"
-if [ "${issuer}" = "http://localhost:18080/realms/${KC_REALM}" ]; then
-  ok "realm ${KC_REALM} live, issuer=${issuer}"
-else
-  fail "keycloak realm ${KC_REALM} not answering (issuer='${issuer:-none}')" \
-       "make up   # seeds keycloak; or see ops/run-latest-2026-07-10.md §5"
-fi
+# The real invariant is tri-consistency (CLAUDE.md §infra): discovery issuer ==
+# BE KEYCLOAK_ISSUER_URL == portal VITE_OIDC_AUTHORITY. The issuer host may be
+# localhost or a LAN IP (realm frontendUrl, e.g. when sharing the bench) — what
+# must never drift is the three agreeing on ONE string.
+be_issuer="$(sed -n 's/^KEYCLOAK_ISSUER_URL=//p' "$(repo_dir BIC-agent-service)/.env" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+be_issuer="${be_issuer:-http://localhost:18080/realms/${KC_REALM}}"
+portal_auth="$(sed -n 's/^VITE_OIDC_AUTHORITY=//p' "$(repo_dir BIC-agent-portal)/.env" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+case "${issuer}" in
+  */realms/${KC_REALM})
+    if [ "${issuer}" = "${be_issuer}" ]; then
+      ok "realm ${KC_REALM} live, issuer=${issuer} (matches BE KEYCLOAK_ISSUER_URL)"
+    else
+      fail "issuer '${issuer}' != BE KEYCLOAK_ISSUER_URL '${be_issuer}' — BE will reject portal tokens" \
+           "align BE .env KEYCLOAK_ISSUER_URL with the realm frontendUrl, then make restart-BE"
+    fi
+    if [ -n "${portal_auth}" ] && [ "${portal_auth}" != "${issuer}" ]; then
+      fail "portal VITE_OIDC_AUTHORITY '${portal_auth}' != issuer '${issuer}' — login will break" \
+           "align BIC-agent-portal/.env VITE_OIDC_AUTHORITY, then make restart-portal"
+    fi
+    ;;
+  *)
+    fail "keycloak realm ${KC_REALM} not answering (issuer='${issuer:-none}')" \
+         "make up   # seeds keycloak; or see ops/run-latest-2026-07-10.md §5"
+    ;;
+esac
 
 # --- 8. Service health -----------------------------------------------------
 section "Service health"
