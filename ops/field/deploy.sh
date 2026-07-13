@@ -294,7 +294,10 @@ cmd_init_env() {
     info "deriving shared infra creds from $src"
     for key in POSTGRES_USER POSTGRES_PASSWORD REDIS_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD MQ_USER MQ_PASSWORD; do
       local val
-      val="$(grep -E "^(export )?${key}=" "$src" 2>/dev/null | tail -1 | sed -E "s/^(export )?${key}=//; s/^\"//; s/\"$//; s/^'//; s/'$//")"
+      # `|| true` inside: with set -eo pipefail an ABSENT key (grep exit 1)
+      # must fall through to the warn-and-continue branch, not kill init-env
+      # (hit live on a1 2026-07-13: its V1 env names MQ creds RABBITMQ_DEFAULT_*).
+      val="$({ grep -E "^(export )?${key}=" "$src" 2>/dev/null || true; } | tail -1 | sed -E "s/^(export )?${key}=//; s/^\"//; s/\"$//; s/^'//; s/'$//")"
       if [ -n "$val" ]; then
         set_env_key "$key" "$val"; ok "$key ← $src"
       else
