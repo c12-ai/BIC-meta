@@ -58,12 +58,23 @@ done <<EOF
 $(services)
 EOF
 
+# Mind mode one-liner (intent from BE .env; detail: make mind-status).
+printf '\n  %smind:%s  ' "${C_DIM}" "${C_RST}"
+case "$(be_mind_mock)" in
+  false) printf '%sREAL%s (%s:%s via orin-tail)\n' "${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}" ;;
+  true)  printf '%sMOCK%s (fixtures; make mind-real to switch)\n' "${C_YEL}" "${C_RST}" ;;
+  *)     printf '%sunset%s (BE default = mock)\n' "${C_YEL}" "${C_RST}" ;;
+esac
+
 # Infra one-liner.
 printf '\n  %sinfra:%s ' "${C_DIM}" "${C_RST}"
 if docker_up; then
   while IFS='|' read -r name _ _; do
     [ -n "${name}" ] || continue
-    if container_running "${name}"; then col="${C_GRN}"; mark="ok"; else col="${C_RED}"; mark="DOWN"; fi
+    if container_running "${name}"; then col="${C_GRN}"; mark="ok"
+    elif [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
+      col="${C_GRN}"; mark="fwd->orin"
+    else col="${C_RED}"; mark="DOWN"; fi
     printf '%s=%s ' "${name}" "${col}${mark}${C_RST}"
   done <<EOF
 $(infra_containers)

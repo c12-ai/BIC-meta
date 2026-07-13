@@ -60,6 +60,12 @@ section "Infra containers (docker)"
 if docker_up; then
   while IFS='|' read -r name port label; do
     [ -n "${name}" ] || continue
+    # Real-Mind mode deliberately stops bic-minio: :9000 is the forwarder to
+    # orin's MinIO (mind.sh). Not a fault — the Mind section below verifies it.
+    if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
+      ok "${name} intentionally stopped (real-Mind mode: :9000 = forwarder -> orin)"
+      continue
+    fi
     if container_running "${name}"; then
       ok "${name} up  ${C_DIM}(${label}, :${port})${C_RST}"
     elif container_exists "${name}"; then
@@ -82,14 +88,20 @@ while IFS='|' read -r port kind expect label; do
   cmd="$(printf '%s' "${owner}" | awk '{print $1}')"
   pid="$(printf '%s' "${owner}" | awk '{print $2}')"
   if [ -z "${owner}" ]; then
-    case "${kind}:${expect}" in
-      app:mind) note "${port} free — ${label} (only in full-real profile)" ;;
-      *)        note "${port} free — ${label} (start with: make up)" ;;
-    esac
+    note "${port} free — ${label} (start with: make up)"
     continue
   fi
   case "${kind}" in
     docker)
+      # Real-Mind mode: :9000/:9001 are owned by minio-forward.py, not docker.
+      if [ "${expect}" = "bic-minio" ] && [ "${pid}" = "$(minio_fwd_pid)" ]; then
+        if [ "$(be_mind_mock)" = "false" ]; then
+          ok "${port} minio forwarder -> orin (real-Mind mode) — ${label}"
+        else
+          fail "${port} held by minio forwarder but BE intent is MOCK — inconsistent" "make mind-mock"
+        fi
+        continue
+      fi
       case "${cmd}" in
         com.docke*|docker*) ok "${port} docker — ${label}" ;;
         ssh)  fail "${port} held by ssh TUNNEL (pid ${pid}), shadowing ${expect} — ${label}" \
@@ -105,10 +117,6 @@ while IFS='|' read -r port kind expect label; do
         fail "${port} held by FOREIGN '${cmd}' (pid ${pid}) — expected our ${label}" \
              "lsof -nP -iTCP:${port} -sTCP:LISTEN   # our services would collide; relocate the other or free it"
       fi
-      ;;
-    ext)
-      # External/optional dependency (e.g. Mind capture proxy) — any listener is fine.
-      ok "${port} present '${cmd}' (pid ${pid}) — ${label}"
       ;;
   esac
 done <<EOF
@@ -234,6 +242,34 @@ for r in BIC-lab-service BIC-agent-service BIC-agent-portal mars_interface_mock;
     fail "$r not found at ${d}" "scripts/bootstrap.sh all   # clones missing repos; or set BIC_ROOT=/path/to/your/checkout"
   fi
 done
+
+# --- 10. Mind / AI engine mode ----------------------------------------------
+# The bench must never be ambiguous about mock vs real Mind (user requirement
+# 2026-07-13). Intent lives in BE .env MIND_MOCK_MODE; real mode additionally
+# needs the /32 route + minio forwarder + reachable Mind (see mind.sh).
+section "Mind / AI engine mode"
+mind_intent="$(be_mind_mock)"
+case "${mind_intent}" in
+  true)
+    if container_running bic-minio; then
+      ok "MODE: MOCK — Mind fixtures + local bic-minio (enable real: make mind-real)"
+    else
+      fail "MODE: MOCK but local bic-minio is not running" "make mind-mock"
+    fi
+    ;;
+  false)
+    _mind_bad=0
+    mind_route_ok || { _mind_bad=1; fail "no /32 route to ${MIND_LAB_IP} via tailscale (lost on reboot)" "make mind-real"; }
+    [ -n "$(minio_fwd_pid)" ] || { _mind_bad=1; fail "minio forwarder not running (lost on reboot)" "make mind-real"; }
+    tcp_open "${MIND_LAB_IP}" "${MIND_PORT}" 3 || { _mind_bad=1; fail "real Mind unreachable (${MIND_LAB_IP}:${MIND_PORT})" "make mind-status  # or fall back: make mind-mock"; }
+    if [ "${_mind_bad}" = "0" ]; then
+      ok "MODE: REAL — Mind ${MIND_LAB_IP}:${MIND_PORT} via orin-tail + orin MinIO through forwarder"
+    fi
+    ;;
+  unset)
+    warn "MIND_MOCK_MODE not set in BE .env — BE code default applies (mock); make mind-mock/mind-real to pin it"
+    ;;
+esac
 
 # --- Verdict ---------------------------------------------------------------
 printf '\n%s%s== Verdict ==%s\n' "${C_BLD}" "${C_BLU}" "${C_RST}"

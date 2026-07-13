@@ -21,6 +21,7 @@ export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help
 .PHONY: help up pull update doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
+        mind-status mind-real mind-mock \
         bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared
 
 help: ## Show this help
@@ -33,6 +34,10 @@ help: ## Show this help
 	@echo "  make status    one-screen service:port:status:sha"
 	@echo "  make down      stop app services (INFRA=1 also stops shared infra)"
 	@echo "  make restart-<svc>   lab | BE | portal | mock | chem"
+	@echo ""
+	@echo "  make mind-status     which AI engine is active: MOCK or REAL (read-only)"
+	@echo "  make mind-real       switch to real Mind + orin MinIO (one sudo per boot)"
+	@echo "  make mind-mock       switch back to Mind fixtures + local MinIO"
 	@echo ""
 	@echo "  BIC_ROOT=$(BIC_ROOT)"
 	@echo "  Troubleshooting appendix: ops/run-latest-2026-07-10.md"
@@ -53,6 +58,11 @@ restart-BE:     ; @$(ENV)/restart.sh BE
 restart-portal: ; @$(ENV)/restart.sh portal
 restart-mock:   ; @$(ENV)/restart.sh mock
 restart-chem:   ; @$(ENV)/restart.sh chem
+
+## --- Mind mode (mock vs real AI engine; see scripts/bic-env/mind.sh) -------
+mind-status:   ; @$(ENV)/mind.sh status
+mind-real:     ; @$(ENV)/mind.sh real
+mind-mock:     ; @$(ENV)/mind.sh mock
 
 ## --- repo bootstrap (clone missing sibling repos) --------------------------
 BOOTSTRAP := ./scripts/bootstrap.sh

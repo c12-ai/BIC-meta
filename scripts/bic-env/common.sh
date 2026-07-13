@@ -67,6 +67,46 @@ fi
 # full-real reads the repos' existing .env values and never overrides them.
 BIC_PROFILE="${BIC_PROFILE:-minimal}"
 
+# ----------------------------------------------------------------------------
+# Mind / orin-tail real-service path (2026-07-13, see scripts/bic-env/mind.sh)
+# Real Mind lives on the LAB network; off-lab benches reach it through the
+# orin-tail tailscale node (c12-workstation), which advertises 192.168.12.0/24.
+# ----------------------------------------------------------------------------
+MIND_LAB_IP="${MIND_LAB_IP:-192.168.12.104}"   # real Mind box (lab LAN)
+MIND_PORT="${MIND_PORT:-8002}"
+ORIN_TS_IP="${ORIN_TS_IP:-100.114.189.44}"     # orin-tail tailnet address
+ORIN_LAB_IP="${ORIN_LAB_IP:-192.168.12.150}"   # orin on the lab LAN = presign host
+MINIO_FWD_PAT='minio[-_]forward'               # pgrep pattern for the :9000 forwarder
+
+# be_mind_mock -> intent from BE .env MIND_MOCK_MODE: "true" | "false" | "unset"
+be_mind_mock() {
+  local f v
+  f="$(repo_dir BIC-agent-service)/.env"
+  [ -f "${f}" ] || { echo unset; return; }
+  v="$(sed -n 's/^MIND_MOCK_MODE=//p' "${f}" | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+  case "${v}" in
+    true|True|TRUE|1)    echo true ;;
+    false|False|FALSE|0) echo false ;;
+    *)                   echo unset ;;
+  esac
+}
+
+# tcp_open <host> <port> [timeout_s]
+tcp_open() { nc -z -G "${3:-2}" "$1" "$2" >/dev/null 2>&1; }
+
+# minio_fwd_pid -> pid of a running minio forwarder ("" if none)
+minio_fwd_pid() { pgrep -f "${MINIO_FWD_PAT}" 2>/dev/null | head -1 || true; }
+
+# mind_route_ok — host route for the Mind box goes via a tailscale utun
+# (needed off-lab: the local LAN is also 192.168.12.x, so without the /32 the
+# connected /24 wins and .104 resolves to a dead local ARP).
+mind_route_ok() {
+  route -n get "${MIND_LAB_IP}" 2>/dev/null | grep -q 'interface: utun'
+}
+
+# orin_lab_ip_is_local — this box already answers for ORIN_LAB_IP (presign host)
+orin_lab_ip_is_local() { ifconfig 2>/dev/null | grep -q "inet ${ORIN_LAB_IP} "; }
+
 # DRY: `make up DRY=1` prints mutating actions instead of running them.
 DRY_RUN="${DRY:-${DRY_RUN:-0}}"
 
@@ -239,7 +279,6 @@ port_table() {
 8800|app|BE|Agent backend
 5173|app|portal|Portal (Vite)
 8010|app|chem|Chem service
-8011|ext|mind|Mind capture proxy (external bridge to orin, full-real only)
 REC
 }
 

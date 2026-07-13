@@ -68,6 +68,12 @@ section "2. Infra containers"
 missing=""
 while IFS='|' read -r name _ _; do
   [ -n "${name}" ] || continue
+  # Real-Mind mode deliberately keeps bic-minio STOPPED: :9000 is the
+  # minio-forward.py bridge to orin's MinIO (see mind.sh). Don't fight it here.
+  if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
+    ok "bic-minio intentionally stopped (real-Mind mode: :9000 = forwarder -> orin)"
+    continue
+  fi
   if container_running "${name}"; then
     ok "${name} running"
   elif container_exists "${name}"; then
@@ -241,10 +247,20 @@ migrate_repo() { # <dir> <label>
 migrate_repo "${lab}" BIC-lab-service
 migrate_repo "${be}" BIC-agent-service
 
+# ===========================================================================
+section "8. Mind mode (mock vs real Mind/MinIO — mind.sh converge)"
+# Default is MOCK. full-real profile auto-switches to REAL only when every leg
+# is already reachable without sudo (route present, orin-tail up); otherwise it
+# stays MOCK and prints what is missing. Runs BEFORE the app launch so the BE
+# starts with the right MIND_* flags (converge stops a stale BE; section 9
+# relaunches it). The final banner states the active mode explicitly.
+bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mind.sh" converge || \
+  warn "mind converge reported a problem — run: make mind-status"
+
 fi  # end full-bring-up sections (ONLY guard)
 
 # ===========================================================================
-section "8. App services (tmux ${BIC_TMUX}: lab -> BE -> portal -> mock -> chem)"
+section "9. App services (tmux ${BIC_TMUX}: lab -> BE -> portal -> mock -> chem)"
 
 # start command for a service (BE carries the unset-proxy prefix).
 start_cmd_for() {
@@ -327,6 +343,10 @@ done
 
 # ===========================================================================
 printf '\n%s%s== Done ==%s  ' "${C_BLD}" "${C_BLU}" "${C_RST}"
+case "$(be_mind_mock)" in
+  false) printf '%sMIND: REAL%s (%s:%s via orin-tail)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}" ;;
+  *)     printf '%sMIND: MOCK%s (fixtures; enable real: make mind-real)  ' "${C_BLD}${C_YEL}" "${C_RST}" ;;
+esac
 printf 'run %smake status%s or %smake doctor%s to verify.\n' "${C_BLD}" "${C_RST}" "${C_BLD}" "${C_RST}"
 [ "${DRY_RUN}" = "1" ] && printf '  %s(this was a DRY run — nothing changed)%s\n' "${C_DIM}" "${C_RST}"
 exit 0
