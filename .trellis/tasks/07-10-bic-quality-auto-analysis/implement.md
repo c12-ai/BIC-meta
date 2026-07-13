@@ -98,6 +98,9 @@ repository isolation.
   read-only boundary.
 - Add Issue Context and an evidence-backed pre-test Risk Matrix without implying
   that any verification command ran.
+- Add an explicit untrusted-content rule to the Skill boundary and a malicious
+  Issue-body fixture proving embedded instructions remain inert data and do not
+  trigger subprocess execution.
 - Remove raw `test_inventory` from the final `assess` payload after correspondence
   and risk derivation; retain it in standalone inventory/suggest diagnostics.
 - Reinstall source to `.agents` and `.claude` only after source verification.
