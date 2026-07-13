@@ -46,6 +46,14 @@ pull:          ; @$(ENV)/pull.sh
 # exception — it serves from disk). update closes that gap deterministically.
 update:        ; @$(ENV)/pull.sh && $(ENV)/down.sh && $(ENV)/up.sh
 doctor:        ; @$(ENV)/doctor.sh
+
+## --- field (orin) ----------------------------------------------------------
+# Field counterparts of the bench targets. update.sh does survey->guards->
+# build->roll->verify; guards HALT on judgment calls (mock compat, missing
+# .env keys) — resolve, then re-run with the suggested flag.
+field-dry:     ; @FIELD_SSH=$${FIELD_SSH:-orin-tail} ops/field/update.sh --dry-run
+field-update:  ; @FIELD_SSH=$${FIELD_SSH:-orin-tail} ops/field/update.sh $(FLAGS)
+field-status:  ; @ssh -o BatchMode=yes $${FIELD_SSH:-orin-tail} 'cd ~/bic-v2 && ./deploy.sh status'
 status:        ; @$(ENV)/status.sh
 down:          ; @$(ENV)/down.sh
 restart-lab:    ; @$(ENV)/restart.sh lab
