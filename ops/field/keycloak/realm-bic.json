@@ -39,6 +39,17 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
+    },
+    {
+      "clientId": "bic-agent-service",
+      "name": "BIC Agent Service (machine identity)",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "${BIC_AGENT_SERVICE_CLIENT_SECRET:}"
     }
   ],
   "identityProviders": [

@@ -29,11 +29,26 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in the field .env}
       REDIS_DB: ${LAB_REDIS_DB:-4}
 
-      S3_ENDPOINT_URL: http://${MINIO_CONTAINER:-bic-minio}:9000
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}
+      # Default = shared MinIO by container name; cloud-Mind sites (a1)
+      # override endpoint+creds to real AWS S3 (same reachability story as the
+      # BE's presigned plate URLs).
+      S3_ENDPOINT_URL: ${LAB_S3_ENDPOINT_URL:-http://${MINIO_CONTAINER:-bic-minio}:9000}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET_NAME: ${LAB_S3_BUCKET:-labrun}
+
+      # --- Auth (lab #112: Keycloak Bearer-JWT validation + CORS allowlist) ---
+      # Issuer must equal the browser-facing token `iss` (same string as BE
+      # KEYCLOAK_ISSUER_URL / portal VITE_OIDC_AUTHORITY) AND be reachable from
+      # inside this container (the LAN address routes out through the host).
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://192.168.12.150:18080/realms/bic}
+      # bic-portal = human user tokens; bic-agent-service = BE service tokens.
+      KEYCLOAK_ALLOWED_AUDIENCES: ${KEYCLOAK_ALLOWED_AUDIENCES:-bic-portal,bic-agent-service}
+      # enforce (field default) | off — off is a bench-debug/rollback lever only.
+      LAB_AUTH_MODE: ${LAB_AUTH_MODE:-enforce}
+      # The portal calls lab cross-origin with an absolute URL in field builds.
+      CORS_ALLOW_ORIGINS: ${LAB_CORS_ALLOW_ORIGINS:-http://${FIELD_HOST:-192.168.12.150}:15173}
 
       MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}
       MQ_PORT: "5672"

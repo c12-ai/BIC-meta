@@ -17,6 +17,10 @@ set -euo pipefail
 FIELD_SSH="${FIELD_SSH:-orin-tail}"
 FIELD_HOST_IP="${FIELD_HOST_IP:-192.168.12.150}"
 REPO_BASE="${REPO_BASE:-/Users/wenlongwang/Work/BIC/talos}"
+# Portal image variant = tag prefix (host-specific: the portal bakes absolute
+# URLs at build time, so each site has its own variant — orin=field, a1=field-a1;
+# sharing one tag across sites would clobber the other site's image).
+PORTAL_VARIANT="${PORTAL_VARIANT:-field}"
 ORG=c12-ai
 
 # svc key -> repo dir | gh repo | container | compose dir | health url (on field) | port
@@ -42,7 +46,7 @@ if [ "${1:-}" = "rollback" ]; then
   svc="${2:?usage: update.sh rollback <svc> <sha>}"; sha="${3:?sha required}"
   cdir="$(compose_dir "$svc")"; [ -n "$cdir" ] || die "unknown svc $svc"
   tag="sha-${sha}"
-  [ "$svc" = portal ] && tag="field-${sha:0:7}"
+  [ "$svc" = portal ] && tag="${PORTAL_VARIANT}-${sha:0:7}"
   info "rollback $svc -> $tag"
   if [ "$svc" = portal ]; then
     fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=${tag}|\" .env"
@@ -69,7 +73,7 @@ for s in "${SVCS[@]}"; do
   git -C "$rd" fetch -q origin
   MAIN[$s]="$(git -C "$rd" rev-parse origin/main)"
   if [ "$s" = portal ]; then
-    DEPLOYED[$s]="$(fssh "grep -m1 '^PORTAL_IMAGE_TAG=' ~/bic-v2/.env" | sed 's/.*field-//')"
+    DEPLOYED[$s]="$(fssh "grep -m1 '^PORTAL_IMAGE_TAG=' ~/bic-v2/.env" | sed "s/.*${PORTAL_VARIANT}-//")"
   else
     DEPLOYED[$s]="$(fssh "docker inspect $(container "$s") --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'" 2>/dev/null || true)"
   fi
@@ -119,7 +123,7 @@ for s in "${UPDATES[@]}"; do
   info "build $s ($gr @ main)"
   if [ "$s" = portal ]; then
     gh workflow run docker-build.yml --repo "$gr" --ref main \
-      -f image_variant=field \
+      -f image_variant="${PORTAL_VARIANT}" \
       -f vite_api_base_url="http://${FIELD_HOST_IP}:8800" \
       -f vite_lab_api_base_url="http://${FIELD_HOST_IP}:8192" \
       -f vite_oidc_authority="http://${FIELD_HOST_IP}:18080/realms/bic"
@@ -143,7 +147,7 @@ done
 for s in "${UPDATES[@]}"; do
   cdir="$(compose_dir "$s")"
   if [ "$s" = portal ]; then
-    fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=field-${MAIN[portal]:0:7}|\" .env"
+    fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=${PORTAL_VARIANT}-${MAIN[portal]:0:7}|\" .env"
   fi
   info "roll $s"
   fssh "cd ~/bic-v2 && docker compose -f ${cdir}/docker-compose.yml --env-file .env pull -q && docker compose -f ${cdir}/docker-compose.yml --env-file .env up -d"
