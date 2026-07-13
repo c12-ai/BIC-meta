@@ -234,6 +234,25 @@ for _repo in "${be}" "${lab}" "${portal}"; do
     ok "$(basename "${_repo}"): seeded .env from .env.example (review before real-Mind use)"
   fi
 done
+
+# Auth env self-heal (lab JWT enforcement wave): these keys are REQUIRED for a
+# working bench. Append-only — an existing value is never overwritten, so LAN
+# benches with a non-localhost issuer keep their override.
+ensure_env_key() { # <env-file> <key> <value> <label>
+  _f="$1"; _k="$2"; _v="$3"; _label="$4"
+  [ -f "${_f}" ] || return 0
+  if grep -q "^${_k}=" "${_f}"; then
+    ok "${_label}: ${_k} present"
+  else
+    # heal a missing trailing newline first (append would glue onto the last line)
+    [ -n "$(tail -c1 "${_f}")" ] && do_sh "printf '\n' >> '${_f}'"
+    do_sh "printf '%s=%s\n' '${_k}' '${_v}' >> '${_f}'"
+    ok "${_label}: ${_k} appended (dev default — override for non-standard benches)"
+  fi
+}
+ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_ID     "${KC_SERVICE_CLIENT}"        "BE"
+ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_SECRET "${KC_SERVICE_CLIENT_SECRET}" "BE"
+ensure_env_key "${lab}/.env" KEYCLOAK_ISSUER_URL    "http://localhost:18080/realms/${KC_REALM}" "lab"
 if [ -d "${portal}" ]; then
   if [ ! -d "${portal}/node_modules" ] || [ "${portal}/pnpm-lock.yaml" -nt "${portal}/node_modules" ]; then
     do_sh "cd '${portal}' && pnpm install"
