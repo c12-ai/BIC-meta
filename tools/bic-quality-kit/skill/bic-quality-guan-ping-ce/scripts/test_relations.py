@@ -18,6 +18,20 @@ TOKEN_STOPWORDS = {
     "tsx", "js", "jsx", "pages", "api", "routers",
 }
 NON_SOURCE_TEST_MODULES = {"portal/tests", "agent/tests", "meta/docs", "meta/test-config"}
+DOCUMENTATION_SUFFIXES = {".adoc", ".md", ".mdx", ".rst"}
+DOCUMENTATION_DIRECTORIES = {"docs", "references"}
+
+
+def guidance_applicability(path: str, module_scope: str) -> tuple[bool, str | None]:
+    """Return whether a changed path should receive add/strengthen guidance."""
+    if module_scope in NON_SOURCE_TEST_MODULES:
+        return False, f"{module_scope} does not represent executable source behavior"
+    parsed = Path(path)
+    if parsed.suffix.lower() in DOCUMENTATION_SUFFIXES:
+        return False, "documentation-only change"
+    if {part.lower() for part in parsed.parts} & DOCUMENTATION_DIRECTORIES:
+        return False, "documentation/reference path"
+    return True, None
 
 
 def repo_local(path: str, repo: str) -> str:
@@ -322,45 +336,49 @@ def analyze_test_relations(
         add_tests: list[str] = []
         strengthen_tests: list[str] = []
         no_gaps: list[str] = []
-        if module not in NON_SOURCE_TEST_MODULES:
-            for symbol in flattened_symbols:
-                name = symbol["name"]
-                direct_for_object = [
-                    relation for relation in direct
-                    if name in relation["related_symbols"]
-                    or (
-                        symbol["kind"] in {"file", "changed-file"}
-                        and symbol["path"] in relation["related_files"]
-                    )
-                ]
-                indirect_for_object = [
-                    relation for relation in indirect
-                    if name in relation["related_symbols"]
-                ]
-                active_direct = any(
-                    relation["has_active_test_with_assertion"]
-                    and (name in relation["related_symbols"] or symbol["kind"] == "file")
-                    for relation in direct_for_object
+        non_testable_changes: dict[str, str] = {}
+        for symbol in flattened_symbols:
+            applicable, exclusion_reason = guidance_applicability(symbol["path"], module)
+            if not applicable:
+                non_testable_changes.setdefault(symbol["path"], exclusion_reason or "not applicable")
+                continue
+            name = symbol["name"]
+            direct_for_object = [
+                relation for relation in direct
+                if name in relation["related_symbols"]
+                or (
+                    symbol["kind"] in {"file", "changed-file"}
+                    and symbol["path"] in relation["related_files"]
                 )
-                active_indirect = any(
-                    relation["has_active_test_with_assertion"]
-                    for relation in indirect_for_object
-                )
-                possible_for_object = any(
-                    symbol["path"] in relation["related_files"]
-                    for relation in possible
-                )
-                needs_strengthening = bool(
-                    direct_for_object or indirect_for_object or possible_for_object
-                )
-                observation = "declared in an added file" if "added" in symbol.get("change_types", []) else "declared in a changed file (diff-hunk attribution unavailable)"
-                subject = f"{symbol['kind']} {name} in {symbol['path']} ({observation})"
-                if active_direct or active_indirect:
-                    no_gaps.append(f"No obvious static gap for {subject}: an active object-related test contains an assertion.")
-                elif needs_strengthening:
-                    strengthen_tests.append(f"Strengthen tests for {subject}: related evidence is only structural/scenario-based, disabled, or has no assertion.")
-                else:
-                    add_tests.append(f"Add a test for {subject}: no related test was found by imports, identifiers, configured relations, filename, or module structure.")
+            ]
+            indirect_for_object = [
+                relation for relation in indirect
+                if name in relation["related_symbols"]
+            ]
+            active_direct = any(
+                relation["has_active_test_with_assertion"]
+                and (name in relation["related_symbols"] or symbol["kind"] == "file")
+                for relation in direct_for_object
+            )
+            active_indirect = any(
+                relation["has_active_test_with_assertion"]
+                for relation in indirect_for_object
+            )
+            possible_for_object = any(
+                symbol["path"] in relation["related_files"]
+                for relation in possible
+            )
+            needs_strengthening = bool(
+                direct_for_object or indirect_for_object or possible_for_object
+            )
+            observation = "declared in an added file" if "added" in symbol.get("change_types", []) else "declared in a changed file (diff-hunk attribution unavailable)"
+            subject = f"{symbol['kind']} {name} in {symbol['path']} ({observation})"
+            if active_direct or active_indirect:
+                no_gaps.append(f"No obvious static gap for {subject}: an active object-related test contains an assertion.")
+            elif needs_strengthening:
+                strengthen_tests.append(f"Strengthen tests for {subject}: related evidence is only structural/scenario-based, disabled, or has no assertion.")
+            else:
+                add_tests.append(f"Add a test for {subject}: no related test was found by imports, identifiers, configured relations, filename, or module structure.")
 
         module_results.append({
             **module_ref(key),
@@ -379,6 +397,10 @@ def analyze_test_relations(
             "add_tests": add_tests,
             "strengthen_tests": strengthen_tests,
             "no_obvious_test_gaps": no_gaps,
+            "non_testable_changes": [
+                {"path": path, "reason": reason}
+                for path, reason in sorted(non_testable_changes.items())
+            ],
         })
 
     return {

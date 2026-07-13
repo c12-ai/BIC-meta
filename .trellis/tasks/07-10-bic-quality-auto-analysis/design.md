@@ -128,6 +128,14 @@ Concrete test files are inspected for imports, referenced identifiers, test and
 scenario names, assertions, and skip/xfail/todo state. The analyzer never
 imports test modules or invokes a test runner.
 
+Test-like filenames are only discovery candidates. JavaScript/TypeScript needs
+a parsed `test`/`it` case. Python additionally needs a standard test directory,
+an assertion, or a pytest/unittest framework signal. A candidate that cannot be
+parsed may remain diagnostic metadata, but it cannot count as test evidence.
+This prevents implementation modules such as `scripts/test_assets.py` from
+being mistaken for pytest files solely because of names such as
+`test_type_for_path`.
+
 Explicit test inventory entries add semantic module relations, especially for
 cross-repository E2E flows. Automatic correspondence uses direct imports or
 symbol references first, then safe one-hop or explicit relations, then
@@ -142,6 +150,12 @@ object-specific direct, safe-one-hop, or explicitly object-mapped test with an
 assertion produces a statement that no obvious static gap was found. A
 module-only configured relation or broad scenario candidate cannot clear every
 changed object. None of these conclusions proves execution or pass/fail.
+
+Before producing add/strengthen guidance, changed objects pass a deterministic
+test-applicability filter. Documentation, Skill/reference, and planning-only
+paths are ineligible for new-test guidance unless a concrete existing test
+relation already establishes an executable documentation contract. Runtime
+configuration is not excluded by extension alone.
 
 The complete discovered inventory is an internal intermediate for `suggest` and
 `assess`. The standalone `inventory` wrapper and `suggest` diagnostic output

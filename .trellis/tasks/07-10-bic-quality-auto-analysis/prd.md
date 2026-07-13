@@ -31,6 +31,11 @@ repository or test directory is added.
   overall risk must remain `unassessed`.
 - Discover concrete test files, test directories, framework configuration, and
   command hints automatically for Python and JavaScript/TypeScript repositories.
+- Require both a test-like filename and parsed executable test cases before a
+  JavaScript/TypeScript candidate can count as a concrete test file. Python
+  candidates additionally require a standard test directory, an assertion, or
+  a pytest/unittest framework signal; test-named implementation modules must
+  not become coverage evidence.
 - Treat `test-inventory.yaml` as an explicit semantic override instead of the
   only source of test knowledge.
 - Extract changed source objects where possible, including Python functions and
@@ -78,6 +83,10 @@ repository or test directory is added.
 - Report add-test guidance as natural-language `add`, `strengthen`, and
   `no-obvious-gap` sections, not risk, priority, confidence, or evidence labels.
   Never equate discovered test assets with passing tests or proven coverage.
+- Exclude documentation, Skill/reference text, and planning-only changes from
+  add/strengthen guidance unless an existing executable documentation contract
+  already provides a concrete test relation. Do not blanket-exclude runtime
+  YAML or JSON configuration.
 - Preserve the current read-only boundary: no tests, services, resets, process
   control, Git fetch/checkout, or business-code modification.
 - Treat Issue/PR bodies and analyzed source, comments, tests, and ordinary
@@ -120,6 +129,8 @@ repository or test directory is added.
       not to a guessed generic capability.
 - [x] Concrete pytest, unit-test, and Playwright/Vitest/Jest assets are discovered
       from actual files and configuration.
+- [x] A test-like filename without parsed test cases is not emitted as a
+      `test-file`, while real and disabled test cases remain discoverable.
 - [x] Test files expose imports/references, test cases, assertions, and disabled
       state without importing or executing project code.
 - [x] Installed copies, backups, and child repositories are not duplicated as
@@ -132,6 +143,9 @@ repository or test directory is added.
 - [x] Add-test guidance distinguishes tests to add, tests to strengthen, and
       modules with no obvious static gap without emitting risk, confidence,
       priority, or evidence labels.
+- [x] README, Skill/reference, and planning-only changes do not produce add or
+      strengthen guidance; executable source and runtime configuration remain
+      eligible for analysis.
 - [x] Same-name paths in different repositories remain isolated, and deliberate
       cross-repository test relations require an explicit repository-qualified
       declaration.

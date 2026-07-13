@@ -466,7 +466,7 @@ def changed_source_symbols(
 ) -> list[dict[str, Any]]:
     test_paths = {
         asset["path"] for asset in tests["discovered_assets"]
-        if asset.get("asset_kind") == "test-file"
+        if asset.get("asset_kind") in {"test-file", "test-candidate"}
     }
     changed_sources = [item for item in context["changed_files"] if item["path"] not in test_paths]
     return extract_changed_symbols(WORKSPACE_ROOT, changed_sources)

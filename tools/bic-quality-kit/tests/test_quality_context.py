@@ -94,6 +94,13 @@ class QualityContextFixtureTest(unittest.TestCase):
         write(self.root / "staged.txt", "staged\n")
         git(self.root, "add", "staged.txt")
         write(self.root / "untracked.txt", "untracked\n")
+        quality_skill = self.root / "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce"
+        write(quality_skill / "scripts/test_assets.py", "def test_type_for_path(path):\n    return path\n")
+        write(quality_skill / "scripts/test_relations.py", "def test_guidance_applicability(path):\n    return bool(path)\n")
+        write(quality_skill / "scripts/test_unparseable.py", "def test_broken(:\n")
+        write(quality_skill / "SKILL.md", "# Fixture Skill\n")
+        write(quality_skill / "references/test-analysis-rules.md", "# Fixture rules\n")
+        write(quality_skill / "config/runtime.yaml", "enabled: true\n")
 
         self.child = self.root / "BIC-agent-service"
         init_repo(self.child)
@@ -113,6 +120,7 @@ class QualityContextFixtureTest(unittest.TestCase):
         write(self.child / "tests/unit/test_alias_target.py", "from app.api.routers.alias_target import alias_target as subject\n\ndef test_alias_target():\n    assert subject() == 'alias'\n")
         write(self.child / "app/tests/test_relative.py", "from ..api.feature import feature\n\ndef test_feature_relative():\n    assert feature() == 'feature'\n")
         write(self.child / "tests/unit/test_unittest_style.py", "import unittest\n\nclass TestStyle(unittest.TestCase):\n    def test_style(self):\n        self.assertEqual(1, 1)\n")
+        write(self.child / "scripts/test_smoke.py", "def test_smoke():\n    assert True\n")
         git(self.child, "add", ".")
         git(self.child, "commit", "-m", "base")
         git(self.child, "switch", "-c", "feature")
@@ -161,6 +169,7 @@ class QualityContextFixtureTest(unittest.TestCase):
         init_repo(self.portal)
         write(self.portal / "README.md", "base\n")
         write(self.portal / "src/lib/agent-client.test.ts", "import { client } from './agent-client'\ntest('client', () => { expect(client).toBeDefined() })\n")
+        write(self.portal / "src/lib/describe-only.test.ts", "describe('helpers', () => {})\n")
         write(self.portal / "src/lib/unrelated.test.ts", "test('other', () => { expect(true).toBe(true) })\n")
         write(self.portal / "src/stores/chatStore.feedback.test.ts", "import { chatStore } from './chatStore'\ntest('feedback', () => { expect(chatStore).toBeDefined() })\n")
         write(self.portal / "src/stores/workspaceStore.test.ts", "test('workspace', () => { expect(true).toBe(true) })\n")
@@ -321,6 +330,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         paths = {asset["path"] for asset in assets}
         root_paths = {asset["path"] for asset in assets if asset["repo"] == "BIC-meta"}
         self.assertIn("BIC-agent-service/tests/unit/test_sse.py", paths)
+        self.assertIn("BIC-agent-service/scripts/test_smoke.py", paths)
         self.assertNotIn("BIC-agent-service/tests/unit/test_sse.py", root_paths)
         self.assertNotIn("BIC-agent-service/tests/empty", paths)
         self.assertFalse(any(path.startswith((".agents/", ".claude/", ".codex/", ".trellis/")) for path in paths))
@@ -330,6 +340,19 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("BIC-agent-portal/playwright.config.ts", paths)
         self.assertTrue(any(asset["asset_kind"] == "test-command" for asset in assets if asset["repo"] == "BIC-agent-portal"))
         asset_by_path = {asset["path"]: asset for asset in assets}
+        self.assertNotIn(
+            "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/test_assets.py",
+            paths,
+        )
+        self.assertNotIn(
+            "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/test_relations.py",
+            paths,
+        )
+        self.assertNotIn("BIC-agent-portal/src/lib/describe-only.test.ts", paths)
+        unparseable = asset_by_path[
+            "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/test_unparseable.py"
+        ]
+        self.assertEqual(unparseable["asset_kind"], "test-candidate")
         self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_sse.py"]["test_facts"]["has_assertions"])
         self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_unittest_style.py"]["test_facts"]["has_assertions"])
         self.assertTrue(asset_by_path["BIC-agent-service/tests/unit/test_disabled.py"]["test_facts"]["has_disabled_tests"])
@@ -394,6 +417,23 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         shared = modules[("BIC-shared-types", "shared/contracts")]
         self.assertTrue(any(item["repo"] == "BIC-agent-portal" for item in shared["indirectly_related_tests"]))
         self.assertTrue(shared["add_tests"])
+
+        meta_tooling = modules[("BIC-meta", "meta/tooling")]
+        guidance = meta_tooling["add_tests"] + meta_tooling["strengthen_tests"]
+        self.assertFalse(any("SKILL.md" in item for item in guidance))
+        self.assertFalse(any("references/test-analysis-rules.md" in item for item in guidance))
+        self.assertTrue(any("config/runtime.yaml" in item for item in guidance))
+        self.assertTrue(any("scripts/test_assets.py" in item for item in guidance))
+        self.assertTrue(any("scripts/test_relations.py" in item for item in guidance))
+        non_testable_paths = {item["path"] for item in meta_tooling["non_testable_changes"]}
+        self.assertIn(
+            "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md",
+            non_testable_paths,
+        )
+        self.assertIn(
+            "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/references/test-analysis-rules.md",
+            non_testable_paths,
+        )
 
         serialized = json.dumps(correspondence)
         for removed in ("confidence", "evidence_type", "coverage_gaps", "coverage_unconfirmed"):

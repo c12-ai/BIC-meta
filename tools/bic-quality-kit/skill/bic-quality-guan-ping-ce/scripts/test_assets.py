@@ -53,7 +53,7 @@ def iter_repo_files(repo: Path, excluded_roots: Iterable[Path] = ()) -> Iterable
             yield root_path / filename
 
 
-def test_type_for_path(relative: str) -> tuple[str, str]:
+def asset_type_for_path(relative: str) -> tuple[str, str]:
     lowered = relative.lower()
     if "playwright" in lowered or "/e2e/" in f"/{lowered}/":
         return "frontend-smoke", "playwright/e2e path"
@@ -287,6 +287,26 @@ def parse_test_file(path: Path) -> dict[str, Any]:
     return facts
 
 
+def classify_test_candidate(path: Path, facts: dict[str, Any]) -> str:
+    """Require parsed test cases before a test-like filename becomes evidence."""
+    if facts.get("test_cases"):
+        if path.suffix != ".py":
+            return "test-file"
+        in_test_directory = any(
+            part.lower() in {"test", "tests", "__tests__"}
+            for part in path.parts[:-1]
+        )
+        imported_roots = {
+            value.lstrip(".").split(".", 1)[0]
+            for value in facts.get("imports", [])
+        }
+        if in_test_directory or facts.get("has_assertions") or imported_roots & {"pytest", "unittest"}:
+            return "test-file"
+    if facts.get("parse_warning"):
+        return "test-candidate"
+    return "not-a-test"
+
+
 def discover_test_assets(
     repositories: list[dict[str, Any]],
     is_ignored: Callable[[str], bool],
@@ -308,14 +328,20 @@ def discover_test_assets(
             output_path = workspace_path(path)
             if is_ignored(output_path) or not TEST_FILE_RE.search(local):
                 continue
-            test_type, reason = test_type_for_path(local)
-            test_dirs.add(workspace_path(path.parent))
+            facts = parse_test_file(path)
+            asset_kind = classify_test_candidate(path, facts)
+            if asset_kind == "not-a-test":
+                continue
+            test_type, reason = asset_type_for_path(local)
+            if asset_kind == "test-file":
+                test_dirs.add(workspace_path(path.parent))
             assets.append({
                 "id": f"discovered:{output_path}", "repo": repo_info["name"],
-                "path": output_path, "asset_kind": "test-file", "type": test_type,
+                "path": output_path, "asset_kind": asset_kind, "type": test_type,
                 "framework": "pytest" if path.suffix == ".py" else "js-test-runner",
-                "discovery_source": "filesystem", "reason": reason,
-                "test_facts": parse_test_file(path),
+                "discovery_source": "filesystem",
+                "reason": reason if asset_kind == "test-file" else "test-like filename could not be parsed into executable test cases",
+                "test_facts": facts,
             })
 
         config_candidates = {

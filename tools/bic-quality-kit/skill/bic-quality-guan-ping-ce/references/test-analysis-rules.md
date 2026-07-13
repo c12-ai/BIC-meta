@@ -33,9 +33,15 @@ root contains independently discovered child Git repositories, scan each child
 under its own repository identity and do not scan it again as part of the root
 repository.
 
-Inspect concrete test files as text or syntax trees. Record imports, referenced
-identifiers, test/describe names, assertions, and skip/xfail/todo state without
-importing the file.
+Treat a test-like filename as a discovery candidate, not test evidence. Inspect
+the candidate as text or syntax trees. JavaScript/TypeScript requires at least
+one parsed `test`/`it` case. Python requires a parsed `test_*` case plus either a
+standard test directory, an assertion, or a pytest/unittest framework signal.
+Keep an unparseable candidate diagnostic-only; an implementation module does
+not become a test because its filename or helper function starts with `test_`.
+Record imports, referenced identifiers, test/describe names, assertions, and
+skip/xfail/todo state without importing the file. A disabled but structurally
+valid test remains a test asset.
 
 ## Correspondence
 
@@ -64,6 +70,11 @@ Keep correspondence facts separate from the need to add tests:
 
 Broad module/scenario candidates remain useful search context but do not clear
 an object-level gap.
+
+Do not generate add/strengthen guidance for documentation, Skill/reference, or
+planning-only paths. An existing concrete relation may still describe an
+executable documentation contract. Do not exclude YAML or JSON by extension
+alone because it may define runtime behavior.
 
 ## Public brief
 

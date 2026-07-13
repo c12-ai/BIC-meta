@@ -69,6 +69,12 @@ and root/unusual files remain visible.
 ## 3. Changed Objects and Test Correspondence
 
 - Replace directory-existence checks with concrete test-asset discovery.
+- Treat filename patterns as candidate discovery only; require parsed
+  JavaScript/TypeScript test cases, and require Python cases plus a standard
+  test directory, assertion, or pytest/unittest signal before emitting
+  `asset_kind: test-file`.
+- Keep unparseable test-like candidates out of coverage evidence, and preserve
+  disabled but structurally valid tests as test files.
 - Detect pytest, JavaScript unit-test, and Playwright configuration and commands.
 - Extract changed Python and JavaScript/TypeScript source objects without
   importing project code, retaining a file-level fallback.
@@ -80,13 +86,18 @@ and root/unusual files remain visible.
   repository/module without exposing confidence or evidence labels.
 - Derive separate natural-language groups for tests to add, tests to strengthen,
   and modules with no obvious static gap.
+- Filter documentation, Skill/reference, and planning-only objects before
+  generating add/strengthen guidance, while preserving existing executable
+  documentation relations and runtime-configuration analysis.
 - Exclude local skill copies, backups, and independently discovered child
   repositories from duplicate root-repository test discovery.
 
 Validation: fixture repositories must cover Python and TypeScript symbols,
 imports/references, assertions, disabled tests, unrelated same-name files,
 frontend tests, empty directories, explicit cross-repository inventory, and
-repository isolation.
+repository isolation. Regression fixtures must also prove that test-named
+implementation modules are not test assets and documentation-only changes do
+not create missing-test guidance.
 
 ## 4. Skill and Documentation
 
