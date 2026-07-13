@@ -224,6 +224,41 @@ done <<EOF
 $(services)
 EOF
 
+# --- 8b. Auth (lab JWT enforcement) -----------------------------------------
+section "Auth (lab JWT enforcement)"
+_be_env="$(repo_dir BIC-agent-service)/.env"
+_lab_env="$(repo_dir BIC-lab-service)/.env"
+if [ -f "${_be_env}" ] && grep -q '^KEYCLOAK_CLIENT_SECRET=..*' "${_be_env}"; then
+  ok "BE .env carries KEYCLOAK_CLIENT_SECRET (service token armed)"
+else
+  fail "BE .env missing KEYCLOAK_CLIENT_SECRET — every agent->lab call 401s under enforcement" "make up   # self-heals the dev default, then: bash scripts/bic-env/restart.sh BE"
+fi
+_lab_probe="$(http_code http://localhost:8192/preparations/racks)"
+if [ "${_lab_probe}" = "401" ]; then
+  ok "lab JWT enforcement active (tokenless business route -> 401)"
+elif [ "${_lab_probe}" = "200" ]; then
+  if [ -f "${_lab_env}" ] && grep -q '^LAB_AUTH_MODE=off' "${_lab_env}"; then
+    warn "lab auth explicitly OFF (LAB_AUTH_MODE=off) — debug posture, remove when done"
+  else
+    fail "lab serves tokenless traffic without LAB_AUTH_MODE=off — stale pre-auth process? (orphaned reload worker can hold the socket)" "pkill -KILL -f BIC-lab-service; bash scripts/bic-env/restart.sh lab"
+  fi
+else
+  warn "lab enforcement probe inconclusive (code ${_lab_probe}) — see Service health card"
+fi
+_tok="$("$(dirname "${BASH_SOURCE[0]}")/get-token.sh" 2>/dev/null || true)"
+if [ -n "${_tok}" ]; then
+  _authed="$(curl -s --noproxy '*' --max-time 5 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${_tok}" http://localhost:8192/preparations/racks 2>/dev/null || true)"
+  if [ "${_authed}" = "200" ]; then
+    ok "service-token round trip (get-token.sh -> lab 200)"
+  elif [ "${_lab_probe}" = "200" ]; then
+    ok "service-token minted (lab in passthrough — round trip trivially 200)"
+  else
+    fail "service token minted but lab rejects it (code ${_authed:-000}) — lab .env KEYCLOAK_ISSUER_URL must byte-match the realm issuer" "grep KEYCLOAK_ISSUER_URL '${_lab_env}'"
+  fi
+else
+  fail "get-token.sh cannot mint a service token — bic-agent-service client missing or keycloak down" "make up   # seeds the client idempotently"
+fi
+
 # --- 9. Repos present ------------------------------------------------------
 section "Repos under BIC_ROOT"
 for r in BIC-lab-service BIC-agent-service BIC-agent-portal mars_interface_mock; do
