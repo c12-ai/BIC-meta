@@ -241,8 +241,14 @@ done
 ensure_env_key() { # <env-file> <key> <value> <label>
   _f="$1"; _k="$2"; _v="$3"; _label="$4"
   [ -f "${_f}" ] || return 0
-  if grep -q "^${_k}=" "${_f}"; then
+  if grep -q "^${_k}=..*" "${_f}"; then
     ok "${_label}: ${_k} present"
+  elif grep -q "^${_k}=$" "${_f}"; then
+    # present but EMPTY — the .env.example seed path leaves these blank, and an
+    # empty value is never a valid bench state for auth keys (BE: disabled ->
+    # 401 storm). Fill the line in place; a real value is still never touched.
+    do_sh "sed -i.bak 's|^${_k}=$|${_k}=${_v}|' '${_f}' && rm -f '${_f}.bak'"
+    ok "${_label}: ${_k} was empty — filled with dev default"
   else
     # heal a missing trailing newline first (append would glue onto the last line)
     [ -n "$(tail -c1 "${_f}")" ] && do_sh "printf '\n' >> '${_f}'"
