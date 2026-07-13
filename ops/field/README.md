@@ -22,6 +22,9 @@ ops/field/
 ├── deploy.sh                 orchestrator (login/pull/preflight/init-env/init-data/up/down/status/logs)
 ├── .env.example              env template (keys+comments only; NO secrets)
 ├── scripts/preflight-selftest.sh   unit-test-like check of the port pre-flight
+├── scripts/reset.sh          bench reset ON the field box: BE /reset (DB truncate+MQ purge,
+│                             no-auth dev endpoint) → lab reset-to-test-data (service-account
+│                             Bearer minted from the on-box Keycloak). `reset.sh [all|be|lab]`
 ├── keycloak/  (docker-compose.yml + realm-bic.json + themes/bic)
 ├── chem-service/  lab-service/  agent-service/  portal/   (docker-compose.yml each)
 ```
