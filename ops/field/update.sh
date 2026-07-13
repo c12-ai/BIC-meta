@@ -20,7 +20,10 @@ REPO_BASE="${REPO_BASE:-/Users/wenlongwang/Work/BIC/talos}"
 ORG=c12-ai
 
 # svc key -> repo dir | gh repo | container | compose dir | health url (on field) | port
-SVCS=(be portal lab chem mock)
+# Order = ROLL order, dependency-safe (consumer after provider): the mock must know
+# lab's skill set before lab rolls; lab's API/skills must be live before the BE that
+# drives them; BE+lab endpoints must exist before the portal that calls them.
+SVCS=(mock chem lab be portal)
 repo_dir()   { case "$1" in be) echo BIC-agent-service;; portal) echo BIC-agent-portal;; lab) echo BIC-lab-service;; chem) echo BIC-chem-service;; mock) echo mars_interface_mock;; esac; }
 container()  { case "$1" in be) echo bic-agent-service;; portal) echo bic-agent-portal;; lab) echo bic-lab-service;; chem) echo bic-chem-service;; mock) echo bic-robot-mock;; esac; }
 compose_dir(){ case "$1" in be) echo agent-service;; portal) echo portal;; lab) echo lab-service;; chem) echo chem-service;; mock) echo robot-mock;; esac; }
@@ -101,11 +104,8 @@ if [ "${CHANGED[lab]:-}" = runtime ] || [ "${CHANGED[mock]:-}" = runtime ]; then
   fi
   ok "compat acknowledged (--ack-compat)"
 fi
-info "guard: field .env has every key from changed services' .env.example"
-missing="$(for s in "${UPDATES[@]}"; do
-  ex="ops/field/$(compose_dir "$s")/.env.example"
-  [ -f "$ex" ] && grep -oE '^[A-Z_]+=' "$ex"
-done | sort -u | while read -r k; do
+info "guard: field .env has every key from the field package .env.example"
+missing="$(grep -oE '^[A-Z_]+=' ops/field/.env.example | sort -u | while read -r k; do
   fssh "grep -q '^${k}' ~/bic-v2/.env" || echo "${k%=}"
 done)" || true
 [ -z "$missing" ] || die "field .env missing keys (set values first): $missing"
