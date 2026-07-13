@@ -589,9 +589,9 @@ For the TLC Lab Logistic panel:
   Service rejects chemist maintenance writes on workbench tube-box/tip-box slots (rule 7,
   D8).
 - A developing-tank inventory record can persist contents (solvent system + ratio); records
-  without contents behave as unknown/empty. Seed/reset data mirrors the demo PASS
-  (2026-07-12): BOTH developing tanks carry contents — PE/EA 5:1 (round 1's system) and
-  PE/EA 2:1 (the retry system) — so both demo rounds exercise the reuse branch and the retry
+  without contents behave as unknown/empty. Seed/reset data mirrors the demo
+  (2026-07-13): BOTH developing tanks carry contents — PE/EA 2:1 (round 1's system) and
+  PE/EA 3:1 (the retry system) — so both demo rounds exercise the reuse branch and the retry
   re-binds to the second tank; the fresh-prep branch is exercised by tests (no contents-less
   tank remains in seed).
 - Dispatching TLC with a workbench tank whose recorded contents exactly match the run's
@@ -747,7 +747,14 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-13 (latest): Added an open question on silica-cartridge consumable-page ↔ robot
+- 2026-07-13 (latest): Demo developing-tank seed ratios changed (Drake ruling): tank 1
+  PE/EA 5:1 → 2:1 (round-1 system) and tank 2 PE/EA 2:1 → 3:1 (round-2 retry system); tank 3
+  stays content-less. Updated the rule-13 acceptance criterion accordingly. The earlier
+  07-12 change-log entry recording the 5:1/2:1 pairing is left as the historical record of
+  that decision. Seed + alembic initial data + coupled tests updated in the same change;
+  fresh-prep branch still covered by tests.
+
+- 2026-07-13: Added an open question on silica-cartridge consumable-page ↔ robot
   consumption fidelity (BIC-lab-service issue #128). Silica is a non-specific auto-pick
   material that is location-blind end to end — the page location neither steers nor tracks
   the robot's silica pick, so the page cannot faithfully reflect silica consumption; the gap
