@@ -42,7 +42,7 @@ pull_one meta "${BIC_META_DIR}"
 for r in BIC-lab-service BIC-agent-service BIC-agent-portal BIC-shared-types mars_interface_mock BIC-chem-service; do
   pull_one "${r}" "$(repo_dir "${r}")"
 done
-pull_one infra "${INFRA_DIR}"
+pull_one BIC-infra "${INFRA_DIR}"
 
 note "next: make up   # re-syncs deps/migrations/themes and restarts anything unhealthy"
 printf '\n  %d ok  %d warn  %d red\n' "${BIC_OK}" "${BIC_WARN}" "${BIC_FAIL}"
