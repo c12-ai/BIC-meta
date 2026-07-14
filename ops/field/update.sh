@@ -22,10 +22,8 @@ REPO_BASE="${REPO_BASE:-${BIC_ROOT:-}}"
 if [ -z "$REPO_BASE" ]; then for _c in "$HOME/Work/BIC/talos" "$HOME/Development/BIC" "$HOME/BIC"; do
   [ -d "$_c/BIC-agent-portal" ] && { REPO_BASE="$_c"; break; }
 done; fi
-# Portal image variant = tag prefix (host-specific: the portal bakes absolute
-# URLs at build time, so each site has its own variant — orin=field, a1=field-a1;
-# sharing one tag across sites would clobber the other site's image).
-PORTAL_VARIANT="${PORTAL_VARIANT:-field}"
+# Portal image is site-agnostic since BIC-agent-portal#86 (runtime config via
+# /env.js): shared tags (latest / sha-<full sha>), no per-site build variants.
 ORG=c12-ai
 
 # svc key -> repo dir | gh repo | container | compose dir | health url (on field) | port
@@ -48,10 +46,9 @@ fssh() { ssh -o BatchMode=yes "$FIELD_SSH" "$@"; }
 
 DRY=0; ACK_COMPAT=0; ONLY=""
 if [ "${1:-}" = "rollback" ]; then
-  svc="${2:?usage: update.sh rollback <svc> <sha>}"; sha="${3:?sha required}"
+  svc="${2:?usage: update.sh rollback <svc> <full-sha>}"; sha="${3:?full sha required (image tags are sha-<full sha>)}"
   cdir="$(compose_dir "$svc")"; [ -n "$cdir" ] || die "unknown svc $svc"
   tag="sha-${sha}"
-  [ "$svc" = portal ] && tag="${PORTAL_VARIANT}-${sha:0:7}"
   info "rollback $svc -> $tag"
   if [ "$svc" = portal ]; then
     fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=${tag}|\" .env"
@@ -77,11 +74,10 @@ for s in "${SVCS[@]}"; do
   [ -d "$rd" ] || { err "$s: repo dir missing ($rd)"; continue; }
   git -C "$rd" fetch -q origin
   MAIN[$s]="$(git -C "$rd" rev-parse origin/main)"
-  if [ "$s" = portal ]; then
-    DEPLOYED[$s]="$(fssh "grep -m1 '^PORTAL_IMAGE_TAG=' ~/bic-v2/.env" | sed "s/.*${PORTAL_VARIANT}-//")"
-  else
-    DEPLOYED[$s]="$(fssh "docker inspect $(container "$s") --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'" 2>/dev/null || true)"
-  fi
+  # All services (portal included since #86) carry the OCI revision label. A
+  # pre-#86 portal image lacks it — do the one-time migration in README §portal
+  # runtime config first.
+  DEPLOYED[$s]="$(fssh "docker inspect $(container "$s") --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}'" 2>/dev/null || true)"
   dep="${DEPLOYED[$s]:-unknown}"
   if [ -n "$dep" ] && [ "$dep" != unknown ] && git -C "$rd" merge-base --is-ancestor "$dep" "${MAIN[$s]}" 2>/dev/null && [ "$(git -C "$rd" rev-parse "$dep")" != "${MAIN[$s]}" ]; then
     # runtime-relevant? skip if every changed path is CI/docs
@@ -194,15 +190,7 @@ esac
 for s in "${UPDATES[@]}"; do
   gr="$ORG/$(repo_dir "$s")"
   info "build $s ($gr @ main)"
-  if [ "$s" = portal ]; then
-    gh workflow run docker-build.yml --repo "$gr" --ref main \
-      -f image_variant="${PORTAL_VARIANT}" \
-      -f vite_api_base_url="http://${FIELD_HOST_IP}:8800" \
-      -f vite_lab_api_base_url="http://${FIELD_HOST_IP}:8192" \
-      -f vite_oidc_authority="http://${FIELD_HOST_IP}:18080/realms/bic"
-  else
-    gh workflow run docker-build.yml --repo "$gr" --ref main
-  fi
+  gh workflow run docker-build.yml --repo "$gr" --ref main
 done
 sleep 10
 for s in "${UPDATES[@]}"; do
@@ -220,7 +208,9 @@ done
 for s in "${UPDATES[@]}"; do
   cdir="$(compose_dir "$s")"
   if [ "$s" = portal ]; then
-    fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=${PORTAL_VARIANT}-${MAIN[portal]:0:7}|\" .env"
+    # Pin the exact build (shared sha tag since #86) — deterministic roll and
+    # a sed-able rollback anchor.
+    fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=sha-${MAIN[portal]}|\" .env"
   fi
   info "roll $s"
   fssh "cd ~/bic-v2 && docker compose -f ${cdir}/docker-compose.yml --env-file .env pull -q && docker compose -f ${cdir}/docker-compose.yml --env-file .env up -d"
@@ -244,9 +234,16 @@ if [ "${CHANGED[be]:-}" = runtime ] || [ "${CHANGED[lab]:-}" = runtime ]; then
   fssh "docker exec bic-rabbitmq rabbitmqctl list_queues name consumers 2>/dev/null" | grep -E "agent.task.status\b|results\b|\.cmd\b" || true
 fi
 if [ "${CHANGED[portal]:-}" = runtime ]; then
-  info "verify: portal bundle bake"
-  n="$(fssh "asset=\$(curl -s http://localhost:15173/ | grep -oE '/assets/[^\"]+\.js' | head -1); curl -s http://localhost:15173\$asset | grep -coE 'localhost:18080'" || true)"
-  [ "${n:-0}" = 0 ] && ok "portal bundle clean (0x localhost:18080)" || die "portal bundle contains localhost:18080 — wrong build args"
+  # /env.js is the runtime contract (#86): it must carry the field authority
+  # and BE origin, or the SPA boots with an empty OIDC authority (fail-loud
+  # by design) — a green /health does not cover this.
+  info "verify: portal runtime config (/env.js)"
+  ej="$(fssh "curl -s --max-time 5 http://localhost:15173/env.js" || true)"
+  echo "$ej" | grep -q "OIDC_AUTHORITY: \"http://${FIELD_HOST_IP}:18080/realms/bic\"" \
+    || die "portal /env.js lacks the field OIDC_AUTHORITY — compose env keys not applied? got: $(echo "$ej" | tr '\n' ' ' | cut -c1-160)"
+  echo "$ej" | grep -q "API_BASE_URL: \"http://${FIELD_HOST_IP}:8800\"" \
+    || die "portal /env.js lacks the field API_BASE_URL — compose env keys not applied?"
+  ok "portal /env.js carries the field runtime config"
 fi
 # ── 5b. verify: auth posture ─────────────────────────────────────────────────
 # Green /health never covers auth or CORS (the 2026-07-14 outage rolled straight
