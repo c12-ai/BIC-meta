@@ -239,10 +239,39 @@ wait_health() {
   ok "$svc healthy"
 }
 
+# lab enforces Keycloak JWTs; BE calls lab with a bic-agent-service
+# client-credentials token. Realm import only runs on a FRESH keycloak DB, so
+# an already-imported field realm never gets the client from realm-bic.json —
+# ensure it here, idempotently (2026-07-14 orin incident: client was missing).
+ensure_auth_client() {
+  local admin admin_pw secret kc
+  admin="$(grep -m1 '^KEYCLOAK_ADMIN=' "$ENV_FILE" | cut -d= -f2-)"
+  admin_pw="$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+  secret="$(grep -m1 '^BIC_AGENT_SERVICE_CLIENT_SECRET=' "$ENV_FILE" | cut -d= -f2-)"
+  kc="${KC_CONTAINER_NAME:-bic-keycloak}"
+  { [ -n "$admin_pw" ] && [ "$admin_pw" != "__FILL_ME__" ]; } || { err "ensure_auth_client: KEYCLOAK_ADMIN_PASSWORD missing in $ENV_FILE"; return 1; }
+  { [ -n "$secret" ] && [ "$secret" != "__FILL_ME__" ]; } || { err "ensure_auth_client: BIC_AGENT_SERVICE_CLIENT_SECRET missing in $ENV_FILE"; return 1; }
+  docker exec "$kc" /opt/keycloak/bin/kcadm.sh config credentials \
+    --server http://localhost:8080 --realm master --user "${admin:-admin}" --password "$admin_pw" >/dev/null 2>&1 \
+    || { err "ensure_auth_client: kcadm admin login failed"; return 1; }
+  if docker exec "$kc" /opt/keycloak/bin/kcadm.sh get clients -r bic -q clientId=bic-agent-service --fields clientId 2>/dev/null | grep -q bic-agent-service; then
+    ok "keycloak client bic-agent-service exists"
+  else
+    docker exec "$kc" /opt/keycloak/bin/kcadm.sh create clients -r bic \
+      -s clientId=bic-agent-service -s 'name=BIC Agent Service' -s protocol=openid-connect \
+      -s enabled=true -s publicClient=false -s serviceAccountsEnabled=true \
+      -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
+      -s clientAuthenticatorType=client-secret -s "secret=$secret" \
+      || { err "ensure_auth_client: kcadm create failed"; return 1; }
+    ok "keycloak client bic-agent-service created (secret from .env)"
+  fi
+}
+
 cmd_up() {
   if [ "$#" -gt 0 ]; then           # single service
     compose "$1" up -d
     wait_health "$1" "$(health_timeout "$1")" || die "$1 failed health gate"
+    [ "$1" = keycloak ] && { ensure_auth_client || die "auth client provisioning failed"; }
     return
   fi
   cmd_preflight
@@ -251,6 +280,7 @@ cmd_up() {
     info "up $s"
     compose "$s" up -d
     wait_health "$s" "$(health_timeout "$s")" || die "$s failed health gate — stopping rollout (fix, then re-run)"
+    [ "$s" = keycloak ] && { ensure_auth_client || die "auth client provisioning failed — BE cannot mint lab tokens without it"; }
   done
   ok "all ${#SERVICES[@]} services up and healthy"
   cmd_status
