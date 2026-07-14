@@ -246,6 +246,10 @@ Switching to the REAL robot = `./mock.sh down`, then the robot team starts
 `bic-rabbitmq`. Zero V2 changes; verify with
 `docker exec bic-rabbitmq rabbitmqctl list_queues name consumers | grep cmd`.
 
+`update.sh` re-checks this mutex before rolling the mock (expected consumers =
+1 iff the mock container is running; anything above aborts the roll) — added
+after the 2026-07-14 double-consumer incident, BIC-meta#314.
+
 Default TLC fixture is a single passing plate (`tlc_plate_med02.jpg`, Rf ≈0.481);
 set `MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg` in
 `.env` for the fail→retry→pass demo.
