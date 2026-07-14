@@ -265,6 +265,65 @@ ensure_env_key() { # <env-file> <key> <value> <label>
 ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_ID     "${KC_SERVICE_CLIENT}"        "BE"
 ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_SECRET "${KC_SERVICE_CLIENT_SECRET}" "BE"
 ensure_env_key "${lab}/.env" KEYCLOAK_ISSUER_URL    "http://localhost:18080/realms/${KC_REALM}" "lab"
+
+# aws-profile .env convergence: point BE + lab at cloud Mind + real AWS S3.
+# Unlike the append-only auth self-heal above, this REWRITES a differing value
+# (the bench must point at the AWS store, not a stale local one). Credentials
+# come from AWS_S3_CREDS_FILE and are NEVER echoed — secret keys report by name
+# only, and DRY prints the key name, not the value. minimal/full-real skip this.
+_read_creds() { # <key> -> value from the S3 creds file (callers never echo it)
+  sed -n "s/^$1=//p" "${AWS_S3_CREDS_FILE}" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]'
+}
+converge_env_kv() { # <file> <key> <value> <label> <secret:0|1>
+  local f="$1" k="$2" v="$3" label="$4" secret="${5:-0}" cur
+  [ -f "${f}" ] || return 0
+  cur="$(sed -n "s/^${k}=//p" "${f}" | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+  [ "${cur}" = "${v}" ] && return 0   # already at AWS 口径 — stay quiet
+  if [ "${DRY_RUN}" = "1" ]; then
+    if [ "${secret}" = "1" ]; then note "[dry] would converge ${label} ${k} (secret — value hidden)"
+    else note "[dry] would converge ${label} ${k}=${v}"; fi
+    return 0
+  fi
+  if grep -q "^${k}=" "${f}"; then
+    sed -i.bak "s|^${k}=.*|${k}=${v}|" "${f}" && rm -f "${f}.bak"
+  else
+    [ -n "$(tail -c1 "${f}")" ] && printf '\n' >> "${f}"
+    printf '%s=%s\n' "${k}" "${v}" >> "${f}"
+  fi
+  if [ "${secret}" = "1" ]; then ok "${label}: ${k} converged to AWS creds (value hidden)"
+  else ok "${label}: ${k} -> ${v}"; fi
+}
+if [ "${BIC_PROFILE}" = "aws" ]; then
+  if [ ! -s "${AWS_S3_CREDS_FILE}" ]; then
+    fail "aws profile: S3 creds file missing/empty (${AWS_S3_CREDS_FILE})" \
+         "create it with S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY (chmod 600); see ops/auth-bench-2026-07-13.md"
+  else
+    _aws_akid="$(_read_creds S3_ACCESS_KEY_ID)"
+    _aws_secret="$(_read_creds S3_SECRET_ACCESS_KEY)"
+    if [ -z "${_aws_akid}" ] || [ -z "${_aws_secret}" ]; then
+      fail "aws profile: S3 creds file lacks S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY" \
+           "check ${AWS_S3_CREDS_FILE} (keys present, non-empty)"
+    else
+      # BE .env: cloud Mind + AWS S3
+      converge_env_kv "${be}/.env"  MCP_HOST                   "${AWS_MIND_HOST}"       "BE"  0
+      converge_env_kv "${be}/.env"  MCP_PORT                   "${AWS_MIND_PORT}"       "BE"  0
+      converge_env_kv "${be}/.env"  MIND_MOCK_MODE             false                    "BE"  0
+      converge_env_kv "${be}/.env"  MIND_RECOGNITION_MOCK_MODE false                    "BE"  0
+      converge_env_kv "${be}/.env"  S3_ENDPOINT_URL            "${AWS_S3_ENDPOINT_URL}" "BE"  0
+      converge_env_kv "${be}/.env"  S3_REGION                  "${AWS_S3_REGION}"       "BE"  0
+      converge_env_kv "${be}/.env"  S3_BUCKET_NAME             "${AWS_S3_BUCKET}"       "BE"  0
+      converge_env_kv "${be}/.env"  S3_ACCESS_KEY_ID           "${_aws_akid}"           "BE"  1
+      converge_env_kv "${be}/.env"  S3_SECRET_ACCESS_KEY       "${_aws_secret}"         "BE"  1
+      # lab .env: AWS S3 (same five keys)
+      converge_env_kv "${lab}/.env" S3_ENDPOINT_URL            "${AWS_S3_ENDPOINT_URL}" "lab" 0
+      converge_env_kv "${lab}/.env" S3_REGION                  "${AWS_S3_REGION}"       "lab" 0
+      converge_env_kv "${lab}/.env" S3_BUCKET_NAME             "${AWS_S3_BUCKET}"       "lab" 0
+      converge_env_kv "${lab}/.env" S3_ACCESS_KEY_ID           "${_aws_akid}"           "lab" 1
+      converge_env_kv "${lab}/.env" S3_SECRET_ACCESS_KEY       "${_aws_secret}"         "lab" 1
+    fi
+  fi
+fi
+
 if [ -d "${portal}" ]; then
   if [ ! -d "${portal}/node_modules" ] || [ "${portal}/pnpm-lock.yaml" -nt "${portal}/node_modules" ]; then
     do_sh "cd '${portal}' && pnpm install"
@@ -318,9 +377,13 @@ start_cmd_for() {
     # Mock uploads plate photos to S3; its coded defaults (localhost:9000 +
     # minioadmin/minioadmin) match neither infra MinIO's secret (bic_local_dev)
     # nor the full-real bench store (192.168.12.150, which real Mind must reach).
-    # minimal profile -> local infra MinIO; anything else -> the 150 store.
+    # minimal -> local infra MinIO; aws -> real AWS S3 (creds loaded from
+    # AWS_S3_CREDS_FILE inside the pane, so no secret hits up.sh output);
+    # full-real (else) -> the 150 store.
     mock)   if [ "${BIC_PROFILE}" = "minimal" ]; then
               printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-mock uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
+            elif [ "${BIC_PROFILE}" = "aws" ]; then
+              printf 'cd %q && set -a && . %q && set +a && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=%s S3_SECURE=true S3_ACCESS_KEY="$S3_ACCESS_KEY_ID" S3_SECRET_KEY="$S3_SECRET_ACCESS_KEY" S3_BUCKET=%s uv run mars-interface-mock' "$(repo_dir mars_interface_mock)" "${AWS_S3_CREDS_FILE}" "${AWS_S3_ENDPOINT_HOST}" "${AWS_S3_BUCKET}"
             else
               printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=192.168.12.150:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-images uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
             fi ;;

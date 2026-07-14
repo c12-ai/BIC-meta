@@ -46,6 +46,14 @@ mind_probe_200() {
     -H 'Content-Type: application/json' -d "${MIND_PROBE_BODY}" 2>/dev/null || true)"
   [ "${code}" = "200" ]
 }
+# aws profile: same rxn-parse probe, but against the public cloud Mind.
+aws_mind_probe_200() {
+  local code
+  code="$(curl -s --noproxy '*' --max-time 20 -o /dev/null -w '%{http_code}' \
+    -X POST "http://${AWS_MIND_HOST}:${AWS_MIND_PORT}${MIND_PROBE_PATH}" \
+    -H 'Content-Type: application/json' -d "${MIND_PROBE_BODY}" 2>/dev/null || true)"
+  [ "${code}" = "200" ]
+}
 
 # mode_banner <MOCK|REAL|BROKEN> <detail>
 mode_banner() {
@@ -95,8 +103,34 @@ restart_be() {
 # status — read-only report of intent + every leg of the real path
 # ----------------------------------------------------------------------------
 cmd_status() {
-  local intent owner9000 fwd
+  local intent owner9000 fwd cloud_up
   intent="$(be_mind_mock)"
+
+  # aws profile: cloud Mind + AWS S3 — no orin route/forwarder legs to report.
+  if [ "${BIC_PROFILE}" = "aws" ]; then
+    section "Mind mode (aws profile — intent: BE .env MIND_MOCK_MODE)"
+    case "${intent}" in
+      true)  warn "intent MOCK (MIND_MOCK_MODE=true) — unexpected on aws profile (make mind-real for cloud)" ;;
+      false) ok "intent REAL (MIND_MOCK_MODE=false)" ;;
+      unset) warn "MIND_MOCK_MODE not set in ${BE_ENV} (BE code default: mock)" ;;
+    esac
+    section "Cloud Mind leg (aws profile)"
+    if [ "$(http_code "http://${AWS_MIND_HOST}:${AWS_MIND_PORT}/openapi.json" 8)" = "200" ]; then
+      ok "cloud Mind reachable (${AWS_MIND_HOST}:${AWS_MIND_PORT} openapi 200)"; cloud_up=1
+    else
+      warn "cloud Mind not reachable (${AWS_MIND_HOST}:${AWS_MIND_PORT}) — check network / VPN"; cloud_up=0
+    fi
+    if [ "${intent}" = "false" ] && [ "${cloud_up}" = "1" ]; then
+      mode_banner REAL "REAL (aws cloud) — Mind ${AWS_MIND_HOST}:${AWS_MIND_PORT} + AWS S3 (no route/forwarder)"
+    elif [ "${intent}" = "false" ]; then
+      mode_banner BROKEN "intent REAL but cloud Mind unreachable — check network, then: make mind-real"
+      return 1
+    else
+      mode_banner MOCK "intent MOCK on aws profile — run: make mind-real to use cloud Mind"
+    fi
+    return 0
+  fi
+
   section "Mind mode (intent: BE .env MIND_MOCK_MODE)"
   case "${intent}" in
     true)  ok "intent MOCK (MIND_MOCK_MODE=true)" ;;
@@ -254,6 +288,36 @@ cmd_mock() {
 }
 
 # ----------------------------------------------------------------------------
+# aws — cloud Mind (aws profile). No route / forwarder / orin leg: Mind and S3
+# are public-internet direct. Probe the cloud Mind, then flip BE to REAL.
+# ----------------------------------------------------------------------------
+cmd_aws() {
+  ENV_CHANGED=0
+  section "Cloud Mind (aws profile) — ${AWS_MIND_HOST}:${AWS_MIND_PORT}"
+
+  # Hard gate: never flip BE onto a dead engine.
+  if [ "${DRY_RUN}" = "1" ]; then
+    note "[dry] would POST ${MIND_PROBE_PATH} to ${AWS_MIND_HOST}:${AWS_MIND_PORT} and require 200"
+  elif aws_mind_probe_200; then
+    ok "cloud Mind answered the rxn-parse probe (200)"
+  else
+    fail "cloud Mind did not answer 200 on ${MIND_PROBE_PATH} (${AWS_MIND_HOST}:${AWS_MIND_PORT})" \
+         "curl -s --noproxy '*' -X POST http://${AWS_MIND_HOST}:${AWS_MIND_PORT}${MIND_PROBE_PATH} -H 'Content-Type: application/json' -d '${MIND_PROBE_BODY}'   # cloud Mind down / no network?"
+    mode_banner BROKEN "cloud Mind ${AWS_MIND_HOST}:${AWS_MIND_PORT} unreachable — check network, then: make mind-real"
+    return 1
+  fi
+
+  # flip BE intent to REAL (cloud). S3 keys are converged by up.sh section 6.
+  set_env_kv MCP_HOST "${AWS_MIND_HOST}"
+  set_env_kv MCP_PORT "${AWS_MIND_PORT}"
+  set_env_kv MIND_MOCK_MODE false
+  set_env_kv MIND_RECOGNITION_MOCK_MODE false
+  if [ "${ENV_CHANGED}" = "1" ]; then restart_be; else ok "BE .env already REAL (aws cloud) — no restart needed"; fi
+
+  mode_banner REAL "REAL (aws cloud) — Mind ${AWS_MIND_HOST}:${AWS_MIND_PORT} + AWS S3 (no route/forwarder)"
+}
+
+# ----------------------------------------------------------------------------
 # converge — called by `make up` BEFORE the BE launches. No sudo, no BE restart
 # (up.sh starts/heals the BE right after, so flags load on that launch).
 # Policy: full-real profile auto-goes REAL when every leg is reachable without
@@ -262,6 +326,14 @@ cmd_mock() {
 cmd_converge() {
   NO_RESTART=1
   ENV_CHANGED=0
+  # aws profile: cloud Mind only. On probe failure, fail loud and leave BE flags
+  # as-is — never silently fall back to mock (no local Mind/MinIO on this bench).
+  if [ "${BIC_PROFILE}" = "aws" ]; then
+    if ! cmd_aws; then
+      note "aws profile: cloud Mind unreachable — BE flags left as-is (fix network, then: make mind-real)"
+    fi
+    return 0
+  fi
   if [ "${BIC_PROFILE}" = "full-real" ] && mind_route_ok && orin_lab_ip_is_local && tcp_open "${ORIN_TS_IP}" 9000 3; then
     if ! cmd_real 0; then
       note "real path failed mid-switch — falling back to MOCK"
@@ -279,7 +351,7 @@ cmd_converge() {
 
 case "${1:-status}" in
   status)   cmd_status ;;
-  real)     cmd_real 1 ;;
+  real)     if [ "${BIC_PROFILE}" = "aws" ]; then cmd_aws; else cmd_real 1; fi ;;
   mock)     cmd_mock ;;
   converge) cmd_converge ;;
   *) printf 'usage: mind.sh <status|real|mock|converge>\n' >&2; exit 2 ;;

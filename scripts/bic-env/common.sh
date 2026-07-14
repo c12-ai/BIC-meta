@@ -63,9 +63,29 @@ if [ -z "${INFRA_DIR:-}" ]; then
   INFRA_DIR="${INFRA_DIR:-${BIC_ROOT}/infra}"
 fi
 
-# Profile: minimal (Mind mocked + local MinIO) is the coworker default.
-# full-real reads the repos' existing .env values and never overrides them.
-BIC_PROFILE="${BIC_PROFILE:-minimal}"
+# Profile: aws (default) — cloud Mind + real AWS S3 (a1-site 口径; no route or
+# forwarder, both are public-internet direct). Alternatives:
+#   minimal   — Mind mocked + local MinIO (coworker / offline default)
+#   full-real — orin LAN real Mind + orin MinIO (tailscale route + :9000 forwarder)
+BIC_PROFILE="${BIC_PROFILE:-aws}"
+
+# ----------------------------------------------------------------------------
+# aws profile constants — cloud Mind + real AWS S3 (a1-site 口径). Public-internet
+# direct: no /32 route, no minio forwarder, no orin leg. Every value is
+# ${VAR:-default} so a site can override any of them via env / .bic-env.
+# ----------------------------------------------------------------------------
+AWS_MIND_HOST="${AWS_MIND_HOST:-52.83.119.132}"
+AWS_MIND_PORT="${AWS_MIND_PORT:-8010}"
+# BE/lab .env form (with scheme):
+AWS_S3_ENDPOINT_URL="${AWS_S3_ENDPOINT_URL:-https://s3.cn-northwest-1.amazonaws.com.cn}"
+# mock form (host:port, no scheme; pair with S3_SECURE=true):
+AWS_S3_ENDPOINT_HOST="${AWS_S3_ENDPOINT_HOST:-s3.cn-northwest-1.amazonaws.com.cn}"
+AWS_S3_REGION="${AWS_S3_REGION:-cn-northwest-1}"
+AWS_S3_BUCKET="${AWS_S3_BUCKET:-aichemengine-release-bundles}"
+# Dedicated S3 credentials file (holds S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY).
+# Kept OUT of the repo; its contents are never echoed. Missing/empty => a red
+# card (fail-loud), never a silent skip.
+AWS_S3_CREDS_FILE="${AWS_S3_CREDS_FILE:-${HOME}/.config/bic-v2/s3-bic.env}"
 
 # ----------------------------------------------------------------------------
 # Mind / orin-tail real-service path (2026-07-13, see scripts/bic-env/mind.sh)
