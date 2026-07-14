@@ -68,6 +68,12 @@ section "2. Infra containers"
 missing=""
 while IFS='|' read -r name _ _; do
   [ -n "${name}" ] || continue
+  # aws profile needs no local object store at all (S3 = real AWS) — a stopped
+  # bic-minio is fine even with no forwarder running (post-reboot state).
+  if [ "${name}" = "bic-minio" ] && [ "${BIC_PROFILE}" = "aws" ] && ! container_running "${name}"; then
+    ok "bic-minio not required (aws profile: object store = real AWS S3)"
+    continue
+  fi
   # Real-Mind mode deliberately keeps bic-minio STOPPED: :9000 is the
   # minio-forward.py bridge to orin's MinIO (see mind.sh). Don't fight it here.
   if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then

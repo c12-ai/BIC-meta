@@ -60,6 +60,12 @@ section "Infra containers (docker)"
 if docker_up; then
   while IFS='|' read -r name port label; do
     [ -n "${name}" ] || continue
+    # aws profile needs no local object store (S3 = real AWS) — a stopped
+    # bic-minio with no forwarder is the normal post-reboot state, not a fault.
+    if [ "${name}" = "bic-minio" ] && [ "${BIC_PROFILE}" = "aws" ] && ! container_running "${name}"; then
+      ok "${name} not required (aws profile: object store = real AWS S3)"
+      continue
+    fi
     # Real-Mind mode deliberately stops bic-minio: :9000 is the forwarder to
     # orin's MinIO (mind.sh). Not a fault — the Mind section below verifies it.
     if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
