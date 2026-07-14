@@ -56,10 +56,17 @@ if [ -z "${CHEM_DIR:-}" ]; then
 fi
 
 # Infra repo (docker compose for bic-* containers). Override with INFRA_DIR=...
+# Candidates cover both layouts (nested child repo / sibling checkout); a real
+# git checkout wins over a bare copy so a stale non-git dir never shadows it.
 if [ -z "${INFRA_DIR:-}" ]; then
-  for _cand in "${BIC_ROOT}/infra" "${BIC_ROOT}/BIC-infra" "${BIC_ROOT}/../infra"; do
-    if [ -d "${_cand}" ]; then INFRA_DIR="$(cd "${_cand}" && pwd)"; break; fi
+  for _cand in "${BIC_ROOT}/infra" "${BIC_ROOT}/BIC-infra" "${BIC_ROOT}/../BIC-infra" "${BIC_ROOT}/../infra"; do
+    if [ -d "${_cand}/.git" ]; then INFRA_DIR="$(cd "${_cand}" && pwd)"; break; fi
   done
+  if [ -z "${INFRA_DIR:-}" ]; then
+    for _cand in "${BIC_ROOT}/infra" "${BIC_ROOT}/BIC-infra" "${BIC_ROOT}/../BIC-infra" "${BIC_ROOT}/../infra"; do
+      if [ -d "${_cand}" ]; then INFRA_DIR="$(cd "${_cand}" && pwd)"; break; fi
+    done
+  fi
   INFRA_DIR="${INFRA_DIR:-${BIC_ROOT}/infra}"
 fi
 

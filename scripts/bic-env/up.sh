@@ -460,7 +460,12 @@ done
 # ===========================================================================
 printf '\n%s%s== Done ==%s  ' "${C_BLD}" "${C_BLU}" "${C_RST}"
 case "$(be_mind_mock)" in
-  false) printf '%sMIND: REAL%s (%s:%s via orin-tail)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}" ;;
+  false)
+    if [ "${BIC_PROFILE}" = "aws" ]; then
+      printf '%sMIND: REAL%s (aws cloud %s:%s)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${AWS_MIND_HOST}" "${AWS_MIND_PORT}"
+    else
+      printf '%sMIND: REAL%s (%s:%s via orin-tail)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}"
+    fi ;;
   *)     printf '%sMIND: MOCK%s (fixtures; enable real: make mind-real)  ' "${C_BLD}${C_YEL}" "${C_RST}" ;;
 esac
 printf 'run %smake status%s or %smake doctor%s to verify.\n' "${C_BLD}" "${C_RST}" "${C_BLD}" "${C_RST}"

@@ -5,7 +5,7 @@ DRY_RUN="${DRY_RUN:-0}"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/bootstrap.sh <all|backend|portal|lab|shared|mock|chem>
+Usage: scripts/bootstrap.sh <all|backend|portal|lab|shared|mock|chem|infra>
 
 Environment:
   DRY_RUN=1  Print clone/skip decisions without changing the filesystem.
@@ -61,6 +61,20 @@ bootstrap_chem() {
   clone_if_missing "chem" "BIC-chem-service" "git@github.com:c12-ai/BIC-chem-service.git"
 }
 
+bootstrap_infra() {
+  # Same candidate set as the INFRA_DIR resolver in scripts/bic-env/common.sh:
+  # a live checkout in either layout means no clone (avoid a duplicate that
+  # would shadow the one docker containers bind-mount from).
+  local d
+  for d in infra BIC-infra ../BIC-infra ../infra; do
+    if [[ -d "$d/.git" ]]; then
+      printf 'skip infra: %s is already a git checkout\n' "$d"
+      return 0
+    fi
+  done
+  clone_if_missing "infra" "BIC-infra" "git@github.com:c12-ai/BIC-infra.git"
+}
+
 target="${1:-}"
 
 case "$target" in
@@ -71,6 +85,7 @@ case "$target" in
     bootstrap_shared
     bootstrap_mock
     bootstrap_chem
+    bootstrap_infra
     ;;
   backend)
     bootstrap_backend
@@ -89,6 +104,9 @@ case "$target" in
     ;;
   chem)
     bootstrap_chem
+    ;;
+  infra)
+    bootstrap_infra
     ;;
   -h|--help|help)
     usage

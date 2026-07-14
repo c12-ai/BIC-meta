@@ -302,6 +302,13 @@ for r in BIC-lab-service BIC-agent-service BIC-agent-portal mars_interface_mock;
     fail "$r not found at ${d}" "scripts/bootstrap.sh all   # clones missing repos; or set BIC_ROOT=/path/to/your/checkout"
   fi
 done
+# infra lives at INFRA_DIR (nested or sibling layout, resolver in common.sh);
+# a non-git INFRA_DIR is a stale copy — keycloak theme/seed heals come from it.
+if [ -d "${INFRA_DIR}/.git" ]; then
+  ok "BIC-infra @ $(git_branch "${INFRA_DIR}") $(git_sha "${INFRA_DIR}") (${INFRA_DIR})"
+else
+  fail "BIC-infra checkout not found (INFRA_DIR=${INFRA_DIR})" "scripts/bootstrap.sh infra   # or set INFRA_DIR=/path/to/BIC-infra"
+fi
 
 # --- 10. Mind / AI engine mode ----------------------------------------------
 # The bench must never be ambiguous about mock vs real Mind (user requirement

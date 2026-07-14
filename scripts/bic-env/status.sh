@@ -61,7 +61,12 @@ EOF
 # Mind mode one-liner (intent from BE .env; detail: make mind-status).
 printf '\n  %smind:%s  ' "${C_DIM}" "${C_RST}"
 case "$(be_mind_mock)" in
-  false) printf '%sREAL%s (%s:%s via orin-tail)\n' "${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}" ;;
+  false)
+    if [ "${BIC_PROFILE}" = "aws" ]; then
+      printf '%sREAL%s (aws cloud %s:%s)\n' "${C_GRN}" "${C_RST}" "${AWS_MIND_HOST}" "${AWS_MIND_PORT}"
+    else
+      printf '%sREAL%s (%s:%s via orin-tail)\n' "${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}"
+    fi ;;
   true)  printf '%sMOCK%s (fixtures; make mind-real to switch)\n' "${C_YEL}" "${C_RST}" ;;
   *)     printf '%sunset%s (BE default = mock)\n' "${C_YEL}" "${C_RST}" ;;
 esac
