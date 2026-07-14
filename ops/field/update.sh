@@ -113,6 +113,33 @@ if [ "${CHANGED[lab]:-}" = runtime ] || [ "${CHANGED[mock]:-}" = runtime ]; then
   fi
   ok "compat acknowledged (--ack-compat)"
 fi
+
+# ── 2a. guard: mock roll must not fight the real robot on the cmd queue ─────
+# mock.sh up refuses when ${ROBOT_ID}.cmd already has a consumer, but a roll
+# goes through bare `compose up -d` and bypasses it (2026-07-14 orin: real
+# mars_interface + mock both consuming talos.001.cmd, commands split round-
+# robin; BIC-meta#314). Expected consumers = 1 iff the mock container is
+# running; anything above is a foreign consumer — halt, don't recreate it.
+if [ "${CHANGED[mock]:-}" = runtime ]; then
+  info "guard: cmd-queue consumer mutex (mock roll)"
+  mutex="$(fssh bash -s <<'RSCRIPT'
+envf=~/bic-v2/.env
+mq="$(grep -m1 '^MQ_CONTAINER=' "$envf" | cut -d= -f2-)"; mq="${mq:-bic-rabbitmq}"
+rid="$(grep -m1 '^MOCK_ROBOT_ID=' "$envf" | cut -d= -f2-)"; rid="${rid:-talos.001}"
+out="$(docker exec "$mq" rabbitmqctl list_queues name consumers 2>/dev/null)" || { echo "ERR - $rid"; exit 0; }
+n="$(printf '%s\n' "$out" | awk -v q="${rid}.cmd" '$1==q{print $2}')"
+e=0; docker ps --format '{{.Names}}' | grep -qx bic-robot-mock && e=1
+echo "${n:-0} $e $rid"
+RSCRIPT
+)"
+  read -r mx_n mx_e mx_rid <<<"$mutex"
+  [ "$mx_n" != ERR ] || die "cannot read ${mx_rid}.cmd consumers off the field rabbitmq — fix MQ before rolling the mock"
+  if [ "$mx_n" -gt "$mx_e" ]; then
+    die "${mx_rid}.cmd has ${mx_n} consumer(s), expected ${mx_e} (mock container $([ "$mx_e" = 1 ] && echo running || echo absent)) — a real robot (mars_interface) or another consumer is live; rolling the mock would split commands nondeterministically. Hand over first (robot-mock/mock.sh down) or re-run with --only excluding mock."
+  fi
+  ok "cmd-queue mutex clean (${mx_rid}.cmd consumers ${mx_n}, expected ${mx_e})"
+fi
+
 info "guard: field .env has every key from the field package .env.example"
 missing="$(grep -oE '^[A-Z_]+=' ops/field/.env.example | sort -u | while read -r k; do
   fssh "grep -q '^${k}' ~/bic-v2/.env" || echo "${k%=}"
