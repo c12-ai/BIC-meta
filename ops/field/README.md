@@ -211,7 +211,10 @@ Deploying/rolling to these mains REQUIRES:
 1. `BIC_AGENT_SERVICE_CLIENT_SECRET` in the field `.env` (init-env generates it).
 2. The `bic-agent-service` confidential client in the realm. A FRESH realm
    import (a1) gets it from realm-bic.json automatically. An ALREADY-imported
-   realm (orin) must add it once (realm import is skipped on existing DBs):
+   realm (orin) is now covered automatically too: `deploy.sh up` (after the
+   keycloak health gate) and `update.sh` (guard 2c) both check-then-create it
+   idempotently from the field `.env` secret. The manual recipe below remains
+   for reference / degraded situations:
 
    ```bash
    docker exec bic-keycloak /opt/keycloak/bin/kcadm.sh config credentials \

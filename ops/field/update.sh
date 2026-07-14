@@ -115,6 +115,74 @@ done)" || true
 [ -z "$missing" ] || die "field .env missing keys (set values first): $missing"
 ok "env keys complete"
 
+# ── 2b. guard: field compose/config matches the repo ────────────────────────
+# Drift here is exactly what shipped the 2026-07-14 orin outage: `up -d` trusts
+# the FIELD's compose, and orin's copies predated the auth/CORS wave. Repo is
+# the authority — sync with a timestamped backup. Scripts are checked but only
+# reported (an executable swap deserves human eyes).
+info "guard: field compose/config files match the repo"
+local_hash() { md5 -q "$1" 2>/dev/null || md5sum "$1" | cut -d' ' -f1; }
+sync_field_file() { # <path relative to ops/field/ and to ~/bic-v2/> [report-only]
+  rel="$1"; mode="${2:-sync}"
+  lh="$(local_hash "ops/field/$rel")"
+  rh="$(fssh "md5sum ~/bic-v2/$rel 2>/dev/null | cut -d' ' -f1" || true)"
+  if [ "$lh" = "$rh" ]; then ok "$rel in sync"; return 0; fi
+  if [ "$mode" = report-only ]; then
+    err "$rel DRIFTED from the repo — review and sync it manually (executable: not auto-synced)"
+    return 0
+  fi
+  if [ "$DRY" -eq 1 ]; then err "$rel drifted — would back up field copy and sync the repo version"; return 0; fi
+  fssh "cp ~/bic-v2/$rel ~/bic-v2/$rel.bak-\$(date +%Y%m%d-%H%M%S) 2>/dev/null || true"
+  scp -q "ops/field/$rel" "${FIELD_SSH}:bic-v2/$rel"
+  ok "$rel synced (field copy backed up)"
+}
+# ALL services' compose files, not just this round's — a drifted compose on an
+# out-of-scope service is a landmine for its next roll. Out-of-scope syncs land
+# on disk and apply at that service's next `up`.
+for s2 in "${SVCS[@]}"; do sync_field_file "$(compose_dir "$s2")/docker-compose.yml"; done
+sync_field_file keycloak/docker-compose.yml
+sync_field_file keycloak/realm-bic.json
+sync_field_file deploy.sh report-only
+sync_field_file scripts/reset.sh report-only
+
+# ── 2c. guard: bic-agent-service client exists in the field realm ───────────
+# Realm import only runs on a fresh keycloak DB — an already-imported field
+# realm never gains the client from realm-bic.json (2026-07-14: missing on orin).
+info "guard: bic-agent-service keycloak client"
+client_state="$(fssh bash -s <<'RSCRIPT'
+envf=~/bic-v2/.env
+g() { grep -m1 "^$1=" "$envf" | cut -d= -f2-; }
+kc="$(g KC_CONTAINER_NAME)"; kc="${kc:-bic-keycloak}"
+docker exec "$kc" /opt/keycloak/bin/kcadm.sh config credentials   --server http://localhost:8080 --realm master   --user "$(g KEYCLOAK_ADMIN)" --password "$(g KEYCLOAK_ADMIN_PASSWORD)" >/dev/null 2>&1   || { echo LOGIN_FAILED; exit 0; }
+if docker exec "$kc" /opt/keycloak/bin/kcadm.sh get clients -r bic -q clientId=bic-agent-service --fields clientId 2>/dev/null | grep -q bic-agent-service; then
+  echo EXISTS
+else
+  echo MISSING
+fi
+RSCRIPT
+)"
+case "$client_state" in
+  EXISTS) ok "client exists" ;;
+  MISSING)
+    if [ "$DRY" -eq 1 ]; then err "client MISSING — would create it (kcadm, secret from field .env)"; else
+      created="$(fssh bash -s <<'RSCRIPT'
+envf=~/bic-v2/.env
+g() { grep -m1 "^$1=" "$envf" | cut -d= -f2-; }
+kc="$(g KC_CONTAINER_NAME)"; kc="${kc:-bic-keycloak}"
+sec="$(g BIC_AGENT_SERVICE_CLIENT_SECRET)"
+{ [ -n "$sec" ] && [ "$sec" != "__FILL_ME__" ]; } || { echo NO_SECRET; exit 0; }
+docker exec "$kc" /opt/keycloak/bin/kcadm.sh create clients -r bic   -s clientId=bic-agent-service -s 'name=BIC Agent Service' -s protocol=openid-connect   -s enabled=true -s publicClient=false -s serviceAccountsEnabled=true   -s standardFlowEnabled=false -s directAccessGrantsEnabled=false   -s clientAuthenticatorType=client-secret -s "secret=$sec" >/dev/null 2>&1   && echo CREATED || echo CREATE_FAILED
+RSCRIPT
+)"
+      case "$created" in
+        CREATED) ok "client created (secret from field .env)" ;;
+        NO_SECRET) die "BIC_AGENT_SERVICE_CLIENT_SECRET unset in field .env — fill it, then re-run" ;;
+        *) die "kcadm create failed — provision manually per ops/field/README §keycloak" ;;
+      esac
+    fi ;;
+  *) die "kcadm admin login failed — check KEYCLOAK_ADMIN(_PASSWORD) in field .env" ;;
+esac
+
 [ "$DRY" -eq 1 ] && { info "dry-run: would build+roll: ${UPDATES[*]}"; exit 0; }
 
 # ── 3. build ─────────────────────────────────────────────────────────────────
@@ -175,5 +243,39 @@ if [ "${CHANGED[portal]:-}" = runtime ]; then
   n="$(fssh "asset=\$(curl -s http://localhost:15173/ | grep -oE '/assets/[^\"]+\.js' | head -1); curl -s http://localhost:15173\$asset | grep -coE 'localhost:18080'" || true)"
   [ "${n:-0}" = 0 ] && ok "portal bundle clean (0x localhost:18080)" || die "portal bundle contains localhost:18080 — wrong build args"
 fi
+# ── 5b. verify: auth posture ─────────────────────────────────────────────────
+# Green /health never covers auth or CORS (the 2026-07-14 outage rolled straight
+# through it): probe the three ways the wave can break — enforcement gate,
+# service token, browser preflight.
+info "verify: auth posture (401 gate / service token / CORS preflight)"
+fssh bash -s -- "$FIELD_HOST_IP" <<'RSCRIPT' || die "auth verify FAILED (see line above) — rollback hints in the roll section"
+set -u
+FIELD_IP="$1"; envf=~/bic-v2/.env
+g() { grep -m1 "^$1=" "$envf" | cut -d= -f2-; }
+lp="$(g LAB_PORT)"; lp="${lp:-8192}"
+bp="$(g BE_PORT)"; bp="${bp:-8800}"
+pp="$(g PORTAL_PORT)"; pp="${pp:-15173}"
+kp="$(g KEYCLOAK_PORT)"; kp="${kp:-18080}"
+LAB="http://localhost:${lp}"; ORIGIN="http://${FIELD_IP}:${pp}"
+
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$LAB/preparations/racks")"
+[ "$code" = 401 ] || { echo "FAIL: tokenless lab call expected 401, got $code (LAB_AUTH_MODE off? stale compose?)"; exit 1; }
+echo "  ✓ tokenless lab call -> 401 (enforcement on)"
+
+sec="$(g BIC_AGENT_SERVICE_CLIENT_SECRET)"
+tok="$(curl -s --max-time 15 -X POST "http://localhost:${kp}/realms/bic/protocol/openid-connect/token"   -d grant_type=client_credentials -d client_id=bic-agent-service   --data-urlencode "client_secret=${sec}"   | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')"
+[ -n "$tok" ] || { echo "FAIL: service token mint failed (client missing / secret mismatch)"; exit 1; }
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "Authorization: Bearer $tok" "$LAB/preparations/racks")"
+[ "$code" = 200 ] || { echo "FAIL: service-token lab call got $code (lab KEYCLOAK_ISSUER_URL must byte-match token iss)"; exit 1; }
+echo "  ✓ service token -> lab 200"
+
+for tgt in "$LAB/preparations/racks" "http://localhost:${bp}/sessions"; do
+  hdrs="$(curl -s -D - -o /dev/null --max-time 5 -X OPTIONS "$tgt"     -H "Origin: ${ORIGIN}" -H "Access-Control-Request-Method: GET"     -H "Access-Control-Request-Headers: authorization")"
+  echo "$hdrs" | head -1 | grep -q " 200" || { echo "FAIL: preflight $tgt not 200 (origin ${ORIGIN})"; exit 1; }
+  echo "$hdrs" | grep -qi "^access-control-allow-origin:" || { echo "FAIL: preflight $tgt has no allow-origin for ${ORIGIN} — CORS_ALLOW_ORIGINS mismatch"; exit 1; }
+done
+echo "  ✓ CORS preflight (portal origin ${ORIGIN}) -> lab + BE both allowed"
+RSCRIPT
+
 ok "update complete: ${UPDATES[*]}"
 for s in "${UPDATES[@]}"; do echo "  $s: ${DEPLOYED[$s]:0:7} -> ${MAIN[$s]:0:7}"; done
