@@ -16,7 +16,12 @@ set -euo pipefail
 
 FIELD_SSH="${FIELD_SSH:-orin-tail}"
 FIELD_HOST_IP="${FIELD_HOST_IP:-192.168.12.150}"
-REPO_BASE="${REPO_BASE:-/Users/wenlongwang/Work/BIC/talos}"
+# Operator's local service-repo checkout (portal/be/lab/chem/mock). Override with
+# REPO_BASE=/path/to/repos or BIC_ROOT; autodetected from common layouts otherwise.
+REPO_BASE="${REPO_BASE:-${BIC_ROOT:-}}"
+if [ -z "$REPO_BASE" ]; then for _c in "$HOME/Work/BIC/talos" "$HOME/Development/BIC" "$HOME/BIC"; do
+  [ -d "$_c/BIC-agent-portal" ] && { REPO_BASE="$_c"; break; }
+done; fi
 # Portal image variant = tag prefix (host-specific: the portal bakes absolute
 # URLs at build time, so each site has its own variant — orin=field, a1=field-a1;
 # sharing one tag across sites would clobber the other site's image).
