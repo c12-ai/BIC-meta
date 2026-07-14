@@ -7,10 +7,10 @@ description: 一键起 BIC 本地台架（lab/BE/portal/mock/chem + infra + keyc
 
 **核心原则**：所有冷启知识都编码进 `scripts/bic-env/*` 了。你的工作是**跑 make、读 doctor 的可执行输出、按红牌自带的 `→ fix` 命令处置**——不要凭记忆复述冷启顺序，也不要通读 `ops/run-latest`。
 
-从 **meta 仓根目录**跑（本机 repos 在 `/Users/wenlongwang/Work/BIC/talos`，需 `BIC_ROOT` 指过去）：
+从 **meta 仓根目录**跑（标准布局 `BIC_ROOT` 自动探测；repos 在非标准位置时用 `BIC_ROOT` 指过去）：
 
 ```bash
-BIC_ROOT=/Users/wenlongwang/Work/BIC/talos make doctor   # 先体检（只读，绝不动运行态）
+BIC_ROOT=<你的 BIC 服务仓目录> make doctor   # 先体检（只读，绝不动运行态）
 ```
 
 ## 决策树

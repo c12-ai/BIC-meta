@@ -26,10 +26,10 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## Folder Structure
 
-1. BIC-agent-service: agent backend. Written in Langgraph. Communicate with Nexus. @/Users/drakezhou/Development/BIC/BIC-agent-service
-2. BIC-agent-portal: agent frontend. (No BFF anymore) @/Users/drakezhou/Development/BIC/BIC-agent-portal
-3. BIC-lab-service: (Nexus) manage lab status (LIMS), orch and report exp task, communicate with robot and backend using MQ. @/Users/drakezhou/Development/BIC/BIC-lab-service
-4. BIC-shared-types: Defined cross team shared object type @/Users/drakezhou/Development/BIC/BIC-shared-types
+1. BIC-agent-service: agent backend. Written in Langgraph. Communicate with Nexus. @$BIC_ROOT/BIC-agent-service
+2. BIC-agent-portal: agent frontend. (No BFF anymore) @$BIC_ROOT/BIC-agent-portal
+3. BIC-lab-service: (Nexus) manage lab status (LIMS), orch and report exp task, communicate with robot and backend using MQ. @$BIC_ROOT/BIC-lab-service
+4. BIC-shared-types: Defined cross team shared object type @$BIC_ROOT/BIC-shared-types
 5. BIC-chem-service: stateless RDKit molecular-weight calculator used by Agent Service ELN report enrichment. Optional for the main workflow; if absent, ELN downloads still work but FW/mole fields are omitted.
 
 ## Local Dev Infra:
@@ -64,8 +64,8 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
    </details>
 
 ## Test Scenarios.
-1. E2E (FE <-> BE <-> LabService) test case: @/Users/drakezhou/Development/BIC/BIC-agent-portal/tests. Run with playwright.test
-2. BE Scenarios test: All cases and scenarios under: @/Users/drakezhou/Development/BIC/BIC-agent-service/scripts
+1. E2E (FE <-> BE <-> LabService) test case: @$BIC_ROOT/BIC-agent-portal/tests. Run with playwright.test
+2. BE Scenarios test: All cases and scenarios under: @$BIC_ROOT/BIC-agent-service/scripts
 3. Live-bench E2E / scenario testing: dispatch the `bic-e2e-runner` agent (`@.claude/agents/bic-e2e-runner.md`) — it carries the full bench playbook (reset preconditions, SSE-stall + LLM-abandon recovery, ChemEngine probe). Don't re-derive the protocol in the main session.
 
 
