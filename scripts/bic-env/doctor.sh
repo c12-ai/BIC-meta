@@ -60,6 +60,12 @@ section "Infra containers (docker)"
 if docker_up; then
   while IFS='|' read -r name port label; do
     [ -n "${name}" ] || continue
+    # aws profile needs no local object store (S3 = real AWS) — a stopped
+    # bic-minio with no forwarder is the normal post-reboot state, not a fault.
+    if [ "${name}" = "bic-minio" ] && [ "${BIC_PROFILE}" = "aws" ] && ! container_running "${name}"; then
+      ok "${name} not required (aws profile: object store = real AWS S3)"
+      continue
+    fi
     # Real-Mind mode deliberately stops bic-minio: :9000 is the forwarder to
     # orin's MinIO (mind.sh). Not a fault — the Mind section below verifies it.
     if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
@@ -312,18 +318,58 @@ case "${mind_intent}" in
     fi
     ;;
   false)
-    _mind_bad=0
-    mind_route_ok || { _mind_bad=1; fail "no /32 route to ${MIND_LAB_IP} via tailscale (lost on reboot)" "make mind-real"; }
-    [ -n "$(minio_fwd_pid)" ] || { _mind_bad=1; fail "minio forwarder not running (lost on reboot)" "make mind-real"; }
-    tcp_open "${MIND_LAB_IP}" "${MIND_PORT}" 3 || { _mind_bad=1; fail "real Mind unreachable (${MIND_LAB_IP}:${MIND_PORT})" "make mind-status  # or fall back: make mind-mock"; }
-    if [ "${_mind_bad}" = "0" ]; then
-      ok "MODE: REAL — Mind ${MIND_LAB_IP}:${MIND_PORT} via orin-tail + orin MinIO through forwarder"
+    if [ "${BIC_PROFILE}" = "aws" ]; then
+      # aws profile: cloud Mind, no orin route/forwarder legs. Deeper HTTP/S3
+      # checks live in the "Cloud Mind + AWS S3" section below; this is the
+      # mode verdict (TCP liveness of the cloud Mind).
+      if tcp_open "${AWS_MIND_HOST}" "${AWS_MIND_PORT}" 3; then
+        ok "MODE: REAL (aws cloud) — Mind ${AWS_MIND_HOST}:${AWS_MIND_PORT} + AWS S3 (no route/forwarder)"
+      else
+        fail "MODE: REAL (aws cloud) but cloud Mind unreachable (${AWS_MIND_HOST}:${AWS_MIND_PORT})" "make mind-status  # check network / VPN"
+      fi
+    else
+      _mind_bad=0
+      mind_route_ok || { _mind_bad=1; fail "no /32 route to ${MIND_LAB_IP} via tailscale (lost on reboot)" "make mind-real"; }
+      [ -n "$(minio_fwd_pid)" ] || { _mind_bad=1; fail "minio forwarder not running (lost on reboot)" "make mind-real"; }
+      tcp_open "${MIND_LAB_IP}" "${MIND_PORT}" 3 || { _mind_bad=1; fail "real Mind unreachable (${MIND_LAB_IP}:${MIND_PORT})" "make mind-status  # or fall back: make mind-mock"; }
+      if [ "${_mind_bad}" = "0" ]; then
+        ok "MODE: REAL — Mind ${MIND_LAB_IP}:${MIND_PORT} via orin-tail + orin MinIO through forwarder"
+      fi
     fi
     ;;
   unset)
     warn "MIND_MOCK_MODE not set in BE .env — BE code default applies (mock); make mind-mock/mind-real to pin it"
     ;;
 esac
+
+# --- 10b. aws profile: cloud Mind + AWS S3 ---------------------------------
+# Only on the aws profile (a1-site 口径). Read-only; secrets are never echoed.
+if [ "${BIC_PROFILE}" = "aws" ]; then
+  section "Cloud Mind + AWS S3 (aws profile)"
+  # (a) dedicated S3 creds file present + non-empty (contents never printed)
+  if [ -s "${AWS_S3_CREDS_FILE}" ]; then
+    ok "S3 creds file present (${AWS_S3_CREDS_FILE})"
+  else
+    fail "S3 creds file missing/empty (${AWS_S3_CREDS_FILE})" \
+         "create it with S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY (chmod 600); see ops/auth-bench-2026-07-13.md"
+  fi
+  # (b) BE .env S3 endpoint + bucket are at the AWS 口径
+  _be_s3ep="$(sed -n 's/^S3_ENDPOINT_URL=//p' "$(repo_dir BIC-agent-service)/.env" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+  _be_s3bkt="$(sed -n 's/^S3_BUCKET_NAME=//p' "$(repo_dir BIC-agent-service)/.env" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+  if [ "${_be_s3ep}" = "${AWS_S3_ENDPOINT_URL}" ] && [ "${_be_s3bkt}" = "${AWS_S3_BUCKET}" ]; then
+    ok "BE .env S3 at AWS 口径 (${AWS_S3_ENDPOINT_URL} / ${AWS_S3_BUCKET})"
+  else
+    fail "BE .env S3 not at AWS 口径 (endpoint='${_be_s3ep:-none}' bucket='${_be_s3bkt:-none}')" \
+         "make up   # converges BE/lab .env to the AWS store"
+  fi
+  # (c) cloud Mind HTTP reachable
+  if [ "$(http_code "http://${AWS_MIND_HOST}:${AWS_MIND_PORT}/openapi.json" 8)" = "200" ]; then
+    ok "cloud Mind openapi 200 (${AWS_MIND_HOST}:${AWS_MIND_PORT})"
+  else
+    fail "cloud Mind openapi not 200 (${AWS_MIND_HOST}:${AWS_MIND_PORT})" \
+         "curl -s --noproxy '*' http://${AWS_MIND_HOST}:${AWS_MIND_PORT}/openapi.json   # network / VPN?"
+  fi
+fi
 
 # --- Verdict ---------------------------------------------------------------
 printf '\n%s%s== Verdict ==%s\n' "${C_BLD}" "${C_BLU}" "${C_RST}"

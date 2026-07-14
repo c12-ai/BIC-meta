@@ -4,7 +4,8 @@
 # Knobs (env or `make X=... target`):
 #   BIC_ROOT=/path      where the service repos live (default: autodetected —
 #                       this repo if they're nested inside it, else its parent)
-#   BIC_PROFILE=minimal|full-real   (default minimal: Mind mocked + local MinIO)
+#   BIC_PROFILE=aws|minimal|full-real  (default aws: cloud Mind + real AWS S3;
+#                       minimal: Mind mocked + local MinIO; full-real: orin LAN Mind)
 #   DRY=1               up/restart: print planned actions, change nothing
 #   INFRA=1             down: also stop the shared docker infra
 #   CHEM_DIR=/path INFRA_DIR=/path   override auto-detection
