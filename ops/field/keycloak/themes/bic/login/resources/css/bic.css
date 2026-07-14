@@ -64,13 +64,15 @@ body#keycloak-bg {
   font-family: var(--bic-font);
 }
 
-/* Brand header → BIC logo lockup. The realm displayName is intentionally empty
+/* Brand header → Talos lockup, matching the portal sidebar BrandHeader
+   ("Talos" + "Talos 控制台", Wenlong 2026-07-14 — the login brands like the
+   portal, not "BIC"). The realm displayName is intentionally empty
    (see keycloak/realm-bic.json), so the wrapper carries only the logo. */
 #kc-header-wrapper {
   height: 52px;
   margin: 0 auto 6px;
   padding: 0;
-  background-image: url("../img/bic-logo.svg");
+  background-image: url("../img/talos-logo.svg");
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
