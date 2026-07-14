@@ -38,7 +38,7 @@ pull_one() { # <label> <dir>
 }
 
 section "Repos"
-pull_one meta "${BIC_META_DIR}"
+pull_one BIC-meta "${BIC_META_DIR}"
 for r in BIC-lab-service BIC-agent-service BIC-agent-portal BIC-shared-types mars_interface_mock BIC-chem-service; do
   pull_one "${r}" "$(repo_dir "${r}")"
 done
