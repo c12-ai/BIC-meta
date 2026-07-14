@@ -23,7 +23,7 @@ export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 .DEFAULT_GOAL := help
 .PHONY: help up pull update doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
         mind-status mind-real mind-mock \
-        bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared
+        bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared bootstrap-infra
 
 help: ## Show this help
 	@echo "BIC env — one-shot local bring-up"
@@ -80,3 +80,4 @@ bootstrap-backend:  ; $(BOOTSTRAP) backend
 bootstrap-portal:   ; $(BOOTSTRAP) portal
 bootstrap-lab:      ; $(BOOTSTRAP) lab
 bootstrap-shared:   ; $(BOOTSTRAP) shared
+bootstrap-infra:    ; $(BOOTSTRAP) infra
