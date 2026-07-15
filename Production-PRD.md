@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-08
+- Last updated: 2026-07-15
 
 ## Scope
 
@@ -150,6 +150,25 @@ Core scenarios:
      time to support later quality analysis by experiment stage, specialist, task, and
      issue pattern.
 
+13. **User-initiated experiment retry**
+   - A chemist can retry after a successful result, a failed result, or a terminal
+     execution failure with no result. The retry creates a new trial under the same job
+     and preserves the prior trial as non-active history.
+   - Version 1 exposes retry only while this is still the current workflow step, before
+     the chemist accepts the result and advances to a downstream job.
+   - This user action is a whole-trial retry and is separate from the automatic TLC Rf
+     round retry performed inside one TLC execution flow.
+   - Version 1 must favor physical safety over material reuse: it carries forward the
+     experiment parameters as an editable draft, but does not carry forward material IDs,
+     placements, Lab Task identity, execution state, evidence, or results.
+   - The new trial must return to Material Preparation. It cannot dispatch until the
+     chemist has prepared new task-specific materials, assigned valid locations, passed
+     readiness validation, and confirmed execution.
+   - Version 1 must not automatically return, delete, dispose, or otherwise rewrite the
+     prior trial's physical materials. Lab Service remains the authority for their actual
+     state; they are simply not selected for the new trial.
+   - A repeated click or request must not create duplicate retry trials.
+
 ## Core Concepts
 
 1. **Experiment Objective**
@@ -208,6 +227,50 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - After TLC parameters are confirmed, the user must confirm the Lab Logistic parameters for the TLC execution.
    - Lab Logistic confirmation connects the user-approved experiment design to concrete lab-side item/location usage.
    - The system must not dispatch the TLC experiment before the required Lab Logistic parameters are confirmed.
+
+## User-Initiated Experiment Retry
+
+### Goal
+
+Let the chemist start a new trial from an unsatisfactory result quickly, while keeping the
+first release small and leaving a safe extension point for material reuse based on real robot
+execution facts.
+
+### Version 1: safe full preparation
+
+1. Once a trial is no longer actively executing, its result or terminal-failure surface exposes
+   one `Retry experiment` action while this remains the current workflow step. This covers a
+   successful result, a failed result, and an execution failure that produced no result. Version 1
+   does not reopen a step after its result was accepted and a downstream job began.
+2. Clicking the action creates exactly one next-attempt trial under the same job.
+   The source trial becomes non-active history and remains visible; it is not overwritten or
+   left competing with the new trial as the current attempt.
+3. Stable experiment inputs and recommended parameters are copied into the new trial as an
+   editable draft. Trial-specific state is cleared, including material identities and
+   placements, readiness confirmation, Lab Task identity, progress, evidence, analysis, and
+   result-review state.
+4. The product opens the new trial's Material Preparation flow. For TLC, the chemist creates
+   new pure/crude tube entries and assigns them just as in the first trial.
+5. The retry never auto-dispatches. The normal Material Preparation, readiness validation,
+   parameter confirmation, and dispatch gates apply again.
+6. Version 1 uses the same behavior for a successful and a failed source trial. It never reuses
+   prior materials because reliable item-level usage facts are not yet guaranteed.
+
+### Follow-up: evidence-based material reuse
+
+1. Robot execution must report item-level material facts at the step where they occur, not only
+   a final task success/failure. At minimum the system must know when a material is moved or
+   picked, first used, returned, discarded, or left in an unknown state.
+2. Lab Service is the authority for these physical facts. Retry eligibility must be derived per
+   material, because one trial may have used one tube while leaving another untouched.
+3. A material can be offered for reuse only when the execution trace proves it was not used and
+   it is physically recoverable. A reused tube keeps its identity but enters the new trial as
+   unassigned, because its old placement may already have been cleared when the robot picked it.
+4. Once any step reports that a material was used, it cannot be reused even if the later trial
+   fails. A successful source trial never reuses its removed tubes.
+5. Missing, contradictory, or unknown execution facts default to not reusable.
+6. The retry record must remain traceable to its source trial and to the material-state facts
+   that allowed or denied each reuse decision.
 
 ## Experiment Item Management Rules
 
@@ -426,6 +489,19 @@ For the TLC Lab Logistic panel:
 - Parameter Design begins only after both Experiment Objective and Workflow Design / Plan are confirmed.
 - If TLC and CC are robot-executed and RE is manual, Parameter Design includes TLC and CC parameters only.
 - TLC Lab Logistic confirmation happens after TLC parameter confirmation and before TLC dispatch.
+- From a successful result, failed result, or terminal execution failure with no result, the
+  chemist can request an experiment retry and receives exactly one new trial under the same job;
+  the source trial remains visible as non-active history.
+- Version 1 offers retry only on the current, not-yet-accepted workflow step; it does not reopen
+  an earlier step after downstream execution has begun.
+- The Version 1 retry carries forward editable experiment parameters but starts with no prior
+  material IDs or placements, Lab Task identity, execution progress, evidence, analysis, or result.
+- The new trial opens Material Preparation and cannot dispatch until new materials are assigned,
+  readiness is validated, and the chemist confirms execution.
+- Version 1 never selects prior-trial materials for reuse and never rewrites their Lab Service
+  state as a side effect of creating the retry.
+- Repeating the same retry request does not create a second new trial.
+- User-initiated whole-trial retry does not change the existing automatic TLC Rf round-retry flow.
 - Experiment-specific items such as sample columns and sample tubes are configured during experiment design/dispatch, not as generic consumables.
 - Generic consumables can be configured through Consumable Maintenance by entering maintenance mode from the upper-right button, clicking slot icons, and exiting edit mode to persist changes.
 - The special item maintenance module is available from the Parameter Design stage and can maintain experiment-specific lab items while also selecting the items required by the current experiment.
@@ -515,10 +591,25 @@ For the TLC Lab Logistic panel:
 - Backend-only implementation details that do not change product behavior.
 - Agent prompt/tool internals except where they define externally visible copilot behavior.
 - Cross-team shared protocol governance owned by `BIC-shared-types`.
+- Version 1 material reuse, robot step-event contract changes, and automated return of prior-trial
+  materials. These belong to the evidence-based follow-up after the basic retry is usable.
+- Retrying an already-accepted historical step after a downstream job has started, including any
+  downstream-result invalidation or rollback policy.
 
 ## Dependencies / Open Questions
 
 - Detailed production acceptance criteria for each chemistry stage should be expanded as product decisions are finalized.
+- Experiment retry Version 1 is not blocked by material-reuse design because it always prepares
+  new task-specific materials.
+- Follow-up dependency: define the Mars → Lab Service item-level event contract that identifies
+  pick/move, first use, return, and discard for each relevant material. A task-level failure step
+  alone is insufficient to decide reuse.
+- Follow-up decision: define the protocol-specific point at which each TLC/CC material becomes
+  irreversibly `used`, and how a physically intact, picked-but-unused item is returned before it
+  can be assigned to a retry.
+- Follow-up decision: define the durable reuse-decision projection and audit surface. Lab Service
+  owns physical facts; the product still needs one consistent cross-service policy that converts
+  those facts into reusable / not reusable / unknown.
 - The former open questions on TLC tube quantity and slot-assignment semantics are RESOLVED
   (2026-07-05): see rules 8 and 9 under Experiment Item Management Rules.
 - Pending external follow-up: the Feishu interaction document and 实验室信息维护配置表 must be
@@ -551,6 +642,13 @@ For the TLC Lab Logistic panel:
 - Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-15 (latest): Added the user-initiated whole-trial experiment retry PRD. Version 1
+  reuses the existing result rework entry and attempt model, copies editable experiment
+  parameters, clears all trial-specific material/execution/result state, and routes the new trial
+  through fresh Material Preparation with no automatic dispatch or material reuse. Added the
+  follow-up item-level robot/Lab material-fact model and conservative reuse rules (used or unknown
+  means not reusable; proven unused and recoverable may be reused but must be reassigned).
 
 - 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
