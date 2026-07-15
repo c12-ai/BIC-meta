@@ -171,6 +171,11 @@ Core scenarios:
    - The robot's claim starts at dispatch and ends only when the task reaches a terminal
      state. A TLC task parked awaiting confirmation still holds its claim, because its
      selected boxes remain off-shelf until the run ends.
+   - A robot claim excludes HUMAN writers only. Robot-vs-robot serialization is owned by
+     robot availability, not by shelf claims: concurrent non-terminal tasks' claims
+     coexist (e.g. a CC dispatch proceeds while a TLC task parked awaiting confirmation
+     still holds its claim) — a robot-vs-robot exclusion would deadlock the established
+     "CC/RE run while TLC awaits confirmation" workflow.
    - A dispatch attempted while a conflicting human claim is live is rejected atomically
      (no task is created) and the failure surfaces to the chemist naming the holder; the
      same dispatch succeeds after the claim is released.
@@ -547,6 +552,8 @@ For the TLC Lab Logistic panel:
   dispatch succeeds after the maintenance session ends.
 - While a dispatched task is non-terminal — including a TLC task parked awaiting
   confirmation — Consumable Maintenance entry is blocked with a robot-window notice.
+- A CC dispatch succeeds while a TLC task is parked awaiting confirmation and still
+  holds its shelf claim (robot claims exclude human writers only, never each other).
 - An abandoned editing session's shelf claim is reclaimed automatically (~1 minute);
   other users' surfaces recover on their next poll, and a write replayed from the
   reclaimed session is rejected.
@@ -602,7 +609,9 @@ For the TLC Lab Logistic panel:
   TLC awaiting-confirm), Lab Service as claim authority with atomic acquisition and
   holder-naming conflicts, advisory-only UI with authoritative re-validation on every
   write/dispatch, automatic reclaim of abandoned sessions, and matching acceptance
-  criteria. Implemented and live-verified as task `07-15-shelf-edit-locks`
+  criteria. Review revision (same day): robot claims exclude HUMAN writers only —
+  robot-vs-robot claims coexist (serialization owned by robot availability), so CC
+  dispatches while a parked TLC still holds its claim. Implemented and live-verified as task `07-15-shelf-edit-locks`
   (BIC-agent-service `.trellis`); design record: 货架编辑互斥锁设计结论
   (Feishu B498dsIMhorCYLxEGNhc90DTn0f), which supersedes the earlier three-lock
   slot-level interaction draft. Cross-task same-item dispatch validation is tracked
