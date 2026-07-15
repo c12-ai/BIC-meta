@@ -620,7 +620,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertLess(diff_step, issue_step)
         self.assertLess(issue_step, freeze_step)
 
-        self.assertIn("Run `scripts/assess-risk-matrix.sh` exactly once", step_one)
+        self.assertIn("Resolve the directory containing this loaded `SKILL.md`", step_one)
+        self.assertIn("`scripts/assess-risk-matrix.sh` exactly once", step_one)
+        self.assertIn("Do not assume `scripts/`", step_one)
+        self.assertIn("exists under the workspace root", step_one)
         self.assertIn("only interpret that same result", step_one)
         self.assertIn("Do not rerun", step_one)
         self.assertIn("exactly one affected GitHub repository", step_one)

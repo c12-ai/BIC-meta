@@ -57,8 +57,10 @@ If the user asks to execute tests, state that this skill only provides read-only
 ## Workflow
 
 1. Build one immutable assessment snapshot:
-   - Run `scripts/assess-risk-matrix.sh` exactly once as the primary entry for a
-     normal end-to-end Quality review. Keep its complete JSON result as the
+   - Resolve the directory containing this loaded `SKILL.md`, then run that
+     directory's `scripts/assess-risk-matrix.sh` exactly once as the primary
+     entry for a normal end-to-end Quality review. Do not assume `scripts/`
+     exists under the workspace root. Keep the complete JSON result as the
      conceptual assessment snapshot for this run; this name does not add a JSON
      field. Substeps 1A, 1B, and 1C only interpret that same result. Do not rerun
      the wrapper or repeat GitHub discovery between them.

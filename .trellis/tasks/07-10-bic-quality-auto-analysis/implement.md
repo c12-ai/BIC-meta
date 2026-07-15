@@ -195,3 +195,16 @@ changed objects gained active direct or safe-indirect assertion evidence.
 Validation: run the unit suite, synchronize the Skill mirrors, run the complete
 `verify-install.sh` chain, run Skill Creator validation, and finish with
 `git diff --check`.
+
+## 7. Real-Agent Evaluation
+
+- Define a small smoke set and a broader full set of realistic prompts.
+- Rebuild each Git fixture independently for `with_skill` and `no_skill`.
+- Run `codex exec` ephemerally with user config ignored and a read-only sandbox.
+- Grade the assessment call count, forbidden commands, required facts,
+  warning/`unassessed` preservation, paired fact-score delta, and prompt-variant
+  stability from raw JSONL and final-answer artifacts.
+- Keep old-Skill comparisons out of the normal gate.
+
+Validation: run the harness unit tests, run a dry-run smoke set, then run the
+real smoke set when model access is available.

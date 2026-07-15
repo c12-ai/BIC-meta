@@ -157,6 +157,12 @@ repository or test directory is added.
   committed source-of-truth Skill rather than a generated discovery mirror.
 - Verify discovery metadata, SOP routing, and mirror synchronization so
   missing or stale metadata fails the quality-kit verification chain.
+- Add isolated real-Agent eval cases that run identical prompts and Git fixtures
+  with the current Skill and without any target Skill or route. Do not include
+  an old-Skill baseline in the normal gate.
+- Deterministically grade observable Skill invocation count, warning and
+  `unassessed` preservation, core Diff/Issue/test facts, forbidden operations,
+  and fact stability across prompt variants.
 
 ## Acceptance Criteria
 
@@ -281,6 +287,11 @@ repository or test directory is added.
       `tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md`.
 - [x] Tests and `verify-install.sh` reject missing, inconsistent, or unsynchronized
       discovery metadata.
+- [x] Real-Agent eval fixtures support paired `with_skill` and `no_skill` runs
+      with identical target Git changes and fresh context for every run.
+- [x] Relevant prompts require exactly one assessment invocation, unrelated
+      prompts require none, and the deterministic grader reports factual and
+      command-trace differences without using an old-Skill baseline.
 
 ## Notes
 

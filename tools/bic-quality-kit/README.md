@@ -186,3 +186,33 @@ tests. GitHub Issue listing and lookup are read-only metadata requests through
 python3 -m unittest discover -s tools/bic-quality-kit/tests -v
 ./tools/bic-quality-kit/verify-install.sh
 ```
+
+## Real Agent Eval
+
+The script/unit suite validates deterministic analyzers. The Agent evals use
+fresh Git fixtures and run the same prompt in two isolated modes:
+
+- `with_skill`: the current repository Skill is installed and routed.
+- `no_skill`: the Skill and its route are absent.
+
+There is no old-Skill baseline in the normal gate. It can be added temporarily
+only when diagnosing a regression.
+
+```bash
+# Show the small PR/smoke case set without calling a model.
+python3 tools/bic-quality-kit/evals/run_agent_evals.py --list
+python3 tools/bic-quality-kit/evals/run_agent_evals.py --suite smoke --dry-run
+
+# Run paired real-Agent smoke evals.
+python3 tools/bic-quality-kit/evals/run_agent_evals.py --suite smoke
+
+# Run all prompt variants three times for a stability check.
+python3 tools/bic-quality-kit/evals/run_agent_evals.py --suite full --repetitions 3
+```
+
+Each run records Codex JSONL events, the final brief, deterministic grading, and
+a `with_skill`/`no_skill` fact-score comparison under `evals/results/`. The gate
+checks trigger behavior through the observable `assess-risk-matrix.sh` call
+count, preserves `warning`/`unassessed` facts, and rejects test execution or
+other write-oriented commands. Baseline results are comparative evidence; only
+the `with_skill` contract is a release gate.

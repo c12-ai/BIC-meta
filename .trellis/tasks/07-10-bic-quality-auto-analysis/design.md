@@ -235,3 +235,17 @@ non-unique Issue context makes overall risk `unassessed`.
 All behavior is contained in the kit source and committed mirrors. Reverting the
 task changes restores the previous hard-coded collector. No database or runtime
 state migration is involved.
+
+## Real-Agent Evaluation
+
+Agent evals live outside the runtime Skill under `tools/bic-quality-kit/evals`.
+Every run creates a fresh temporary Git workspace. The `with_skill` workspace
+contains the current `.agents` Skill and SOP route; the `no_skill` workspace
+contains the same business Diff and prompt without either discovery surface.
+Codex runs ephemerally with user config ignored and a read-only sandbox.
+
+The grader uses JSONL command events and normalized final-answer facts. It
+checks the assessment wrapper count, forbidden commands, required warnings and
+`unassessed` states, repository/module/Issue/test facts, and paired fact-score
+deltas. The no-Skill result is comparative evidence rather than a gate. An old
+Skill is intentionally excluded from routine evaluation.
