@@ -234,6 +234,85 @@ def static_argument(node: ast.AST, bindings: dict[str, str]) -> str | dict[str, 
     return None
 
 
+def function_nodes(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+    """Return nodes in one function body without descending into nested scopes."""
+    nodes: list[ast.AST] = []
+    pending = list(reversed(node.body))
+    while pending:
+        current = pending.pop()
+        nodes.append(current)
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        pending.extend(reversed(list(ast.iter_child_nodes(current))))
+    return nodes
+
+
+def call_site(node: ast.Call) -> tuple[int, int]:
+    return node.lineno, node.col_offset
+
+
+def assertion_linked_call_sites(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[tuple[int, int]]:
+    """Find calls whose value is consumed by a local assertion or raises block."""
+    nodes = function_nodes(node)
+    asserted_names: set[str] = set()
+    linked_calls: set[tuple[int, int]] = set()
+
+    def consume(expression: ast.AST) -> None:
+        asserted_names.update(
+            child.id for child in ast.walk(expression) if isinstance(child, ast.Name)
+        )
+        linked_calls.update(
+            call_site(child) for child in ast.walk(expression) if isinstance(child, ast.Call)
+        )
+
+    for child in nodes:
+        if isinstance(child, ast.Assert):
+            consume(child.test)
+        elif isinstance(child, ast.Call):
+            called = dotted_name(child.func)
+            if called.rsplit(".", 1)[-1].startswith("assert"):
+                consume(child)
+        elif isinstance(child, (ast.With, ast.AsyncWith)):
+            has_raises_context = any(
+                isinstance(item.context_expr, ast.Call)
+                and dotted_name(item.context_expr.func).endswith(("pytest.raises", "raises"))
+                for item in child.items
+            )
+            if has_raises_context:
+                for statement in child.body:
+                    consume(statement)
+
+    assignments: list[tuple[set[str], ast.AST]] = []
+    for child in nodes:
+        if isinstance(child, ast.Assign):
+            names = {
+                target.id for target in child.targets if isinstance(target, ast.Name)
+            }
+            if names:
+                assignments.append((names, child.value))
+        elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name) and child.value:
+            assignments.append(({child.target.id}, child.value))
+
+    changed = True
+    while changed:
+        changed = False
+        for names, value in assignments:
+            if not names & asserted_names:
+                continue
+            before_names = len(asserted_names)
+            before_calls = len(linked_calls)
+            asserted_names.update(
+                child.id for child in ast.walk(value) if isinstance(child, ast.Name)
+            )
+            linked_calls.update(
+                call_site(child) for child in ast.walk(value) if isinstance(child, ast.Call)
+            )
+            changed = changed or before_names != len(asserted_names) or before_calls != len(linked_calls)
+    return linked_calls
+
+
 class FunctionStaticFacts(ast.NodeVisitor):
     """Collect calls from one function body without descending into nested defs."""
 
@@ -243,11 +322,13 @@ class FunctionStaticFacts(ast.NodeVisitor):
         path_values: dict[str, Path],
         module_paths: dict[str, Path],
         known_helpers: set[str],
+        assertion_linked_calls: set[tuple[int, int]],
     ) -> None:
         self.test_path = test_path
         self.path_values = path_values
         self.module_paths = module_paths
         self.known_helpers = known_helpers
+        self.assertion_linked_calls = assertion_linked_calls
         self.targets: list[dict[str, Any]] = []
         self.helpers: list[dict[str, Any]] = []
 
@@ -269,6 +350,7 @@ class FunctionStaticFacts(ast.NodeVisitor):
                     "symbols": [node.func.attr],
                     "argv": [],
                     "source": "dynamic-module",
+                    "assertion_linked": call_site(node) in self.assertion_linked_calls,
                 })
 
         called = dotted_name(node.func)
@@ -296,6 +378,7 @@ class FunctionStaticFacts(ast.NodeVisitor):
                     "symbols": [],
                     "argv": argv,
                     "source": "subprocess-entrypoint",
+                    "assertion_linked": call_site(node) in self.assertion_linked_calls,
                 })
                 break
 
@@ -312,6 +395,7 @@ class FunctionStaticFacts(ast.NodeVisitor):
             self.helpers.append({
                 "name": helper_name,
                 "args": [static_argument(arg, {}) for arg in node.args],
+                "assertion_linked": call_site(node) in self.assertion_linked_calls,
             })
         self.generic_visit(node)
 
@@ -326,7 +410,13 @@ def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[d
     }
     summaries: dict[str, dict[str, Any]] = {}
     for name, node in functions.items():
-        visitor = FunctionStaticFacts(test_path, path_values, module_paths, set(functions))
+        visitor = FunctionStaticFacts(
+            test_path,
+            path_values,
+            module_paths,
+            set(functions),
+            assertion_linked_call_sites(node),
+        )
         for statement in node.body:
             visitor.visit(statement)
         parameters = [arg.arg for arg in node.args.args if arg.arg not in {"self", "cls"}]
@@ -340,6 +430,7 @@ def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[d
         name: str,
         bindings: dict[str, str],
         stack: tuple[str, ...] = (),
+        inherited_assertion_link: bool = False,
     ) -> list[dict[str, Any]]:
         if name in stack or name not in summaries:
             return []
@@ -354,7 +445,13 @@ def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[d
                         argv.append(bound)
                 elif isinstance(value, str):
                     argv.append(value)
-            resolved.append({**target, "argv": argv})
+            resolved.append({
+                **target,
+                "argv": argv,
+                "assertion_linked": bool(
+                    inherited_assertion_link or target.get("assertion_linked")
+                ),
+            })
         for helper in summary["helpers"]:
             callee = summaries[helper["name"]]
             callee_bindings: dict[str, str] = {}
@@ -363,14 +460,24 @@ def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[d
                     callee_bindings[parameter] = value
                 elif isinstance(value, dict) and value.get("parameter") in bindings:
                     callee_bindings[parameter] = bindings[value["parameter"]]
-            resolved.extend(resolve(helper["name"], callee_bindings, (*stack, name)))
+            resolved.extend(resolve(
+                helper["name"],
+                callee_bindings,
+                (*stack, name),
+                bool(inherited_assertion_link or helper.get("assertion_linked")),
+            ))
         unique: dict[tuple[str, tuple[str, ...], tuple[str, ...], str], dict[str, Any]] = {}
         for item in resolved:
             key = (
                 item["path"], tuple(item.get("symbols", [])),
                 tuple(item.get("argv", [])), item.get("source", ""),
             )
-            unique[key] = item
+            if key in unique:
+                unique[key]["assertion_linked"] = bool(
+                    unique[key].get("assertion_linked") or item.get("assertion_linked")
+                )
+            else:
+                unique[key] = item
         return list(unique.values())
 
     return {name: resolve(name, {}) for name in functions}

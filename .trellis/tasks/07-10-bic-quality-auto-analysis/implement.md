@@ -1,5 +1,6 @@
 # Implementation Plan
 
+
 ## 1. Repository and Diff Collection
 
 - Replace the hard-coded repository list with bounded dynamic discovery.
@@ -25,12 +26,21 @@ staged, untracked, rename, delete, missing-base, and child-repository behavior.
   repository identity, module/object tokens, labels, stable update ordering, and
   repository diversity. Preserve counts and exclusion reasons without returning
   excluded Issue content.
+- Split authoritative current-PR links from commit/branch reference hints so a
+  branch name cannot resolve an Issue without semantic confirmation.
+- Add bounded Chinese tokenization/project aliases and changed-path signals.
+  Require a real search signal for ordinary global shortlist filling and allow
+  only one no-signal fallback per affected repository.
 - Attempt to read every shortlisted body; do not introduce a separate five-body
-  cutoff. Continue after individual lookup failures and expose per-candidate
-  hydration status. Preserve strong-reference overflow as ambiguity.
+  cutoff. Use one GraphQL batch for multiple bodies and a fixed-size fallback
+  only for unresolved items. Continue after individual lookup failures and
+  expose per-candidate hydration status. Preserve strong-reference overflow as ambiguity.
+- Resolve a unique authoritative current-PR Issue through a fast path only when
+  one affected GitHub repository exists. With multiple affected repositories,
+  scan all repositories and keep the PR Issue repository-local.
 - Add explicit timeouts to current-PR lookup, repository Issue listing, and Issue
-  body lookup. Hydrate the shortlist through a fixed-size thread pool, preserve
-  input order, and isolate timeout/failure warnings per candidate.
+  body lookup plus a 60-second total GitHub analysis deadline. Preserve input
+  order and isolate timeout/failure warnings per candidate.
 - Record per-repository scan status and derive aggregate `succeeded`, `failed`,
   `partial`, or `not-run` state. Map failed/partial scans to distinct analysis
   statuses and never emit a successful-empty message for failed queries.
@@ -50,6 +60,12 @@ Issue-list call per affected repository during an end-to-end assessment without
 mutating Git state. Add timeout, ordered limited-concurrency, `scan-failed`,
 `partial-scan`, and successful-empty fixtures. A real GitHub list receives a
 read-only smoke check when authentication is available.
+
+Additional fixtures cover Chinese and mixed-language titles, commit/branch
+reference hints that remain unresolved, and repository fallback quotas that do
+not force the shortlist to its maximum size. Fast-path, one-request GraphQL
+batching, bounded fallback, and total-deadline fixtures prevent request-count and
+latency regressions.
 
 ## 2. Repository and Module Mapping
 
@@ -85,6 +101,12 @@ and root/unusual files remain visible.
   facts to the originating test case without executing analyzed content.
 - Use proven local Python entrypoints as safe one-hop import sources while
   retaining assertion and object-specific evidence requirements.
+- Attach assertion-link facts to dynamic target calls and helper-expanded local
+  entrypoints. Add regression coverage proving `target(); assert True` needs
+  strengthening while `result = target(); assert result` can clear the gap.
+- Restrict command-entrypoint one-hop imports to imported aliases referenced by
+  the selected branch's reachable functions. Add sibling-command fixtures that
+  prevent whole-file imports from clearing unrelated gaps.
 - Merge explicit repository-qualified inventory relations with discovered
   assets; reserve explicit cross-repository targets for deliberate E2E flows.
 - Analyze direct, safe one-hop/explicit, and possible scenario relationships per

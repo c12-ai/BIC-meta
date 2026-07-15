@@ -63,9 +63,17 @@ Resolve only a small static subset of `Path(__file__)`, parent, join, and local
 helper expressions. Never evaluate an expression or execute a discovered
 target. When an asserted test invokes a local Python entrypoint with a literal
 command, follow only that command's selected branch and the statically reachable
-local functions/constants. A directly called dynamic-module function may also
-establish relations to its statically reachable local helpers. Do not mark
-unselected command branches or unrelated same-file objects as tested.
+local functions/constants. Restrict safe one-hop imports to imported aliases
+actually referenced by that reachable branch; a whole-file import used only by
+a sibling command is not test evidence. A directly called dynamic-module
+function may also establish relations to its statically reachable local helpers.
+Do not mark unselected command branches or unrelated same-file objects as tested.
+
+Keep target reachability separate from assertion linkage. A target call clears
+a gap only when it occurs inside an assertion or expected-exception context, or
+when its direct/helper return value flows into an asserted expression. An
+unrelated assertion such as `target(); assert True` retains the relation but
+requires strengthening.
 
 ## Add-test guidance
 

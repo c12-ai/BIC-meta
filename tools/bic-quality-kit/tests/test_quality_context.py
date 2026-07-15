@@ -45,7 +45,6 @@ assert TEST_RELATIONS_SPEC and TEST_RELATIONS_SPEC.loader
 TEST_RELATIONS_MODULE = importlib.util.module_from_spec(TEST_RELATIONS_SPEC)
 TEST_RELATIONS_SPEC.loader.exec_module(TEST_RELATIONS_MODULE)
 
-
 def run(command: list[str], cwd: Path) -> str:
     proc = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=True)
     return proc.stdout.strip()
@@ -332,6 +331,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         for removed_key in ("capability_scope", "risk", "verification_scope", "potential_contract_impact", "cross_repository_impact"):
             self.assertNotIn(f'"{removed_key}"', serialized)
 
+
     def test_missing_explicit_base_warns_and_test_discovery_requires_files(self) -> None:
         collected = self.analyze("collect", "--base-ref", "does-not-exist")
         for repo in collected["repositories"]:
@@ -474,10 +474,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("核心结论", public_template)
         self.assertLess(public_template.index("核心结论"), public_template.index("变更集"))
         self.assertIn("影响范围：", public_template)
-        self.assertIn("跨仓判断：", public_template)
+        self.assertIn("多仓事实：", public_template)
         self.assertIn("Issue 对齐：", public_template)
         self.assertIn("测试判断：", public_template)
         self.assertIn("风险结论：", public_template)
+        self.assertIn("是否多仓发生改动：", public_template)
         self.assertIn("模块映射", public_template)
         self.assertIn("需求与问题单", public_template)
         self.assertIn("扫描状态：", public_template)
@@ -505,8 +506,15 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             self.assertNotIn(english_heading, public_template)
         self.assertNotIn("映射来源：", public_template)
         self.assertNotIn("下一步建议：", public_template)
+        self.assertNotIn("跨仓判断：", public_template)
+        self.assertNotIn("是否直接跨仓：", public_template)
+        self.assertNotIn("independent change stream", deliverables)
+        self.assertNotIn("direct business or contract chain", deliverables)
         self.assertIn("do not print it in the default brief", skill)
         self.assertIn("Start with the concise `核心结论`", skill)
+        self.assertIn("one workspace-level Issue context", skill)
+        self.assertIn("Never use repository count alone", skill)
+        self.assertNotIn("Report risk separately for independent change streams", skill)
 
     def test_skill_discovery_metadata_and_sop_entry_are_consistent(self) -> None:
         self.assertTrue(OPENAI_YAML.is_file())
@@ -552,6 +560,39 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         for trigger_term in ("test correspondence", "missing tests", "risk"):
             self.assertIn(trigger_term, skill_text.lower())
             self.assertIn(trigger_term, sop_row.lower())
+
+    def test_skill_step_one_freezes_one_assessment_snapshot(self) -> None:
+        skill = SKILL_FILE.read_text(encoding="utf-8")
+        step_one = skill.split("1. Build one immutable assessment snapshot:", 1)[1]
+        step_one = step_one.split("2. Read references only as needed", 1)[0]
+
+        diff_step = step_one.index("**1A. Collect Diff and comparison context.**")
+        issue_step = step_one.index("**1B. Discover and shortlist Issues.**")
+        freeze_step = step_one.index("**1C. Freeze the snapshot and scan state.**")
+        self.assertLess(diff_step, issue_step)
+        self.assertLess(issue_step, freeze_step)
+
+        self.assertIn("Run `scripts/assess-risk-matrix.sh` exactly once", step_one)
+        self.assertIn("only interpret that same result", step_one)
+        self.assertIn("Do not rerun", step_one)
+        self.assertIn("exactly one affected GitHub repository", step_one)
+        self.assertIn("With multiple affected repositories, scan every repository", step_one)
+        self.assertIn("`scan-failed` or `partial-scan`", step_one)
+        self.assertIn("`references/risk-model.md`", step_one)
+        self.assertIn("must not replace or silently merge", step_one)
+
+        self.assertIn("From the frozen assessment snapshot", skill)
+        self.assertIn("Do not recollect Issue metadata", skill)
+        self.assertIn(
+            "Treat `risk_assessment` from the frozen assessment snapshot",
+            skill,
+        )
+        self.assertIn(
+            "use its already hydrated full body from the frozen assessment",
+            skill,
+        )
+        self.assertIn("Never perform a second Issue body lookup", skill)
+        self.assertNotIn("candidate, read it fully", skill)
 
     def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
         without_issue = self.analyze("assess")
@@ -677,7 +718,108 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             )
         self.assertTrue(overridden["resolved"])
         snapshot_mock.assert_not_called()
-        resolve_mock.assert_called_once_with("c12-ai/BIC-meta#42", self.root)
+        self.assertEqual(resolve_mock.call_count, 1)
+        self.assertEqual(resolve_mock.call_args.args[:2], ("c12-ai/BIC-meta#42", self.root))
+
+    def test_branch_and_commit_references_require_semantic_confirmation(self) -> None:
+        repository = "c12-ai/BIC-agent-service"
+        payload = {
+            "number": 88,
+            "title": "Workflow dispatch behavior",
+            "url": f"https://github.com/{repository}/issues/88",
+            "state": "OPEN",
+            "labels": [{"name": "workflow"}],
+            "updatedAt": "2026-07-13T00:00:00Z",
+        }
+        resolved = ISSUE_MODULE.normalize_issue(
+            {**payload, "body": "## Acceptance Criteria\n- [ ] Keep dispatch idempotent"},
+            f"{repository}#88",
+            "github-cli",
+        )
+
+        for source, priority in (("commit-message", 2), ("branch-name", 3)):
+            with self.subTest(source=source):
+                snapshot = {
+                    "affected_repositories": [repository],
+                    "strong_candidates": [{
+                        "reference": f"{repository}#88",
+                        "source": source,
+                        "priority": priority,
+                        "evidence": "feature/issue-88-workflow",
+                    }],
+                    "repository_candidates": ISSUE_MODULE.repository_issue_candidates(
+                        [payload], repository,
+                    ),
+                    "repository_issue_counts": {repository: 1},
+                    "warnings": [],
+                }
+                with mock.patch.object(
+                    ISSUE_MODULE, "resolve_github_issue", return_value=resolved,
+                ):
+                    result = ISSUE_MODULE.finalized_auto_issue_context(
+                        self.root,
+                        snapshot,
+                        {"BIC-agent-service": [{
+                            "module_scope": "app/workflow",
+                            "name": "Workflow Runtime",
+                        }]},
+                        [{
+                            "repo": "BIC-agent-service",
+                            "path": "app/workflow/engine.py",
+                            "symbols": [{"name": "dispatch_workflow", "kind": "function"}],
+                        }],
+                    )
+
+                self.assertFalse(result["resolved"])
+                self.assertIsNone(result["selection_reason"])
+                self.assertEqual(result["analysis_status"], "semantic-review-required")
+                self.assertEqual(result["candidates"][0]["reference"], f"{repository}#88")
+
+    def test_issue_search_terms_support_chinese_and_mixed_titles(self) -> None:
+        repository = "c12-ai/BIC-agent-service"
+        payloads = [
+            {
+                "number": 70,
+                "title": "完善工作流状态切换和任务派发",
+                "url": f"https://github.com/{repository}/issues/70",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2026-07-12T00:00:00Z",
+            },
+            {
+                "number": 71,
+                "title": "更新用户权限说明",
+                "url": f"https://github.com/{repository}/issues/71",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2026-07-13T00:00:00Z",
+            },
+        ]
+        snapshot = {
+            "affected_repositories": [repository],
+            "strong_candidates": [],
+            "repository_candidates": ISSUE_MODULE.repository_issue_candidates(payloads, repository),
+            "repository_issue_counts": {repository: 2},
+            "warnings": [],
+        }
+        shortlist = ISSUE_MODULE.shortlist_issue_candidates(
+            snapshot,
+            {"BIC-agent-service": [{
+                "module_scope": "app/workflow",
+                "name": "Workflow Runtime",
+            }]},
+            [{
+                "repo": "BIC-agent-service",
+                "path": "app/workflow/dispatch_executor.py",
+                "symbols": [{"name": "dispatch_workflow", "kind": "function"}],
+            }],
+        )
+
+        self.assertIn("工作流", ISSUE_MODULE.search_terms("Workflow Runtime"))
+        self.assertIn("工作流", ISSUE_MODULE.search_terms(payloads[0]["title"]))
+        self.assertEqual(shortlist["candidates"][0]["reference"], f"{repository}#70")
+        self.assertTrue(shortlist["candidates"][0]["module_matches"])
+        self.assertIn("派发", shortlist["candidates"][0]["path_matches"])
 
     def test_issue_auto_discovery_scans_affected_repository_issues(self) -> None:
         repositories = [{
@@ -706,7 +848,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             },
         ]
 
-        def resolved_candidate(reference: str, _cwd: Path) -> dict:
+        def resolved_candidate(reference: str, _cwd: Path, _deadline: float | None = None) -> dict:
             number = int(reference.rsplit("#", 1)[1])
             payload = next(item for item in open_issues if item["number"] == number)
             return ISSUE_MODULE.normalize_issue(
@@ -730,13 +872,14 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(scanned["repository_issue_counts"], {"c12-ai/BIC-meta": 2})
         self.assertEqual(
             [item["reference"] for item in scanned["candidates"]],
-            ["c12-ai/BIC-meta#150", "c12-ai/BIC-meta#149"],
+            ["c12-ai/BIC-meta#150"],
         )
         self.assertEqual(scanned["candidates"][0]["labels"], ["quality"])
-        self.assertEqual(resolve_mock.call_count, 2)
-        self.assertEqual(scanned["issue_scan"]["shortlisted_count"], 2)
-        self.assertEqual(scanned["issue_scan"]["hydration_attempted_count"], 2)
-        self.assertEqual(scanned["issue_scan"]["hydration_succeeded_count"], 2)
+        self.assertEqual(resolve_mock.call_count, 1)
+        self.assertEqual(scanned["issue_scan"]["shortlisted_count"], 1)
+        self.assertEqual(scanned["issue_scan"]["fallback_selected_count"], 1)
+        self.assertEqual(scanned["issue_scan"]["hydration_attempted_count"], 1)
+        self.assertEqual(scanned["issue_scan"]["hydration_succeeded_count"], 1)
 
         linked_pr = {
             "url": "https://github.com/c12-ai/BIC-meta/pull/7",
@@ -764,7 +907,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             if item["reference"] == "c12-ai/BIC-meta#150"
         )
         self.assertEqual(selected_candidate["title"], "Add repository-aware quality analysis")
-        self.assertEqual(linked_resolve.call_count, 2)
+        self.assertEqual(linked_resolve.call_count, 1)
 
         with (
             mock.patch.object(ISSUE_MODULE, "github_repository", return_value="c12-ai/BIC-meta"),
@@ -879,6 +1022,207 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertTrue(any("timed out" in warning for warning in resolved["warnings"]))
         self.assertEqual(issue_run.call_args.kwargs["timeout"], ISSUE_MODULE.GH_BODY_TIMEOUT_SECONDS)
 
+    def test_authoritative_issue_fast_path_skips_open_issue_scan(self) -> None:
+        repository = "c12-ai/BIC-meta"
+        reference = f"{repository}#150"
+        repositories = [{
+            "name": "BIC-meta",
+            "path": str(self.root),
+            "branch": "feature/quality-agent",
+            "merge_base": "abc123",
+            "change_count": 1,
+        }]
+        linked_pr = {
+            "url": f"https://github.com/{repository}/pull/7",
+            "body": "Closes #150",
+            "closingIssuesReferences": [{
+                "number": 150,
+                "url": f"https://github.com/{repository}/issues/150",
+                "repository": {"nameWithOwner": repository},
+            }],
+        }
+        resolved = ISSUE_MODULE.normalize_issue(
+            {
+                "number": 150,
+                "title": "Quality analysis",
+                "body": "## Acceptance Criteria\n- [ ] Analyze quality",
+                "url": f"https://github.com/{repository}/issues/150",
+                "state": "OPEN",
+                "labels": [{"name": "quality"}],
+            },
+            reference,
+            "github-cli",
+        )
+
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", return_value=repository),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", return_value=linked_pr),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(ISSUE_MODULE, "list_repository_issues") as list_mock,
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=resolved) as resolve_mock,
+        ):
+            result = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+
+        list_mock.assert_not_called()
+        resolve_mock.assert_called_once()
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["reference"], reference)
+        self.assertEqual(result["issue_scan"]["scan_status"], "skipped-authoritative")
+        self.assertTrue(result["issue_scan"]["authoritative_fast_path"])
+        self.assertEqual(result["issue_scan"]["hydration_attempted_count"], 1)
+
+    def test_authoritative_issue_does_not_suppress_multi_repository_scan(self) -> None:
+        meta_repository = "c12-ai/BIC-meta"
+        agent_repository = "c12-ai/BIC-agent-service"
+        reference = f"{meta_repository}#150"
+        repositories = [
+            {
+                "name": "BIC-meta",
+                "path": str(self.root),
+                "branch": "feature/quality-agent",
+                "merge_base": "abc123",
+                "change_count": 1,
+            },
+            {
+                "name": "BIC-agent-service",
+                "path": str(self.child),
+                "branch": "feature/workflow",
+                "merge_base": "def456",
+                "change_count": 1,
+            },
+        ]
+        linked_pr = {
+            "url": f"https://github.com/{meta_repository}/pull/7",
+            "body": "Closes #150",
+            "closingIssuesReferences": [{
+                "number": 150,
+                "url": f"https://github.com/{meta_repository}/issues/150",
+                "repository": {"nameWithOwner": meta_repository},
+            }],
+        }
+        resolved = ISSUE_MODULE.normalize_issue(
+            {
+                "number": 150,
+                "title": "Quality analysis",
+                "body": "## Acceptance Criteria\n- [ ] Analyze quality",
+                "url": f"https://github.com/{meta_repository}/issues/150",
+                "state": "OPEN",
+                "labels": [{"name": "quality"}],
+            },
+            reference,
+            "github-cli",
+        )
+
+        def repository_for(repo: Path) -> str:
+            return meta_repository if Path(repo) == self.root else agent_repository
+
+        def current_pr_for(repo: Path, *_args: object) -> dict | None:
+            return linked_pr if Path(repo) == self.root else None
+
+        with (
+            mock.patch.object(ISSUE_MODULE, "github_repository", side_effect=repository_for),
+            mock.patch.object(ISSUE_MODULE, "current_pr_payload", side_effect=current_pr_for),
+            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
+            mock.patch.object(
+                ISSUE_MODULE, "list_repository_issues", return_value=([], None),
+            ) as list_mock,
+            mock.patch.object(
+                ISSUE_MODULE, "resolve_github_issue", return_value=resolved,
+            ),
+        ):
+            result = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
+
+        self.assertEqual(list_mock.call_count, 2)
+        self.assertFalse(result["resolved"])
+        self.assertEqual(result["analysis_status"], "semantic-review-required")
+        self.assertEqual(result["issue_scan"]["scan_status"], "succeeded")
+        self.assertFalse(result["issue_scan"]["authoritative_fast_path"])
+        self.assertFalse(result["issue_scan"]["authoritative_scope_complete"])
+        self.assertEqual(
+            set(result["issue_scan"]["repository_scans"]),
+            {meta_repository, agent_repository},
+        )
+        self.assertIn(reference, {item["reference"] for item in result["candidates"]})
+
+    def test_issue_bodies_use_one_graphql_batch_and_preserve_order(self) -> None:
+        repository = "c12-ai/BIC-meta"
+        candidates = [
+            {
+                "reference": f"{repository}#{number}",
+                "repository": repository,
+                "number": number,
+                "title": f"Candidate {number}",
+            }
+            for number in (3, 1, 2)
+        ]
+        graphql_payload = {
+            "data": {
+                f"issue_{index}": {
+                    "issue": {
+                        "number": candidate["number"],
+                        "title": candidate["title"],
+                        "body": f"Body {candidate['number']}",
+                        "url": f"https://github.com/{repository}/issues/{candidate['number']}",
+                        "state": "OPEN",
+                        "labels": {"nodes": [{"name": "quality"}]},
+                        "repository": {"nameWithOwner": repository},
+                    }
+                }
+                for index, candidate in enumerate(candidates)
+            }
+        }
+        success = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(graphql_payload), stderr="",
+        )
+
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(ISSUE_MODULE.subprocess, "run", return_value=success) as run_mock,
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue") as fallback_mock,
+        ):
+            hydration = ISSUE_MODULE.hydrate_issue_candidates(candidates, self.root)
+
+        fallback_mock.assert_not_called()
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertEqual(run_mock.call_args.args[0][:3], ["gh", "api", "graphql"])
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], ISSUE_MODULE.GH_BODY_TIMEOUT_SECONDS)
+        self.assertEqual(hydration["mode"], "batch")
+        self.assertEqual(hydration["batch_request_count"], 1)
+        self.assertEqual(hydration["fallback_request_count"], 0)
+        self.assertEqual(
+            [item["reference"] for item in hydration["candidates"]],
+            [item["reference"] for item in candidates],
+        )
+        self.assertTrue(all(item["hydration_status"] == "succeeded" for item in hydration["candidates"]))
+
+    def test_github_total_deadline_prevents_new_requests(self) -> None:
+        expired_deadline = time.monotonic() - 1
+        candidates = [{
+            "reference": "c12-ai/BIC-meta#150",
+            "repository": "c12-ai/BIC-meta",
+            "number": 150,
+        }]
+
+        with (
+            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
+            mock.patch.object(ISSUE_MODULE.subprocess, "run") as run_mock,
+        ):
+            issues, warning = ISSUE_MODULE.list_repository_issues(
+                "c12-ai/BIC-meta", self.root, deadline=expired_deadline,
+            )
+            hydration = ISSUE_MODULE.hydrate_issue_candidates(
+                candidates, self.root, deadline=expired_deadline,
+            )
+
+        run_mock.assert_not_called()
+        self.assertEqual(issues, [])
+        self.assertIn("total GitHub analysis deadline", warning)
+        self.assertTrue(hydration["deadline_exceeded"])
+        self.assertEqual(hydration["attempted_count"], 1)
+        self.assertEqual(hydration["failed_count"], 1)
+        self.assertEqual(hydration["batch_request_count"], 0)
+        self.assertEqual(hydration["fallback_request_count"], 0)
+
     def test_issue_scan_reports_partial_repository_failure(self) -> None:
         repositories = [
             {
@@ -899,8 +1243,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             "updatedAt": "2026-07-10T00:00:00Z",
         }
 
-        def list_issues(repository: str, _cwd: Path, limit: int = 100):
+        def list_issues(
+            repository: str, _cwd: Path, limit: int = 100,
+            deadline: float | None = None,
+        ):
             self.assertEqual(limit, 100)
+            self.assertIsNotNone(deadline)
             if repository == "c12-ai/BIC-meta":
                 return [issue_payload], None
             return [], "Could not scan open Issues for c12-ai/BIC-agent-service: timed out"
@@ -938,10 +1286,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         payloads = [
             {
                 "number": number,
-                "title": "WorkflowBaton recovery" if number == 99 else f"Unrelated work {number}",
+                "title": f"WorkflowBaton recovery {number}" if number >= 91 else f"Unrelated work {number}",
                 "url": f"https://github.com/{repository}/issues/{number}",
                 "state": "OPEN",
-                "labels": [{"name": "workflow"}] if number == 99 else [],
+                "labels": [{"name": "workflow"}] if number >= 91 else [],
                 "updatedAt": f"2026-07-{(number % 28) + 1:02d}T00:00:00Z",
             }
             for number in range(1, 101)
@@ -988,7 +1336,19 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
                 with concurrency_lock:
                     active_calls -= 1
 
-        with mock.patch.object(ISSUE_MODULE, "resolve_github_issue", new=resolve):
+        with (
+            mock.patch.object(
+                ISSUE_MODULE,
+                "batch_resolve_github_issues",
+                return_value={
+                    "results": {},
+                    "attempted": True,
+                    "warning": "fixture batch failure",
+                    "deadline_exceeded": False,
+                },
+            ),
+            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", new=resolve),
+        ):
             result = ISSUE_MODULE.finalized_auto_issue_context(
                 self.root, snapshot, modules, changed_objects,
             )
@@ -1001,6 +1361,9 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(scan["shortlisted_count"], 10)
         self.assertEqual(scan["hydration_attempted_count"], 10)
         self.assertEqual(resolve_calls, 10)
+        self.assertEqual(scan["hydration_mode"], "batch-fallback")
+        self.assertEqual(scan["hydration_batch_request_count"], 1)
+        self.assertEqual(scan["hydration_fallback_request_count"], 10)
         self.assertEqual(scan["hydration_max_workers"], 3)
         self.assertGreaterEqual(max_active_calls, 2)
         self.assertEqual(
@@ -1045,13 +1408,14 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             "warnings": [],
         }
         shortlist = ISSUE_MODULE.shortlist_issue_candidates(snapshot)
-        self.assertEqual(shortlist["shortlisted_count"], 10)
+        self.assertEqual(shortlist["shortlisted_count"], 2)
         self.assertEqual(
             {item["repository"] for item in shortlist["candidates"]},
             set(repositories),
         )
         self.assertEqual(set(shortlist["shortlisted_by_repository"]), set(repositories))
-        self.assertEqual(sum(shortlist["excluded_by_repository"].values()), 6)
+        self.assertEqual(sum(shortlist["excluded_by_repository"].values()), 14)
+        self.assertEqual(shortlist["fallback_selected_count"], 2)
 
         strong_snapshot = {
             "affected_repositories": ["c12-ai/repo-a"],
@@ -1145,10 +1509,10 @@ raise SystemExit(2)
         issue_views = [call for call in calls if call[:2] == ["issue", "view"]]
         scan = payload["context"]["issue_context"]["issue_scan"]
         self.assertEqual(len(issue_lists), 1)
-        self.assertEqual(len(issue_views), 10)
-        self.assertEqual(scan["shortlisted_count"], 10)
-        self.assertEqual(scan["hydration_attempted_count"], 10)
-        self.assertEqual(scan["hydration_succeeded_count"], 10)
+        self.assertEqual(len(issue_views), 1)
+        self.assertEqual(scan["shortlisted_count"], 1)
+        self.assertEqual(scan["hydration_attempted_count"], 1)
+        self.assertEqual(scan["hydration_succeeded_count"], 1)
 
     def test_dynamic_import_and_helper_entrypoint_are_parsed_without_execution(self) -> None:
         fixture = Path(self.temp.name) / "dynamic-parser"
@@ -1183,8 +1547,9 @@ raise SystemExit(2)
             "    return subprocess.run(['python3', str(ENTRYPOINT), command])\n"
             "def test_dynamic_behavior():\n"
             "    result = MODULE.changed_behavior()\n"
-            "    run_entrypoint('collect')\n"
-            "    assert result == 'ok'\n",
+            "    process = run_entrypoint('collect')\n"
+            "    assert result == 'ok'\n"
+            "    assert process is not None\n",
         )
 
         facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
@@ -1195,6 +1560,7 @@ raise SystemExit(2)
         }
         self.assertIn((str(target.resolve()), ("changed_behavior",), ()), calls)
         self.assertIn((str(entrypoint.resolve()), (), ("collect",)), calls)
+        self.assertTrue(all(item["assertion_linked"] for item in case["target_calls"]))
         self.assertFalse(marker.exists(), "static analysis must not execute the discovered entrypoint")
 
     def test_dynamic_relations_are_exact_and_entrypoint_imports_are_one_hop(self) -> None:
@@ -1224,9 +1590,10 @@ raise SystemExit(2)
             "def run_entrypoint():\n"
             "    return subprocess.run(['python3', str(ENTRYPOINT)])\n"
             "def test_dynamic_behavior():\n"
-            "    MODULE.changed_behavior()\n"
-            "    run_entrypoint()\n"
-            "    assert True\n",
+            "    result = MODULE.changed_behavior()\n"
+            "    process = run_entrypoint()\n"
+            "    assert result == 'ok'\n"
+            "    assert process is not None\n",
         )
         facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
         paths = ["target.py", "entrypoint.py", "dependency.py"]
@@ -1274,6 +1641,45 @@ raise SystemExit(2)
         self.assertTrue(any("dependent_behavior" in item for item in module["no_obvious_test_gaps"]))
         self.assertTrue(any("unrelated_behavior" in item for item in module["add_tests"]))
         self.assertTrue(any("function main" in item for item in module["add_tests"]))
+
+    def test_unrelated_assertion_does_not_clear_dynamic_target_gap(self) -> None:
+        workspace = Path(self.temp.name) / "dynamic-unrelated-assertion"
+        target = workspace / "target.py"
+        test_file = workspace / "tests/test_dynamic.py"
+        write(target, "def changed_behavior():\n    return 'ok'\n")
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import importlib.util\n"
+            "TARGET = Path(__file__).resolve().parents[1] / 'target.py'\n"
+            "SPEC = importlib.util.spec_from_file_location('target_fixture', TARGET)\n"
+            "MODULE = importlib.util.module_from_spec(SPEC)\n"
+            "def test_dynamic_behavior():\n"
+            "    MODULE.changed_behavior()\n"
+            "    assert True\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        self.assertFalse(facts["test_cases"][0]["target_calls"][0]["assertion_linked"])
+        scope = {
+            "changed_files": [{"repo": "BIC-meta", "path": "target.py", "change_types": ["added"]}],
+            "file_mappings": [{"repo": "BIC-meta", "path": "target.py", "mapping": {"module_scope": "meta/tooling"}}],
+        }
+        symbols = [{
+            "path": "target.py",
+            "symbols": [{"name": "changed_behavior", "kind": "function"}],
+        }]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_dynamic.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )["modules"][0]
+        self.assertFalse(module["no_obvious_test_gaps"])
+        self.assertTrue(any("changed_behavior" in item for item in module["strengthen_tests"]))
 
     def test_subprocess_command_maps_only_the_selected_entrypoint_branch(self) -> None:
         workspace = Path(self.temp.name) / "command-entrypoint"
@@ -1337,6 +1743,72 @@ raise SystemExit(2)
         self.assertTrue(any("collect_context" in item for item in module["no_obvious_test_gaps"]))
         self.assertTrue(any("collect_helper" in item for item in module["no_obvious_test_gaps"]))
         self.assertTrue(any("unrelated_command" in item for item in module["add_tests"]))
+
+    def test_selected_entrypoint_branch_excludes_sibling_imports(self) -> None:
+        workspace = Path(self.temp.name) / "command-one-hop-imports"
+        entrypoint = workspace / "entrypoint.py"
+        collect_service = workspace / "collect_service.py"
+        delete_service = workspace / "delete_service.py"
+        test_file = workspace / "tests/test_entrypoint.py"
+        write(collect_service, "def collect_behavior():\n    return 'collected'\n")
+        write(delete_service, "def delete_behavior():\n    return 'deleted'\n")
+        write(
+            entrypoint,
+            "import argparse\n"
+            "from collect_service import collect_behavior\n"
+            "from delete_service import delete_behavior\n\n"
+            "def main():\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('command')\n"
+            "    args = parser.parse_args()\n"
+            "    if args.command == 'collect':\n"
+            "        return collect_behavior()\n"
+            "    if args.command == 'delete':\n"
+            "        return delete_behavior()\n"
+            "    return None\n",
+        )
+        write(
+            test_file,
+            "from pathlib import Path\n"
+            "import subprocess\n"
+            "ENTRYPOINT = Path(__file__).resolve().parents[1] / 'entrypoint.py'\n"
+            "def run_entrypoint(command):\n"
+            "    return subprocess.run(['python3', str(ENTRYPOINT), command])\n"
+            "def test_collect():\n"
+            "    result = run_entrypoint('collect')\n"
+            "    assert result is not None\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        paths = ["collect_service.py", "delete_service.py"]
+        scope = {
+            "changed_files": [
+                {"repo": "BIC-meta", "path": path, "change_types": ["added"]}
+                for path in paths
+            ],
+            "file_mappings": [
+                {"repo": "BIC-meta", "path": path, "mapping": {"module_scope": "meta/tooling"}}
+                for path in paths
+            ],
+        }
+        symbols = [
+            {"path": "collect_service.py", "symbols": [{"name": "collect_behavior", "kind": "function"}]},
+            {"path": "delete_service.py", "symbols": [{"name": "delete_behavior", "kind": "function"}]},
+        ]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_entrypoint.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )["modules"][0]
+        indirect = module["indirectly_related_tests"][0]
+        self.assertEqual(indirect["related_files"], ["collect_service.py"])
+        self.assertEqual(indirect["related_symbols"], ["collect_behavior"])
+        self.assertTrue(any("collect_behavior" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("delete_behavior" in item for item in module["add_tests"]))
 
     def test_dynamic_relation_without_assertion_does_not_clear_gap(self) -> None:
         workspace = Path(self.temp.name) / "dynamic-no-assertion"

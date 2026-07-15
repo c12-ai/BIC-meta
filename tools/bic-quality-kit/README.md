@@ -10,11 +10,12 @@ It is intentionally read-only:
 - It inspects concrete tests and relates them to changed source objects by
   repository and functional module.
 - It recognizes local Python modules loaded through `importlib` and asserted
-  test helpers that launch a local Python entrypoint, without executing either.
+  test helpers that launch a local Python entrypoint, without executing either;
+  unrelated assertions and imports used only by sibling command branches do not
+  clear a test gap.
 - After the Diff identifies affected repositories, it scans their open GitHub
-  Issues, preserves strong PR/commit/branch links, and generates an
-  evidence-backed pre-test Risk Matrix from Issue, Diff, contract-boundary,
-  and test evidence.
+  Issues and generates an evidence-backed pre-test Risk Matrix from Issue, Diff,
+  contract-boundary, and test evidence.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
 - It outputs one `BIC Quality Brief`.
@@ -81,17 +82,31 @@ An explicit Issue remains available as an override:
 ```
 
 By default the Skill first identifies repositories changed by the Diff, then
-scans open Issues in each affected repository. Current PR links, PR/commit
-closing references, and a strong `issue-123` branch-name pattern take priority.
-Without a strong link, the Skill scans at most 100 metadata records per affected
-repository, compares them with changed modules and objects, shortlists at most
-10 ordinary candidates, and reads every shortlisted body before semantic
-alignment. All GitHub calls have bounded timeouts; body hydration uses at most
-three concurrent workers and preserves shortlist order. It reports exclusion,
+inspects current-PR Issue evidence. An explicit override is authoritative. A
+unique current-PR linked/closing reference skips broad open-Issue discovery only
+when exactly one affected GitHub repository exists. With multiple affected
+repositories, every repository is scanned and the current-PR Issue remains a
+repository-local candidate rather than resolving workspace Issue alignment.
+Diff-commit references and
+an `issue-123` branch-name pattern are protected hints that still need semantic
+confirmation. Without an authoritative link, the Skill scans at most 100
+metadata records per affected repository, compares English/Chinese/mixed titles
+and labels with changed modules, objects, and paths, shortlists at most 10
+ordinary candidates, keeps at most one no-signal fallback per affected
+repository, and reads every shortlisted body before semantic
+alignment. Multiple bodies use one read-only GraphQL batch; unresolved batch
+items fall back to at most three concurrent lookups. All GitHub calls have
+bounded timeouts and the complete GitHub analysis has a 60-second deadline. It
+preserves shortlist order and reports exclusion,
 hydration, and scan-status data; `scan-failed` and `partial-scan` remain distinct
 from a successful empty scan. Ambiguous or incomplete candidates keep overall
 risk `unassessed`. An explicit reference is translated to `--issue` and
 overrides discovery.
+
+The analyzer currently returns one workspace-level Issue context, test
+correspondence, and risk assessment. Repository count is reported only as a
+multi-repository change fact; it is not evidence that the changes form one
+business or contract chain.
 
 An explicit local base can be supplied through conversation:
 

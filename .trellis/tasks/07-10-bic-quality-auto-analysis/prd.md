@@ -25,6 +25,7 @@ repository or test directory is added.
   generic keywords such as `api`, `models`, `events`, or `client`.
 - Retain unmapped changes visibly when no stable structural module exists.
 - Report direct multi-repository changes as a fact derived from changed repos.
+
 - Do not derive risk from paths or duplicate impact labels. A strongly linked,
   uniquely matched, or explicitly overridden Issue may enable an
   evidence-backed high/medium/low pre-test Risk Matrix; without a unique Issue,
@@ -45,7 +46,12 @@ repository or test directory is added.
 - After the Diff identifies affected repositories, scan open GitHub Issues in
   each affected repository. Preserve current-PR links, PR/commit closing text,
   and a strong branch-name pattern as higher-priority association evidence.
-  Without a strong link, retain repository Issue candidates for semantic
+  Explicit overrides are authoritative. A current-PR linked/closing reference
+  may resolve automatically only when one affected GitHub repository exists;
+  with multiple affected repositories it remains repository-local and all
+  repositories are scanned. Commit and branch references remain
+  semantic-review hints. Without an
+  authoritative link, retain repository Issue candidates for semantic
   comparison with changed modules and objects. Accept an explicit reference
   only as an override. All GitHub access is read-only through local `gh`.
 - Keep affected-repository Issue discovery bounded and auditable: scan at most
@@ -55,6 +61,15 @@ repository or test directory is added.
   a second metadata-only body-selection cutoff. Preserve scan, exclusion, and
   hydration counts plus categorized warnings without returning excluded Issue
   content to the Agent context.
+- Treat explicit overrides as authoritative. Treat a unique current-PR
+  linked/closing reference as workspace-authoritative only for a
+  single-affected-repository analysis. Commit-message and `issue-123` branch references must remain
+  protected shortlist hints until their full Issue content agrees semantically
+  with the changed modules and objects.
+- Support English, Chinese, and mixed-language Issue shortlist signals. Require
+  an object, module, changed-path, or label signal for ordinary candidates and
+  allow at most one no-signal fallback per affected repository instead of
+  filling the shortlist with unrelated recent Issues.
 - Reuse one immutable Issue snapshot throughout a normal end-to-end assessment.
   Treat the final assessment wrapper as the primary Skill entry and the
   intermediate wrappers as diagnostics so module, test, and risk stages do not
@@ -64,8 +79,14 @@ repository or test directory is added.
   JSON after test correspondence and risk have been derived. Keep the standalone
   inventory wrapper as the raw diagnostic contract.
 - Bound every GitHub CLI call with an explicit timeout. Hydrate shortlisted Issue
-  bodies with a small fixed concurrency limit while preserving shortlist order,
-  per-candidate failure isolation, and the read-only boundary.
+  bodies through one GraphQL batch when multiple candidates exist, with a small
+  fixed-concurrency fallback for unresolved candidates. Preserve shortlist
+  order, per-candidate failure isolation, and the read-only boundary. Apply one
+  60-second deadline to the complete GitHub analysis.
+- When current-PR evidence contains exactly one authoritative linked/closing
+  Issue and exactly one affected GitHub repository exists, skip broad open-Issue
+  discovery and resolve only that Issue. With multiple affected repositories,
+  scan all repositories and keep the PR Issue repository-local.
 - Distinguish a successful empty Issue scan from query failure. Report
   `scan-failed` when no affected-repository scan succeeds and `partial-scan`
   when only some scans succeed; never describe a failed scan as proof that no
@@ -82,6 +103,14 @@ repository or test directory is added.
 - Treat imports made by a proven local entrypoint as safe one-hop relations, but
   do not claim object-level coverage unless the object call or static source
   reference is concrete.
+- Do not let an unrelated or unconditional assertion such as `assert True`
+  clear a dynamic-target test gap. A dynamic target must be connected to the
+  asserted expression, an asserted result variable, or an expected-exception
+  context; otherwise retain the relation but recommend strengthening the test.
+- When a local Python entrypoint selects a command branch, restrict one-hop
+  imported-module relations to imports actually referenced by the statically
+  reachable functions for that command. Imports used only by other command
+  branches must not clear a gap.
 - Separate relation facts from the need to add tests. A changed object with no
   object-specific test relation needs a new test. Disabled, assertion-free, or
   object-specific filename candidates need strengthening. Active direct,
@@ -154,6 +183,12 @@ repository or test directory is added.
 - [x] A proven local entrypoint can establish safe one-hop relations to its
       statically imported changed modules, while assertion-free or disabled
       cases cannot clear a missing-test gap.
+- [x] A dynamic target followed only by an unrelated `assert True` remains a
+      strengthen-test finding; asserting the target result or expecting its
+      exception may clear the static gap.
+- [x] A selected local-entrypoint command relates only to imported objects used
+      by its reachable branch; imports used exclusively by sibling commands do
+      not become indirect test evidence.
 - [x] Add-test guidance distinguishes tests to add, tests to strengthen, and
       modules with no obvious static gap without emitting risk, confidence,
       priority, or evidence labels.
@@ -177,6 +212,15 @@ repository or test directory is added.
 - [x] Each affected repository scans at most 100 open-Issue metadata records;
       ordinary Agent-facing candidates are deterministically shortlisted to at
       most 10 after module/object mapping, and excluded Issue content is omitted.
+- [x] English, Chinese, and mixed-language Issue titles can contribute bounded
+      module/object/path signals; ordinary global shortlist filling requires a
+      real signal and each affected repository receives at most one no-signal
+      fallback candidate.
+- [x] A unique current-PR linked/closing reference may resolve automatically for
+      one affected GitHub repository. Multi-repository analysis scans every
+      repository and does not apply that reference to the whole workspace;
+      commit-message and branch-name references remain unresolved until semantic
+      Issue-to-Diff comparison confirms them.
 - [x] Every shortlisted candidate is attempted with a read-only full-body lookup;
       lookup failures remain visible and do not stop hydration of other candidates.
 - [x] One complete `assess` invocation lists Issues once per affected repository,
@@ -189,8 +233,12 @@ repository or test directory is added.
       `test_correspondence` and `risk_assessment`; the `inventory` and `suggest`
       diagnostic contracts retain their detailed inventory output.
 - [x] Current-PR lookup, Issue listing, and Issue body lookup all use bounded
-      timeouts; shortlisted bodies hydrate with fixed limited concurrency and
-      preserve deterministic shortlist order.
+      timeouts; the complete GitHub analysis has a 60-second deadline.
+- [x] A unique current-PR authoritative Issue skips open-Issue listing only in a
+      single-affected-repository analysis and records an auditable fast-path status.
+- [x] Multiple shortlisted Issue bodies use one GraphQL request, preserve
+      deterministic order, and fall back with fixed limited concurrency only
+      for unresolved candidates.
 - [x] A timed-out or failed Issue scan reports `scan-failed`, a mixed multi-repo
       result reports `partial-scan`, and only a successful empty scan reports
       `no-candidates` / no open Issue.

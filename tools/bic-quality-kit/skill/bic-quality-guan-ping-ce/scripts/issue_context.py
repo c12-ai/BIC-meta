@@ -7,6 +7,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -29,17 +30,54 @@ ISSUE_TOKEN_RE = re.compile(
 CLOSING_KEYWORD_RE = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b", re.IGNORECASE)
 BRANCH_ISSUE_RE = re.compile(r"(?:^|[/_-])issues?[-_/]?(?P<number>\d+)(?:$|[/_-])", re.IGNORECASE)
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+CJK_SEQUENCE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 ISSUE_METADATA_SCAN_LIMIT = 100
 ISSUE_SHORTLIST_LIMIT = 10
 GH_METADATA_TIMEOUT_SECONDS = 15
 GH_BODY_TIMEOUT_SECONDS = 10
+GH_TOTAL_TIMEOUT_SECONDS = 60
 ISSUE_HYDRATION_MAX_WORKERS = 3
 STRONG_CANDIDATE_PRIORITY_MAX = 3
+AUTHORITATIVE_CANDIDATE_PRIORITY_MAX = 1
 SEARCH_STOP_WORDS = {
     "app", "apps", "src", "source", "lib", "libs", "service", "services",
     "api", "test", "tests", "issue", "feature", "change", "update", "repo",
     "repository", "bic", "meta",
 }
+SEARCH_TERM_ALIASES = {
+    "workflow": {"工作流"},
+    "runtime": {"运行时"},
+    "session": {"会话"},
+    "database": {"数据库"},
+    "persistence": {"持久化"},
+    "dispatch": {"派发", "调度"},
+    "event": {"事件"},
+    "events": {"事件"},
+    "stream": {"流式"},
+    "streaming": {"流式"},
+    "feedback": {"反馈"},
+    "contract": {"契约"},
+    "contracts": {"契约"},
+}
+
+
+def github_deadline() -> float:
+    """Return the monotonic deadline shared by one complete GitHub analysis."""
+    return time.monotonic() + GH_TOTAL_TIMEOUT_SECONDS
+
+
+def bounded_github_timeout(default_seconds: float, deadline: float | None) -> float | None:
+    """Bound one request by both its local timeout and the shared deadline."""
+    if deadline is None:
+        return default_seconds
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return None
+    return min(default_seconds, remaining)
+
+
+def github_deadline_exceeded(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
 
 
 def normalize_labels(labels: Any) -> list[str]:
@@ -209,11 +247,23 @@ def search_terms(value: str | None) -> set[str]:
     if not value:
         return set()
     expanded = CAMEL_BOUNDARY_RE.sub(" ", value)
-    return {
+    terms = {
         token.lower()
-        for token in re.split(r"[^A-Za-z0-9]+", expanded)
+        for token in re.findall(r"[A-Za-z0-9]+", expanded)
         if len(token) >= 3 and not token.isdigit() and token.lower() not in SEARCH_STOP_WORDS
     }
+    for sequence in CJK_SEQUENCE_RE.findall(value):
+        for size in range(2, min(4, len(sequence)) + 1):
+            terms.update(
+                sequence[index:index + size]
+                for index in range(0, len(sequence) - size + 1)
+            )
+    for canonical, aliases in SEARCH_TERM_ALIASES.items():
+        if canonical in terms:
+            terms.update(aliases)
+        if terms & aliases:
+            terms.add(canonical)
+    return terms
 
 
 def updated_timestamp(value: Any) -> float:
@@ -277,9 +327,16 @@ def select_issue_candidate(
 
 
 def current_pr_payload(
-    repo: Path, warnings: list[str] | None = None,
+    repo: Path,
+    warnings: list[str] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any] | None:
     if not shutil.which("gh"):
+        return None
+    timeout = bounded_github_timeout(GH_METADATA_TIMEOUT_SECONDS, deadline)
+    if timeout is None:
+        if warnings is not None:
+            warnings.append(f"Current PR lookup skipped after total GitHub analysis deadline for {repo}")
         return None
     try:
         proc = subprocess.run(
@@ -288,13 +345,16 @@ def current_pr_payload(
                 "number,title,body,url,state,headRefName,baseRefName,closingIssuesReferences",
             ],
             cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            check=False, timeout=GH_METADATA_TIMEOUT_SECONDS,
+            check=False, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         if warnings is not None:
-            warnings.append(
-                f"Current PR lookup timed out after {GH_METADATA_TIMEOUT_SECONDS} seconds for {repo}"
-            )
+            if github_deadline_exceeded(deadline):
+                warnings.append(f"Current PR lookup reached the total GitHub analysis deadline for {repo}")
+            else:
+                warnings.append(
+                    f"Current PR lookup timed out after {GH_METADATA_TIMEOUT_SECONDS} seconds for {repo}"
+                )
         return None
     if proc.returncode != 0:
         return None
@@ -306,10 +366,16 @@ def current_pr_payload(
 
 
 def list_repository_issues(
-    repository: str, cwd: Path, limit: int = ISSUE_METADATA_SCAN_LIMIT,
+    repository: str,
+    cwd: Path,
+    limit: int = ISSUE_METADATA_SCAN_LIMIT,
+    deadline: float | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     if not shutil.which("gh"):
         return [], "GitHub CLI `gh` is not available; affected repository Issues were not scanned"
+    timeout = bounded_github_timeout(GH_METADATA_TIMEOUT_SECONDS, deadline)
+    if timeout is None:
+        return [], f"Could not scan open Issues for {repository}: total GitHub analysis deadline exceeded"
     try:
         proc = subprocess.run(
             [
@@ -318,9 +384,13 @@ def list_repository_issues(
                 "--json", "number,title,url,state,labels,updatedAt",
             ],
             cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            check=False, timeout=GH_METADATA_TIMEOUT_SECONDS,
+            check=False, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        if github_deadline_exceeded(deadline):
+            return [], (
+                f"Could not scan open Issues for {repository}: total GitHub analysis deadline exceeded"
+            )
         return [], (
             f"Could not scan open Issues for {repository}: timed out after "
             f"{GH_METADATA_TIMEOUT_SECONDS} seconds"
@@ -427,16 +497,31 @@ def gh_issue_command(reference: str) -> list[str]:
     ]
 
 
-def resolve_github_issue(reference: str, cwd: Path) -> dict[str, Any]:
+def resolve_github_issue(
+    reference: str, cwd: Path, deadline: float | None = None,
+) -> dict[str, Any]:
     if not shutil.which("gh"):
         return unresolved(reference, "github-cli", "GitHub CLI `gh` is not available")
+    timeout = bounded_github_timeout(GH_BODY_TIMEOUT_SECONDS, deadline)
+    if timeout is None:
+        return unresolved(
+            reference,
+            "github-cli",
+            "GitHub Issue lookup skipped after total GitHub analysis deadline",
+        )
     try:
         proc = subprocess.run(
             gh_issue_command(reference), cwd=cwd, text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-            timeout=GH_BODY_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
+        if github_deadline_exceeded(deadline):
+            return unresolved(
+                reference,
+                "github-cli",
+                "GitHub Issue lookup reached the total GitHub analysis deadline",
+            )
         return unresolved(
             reference,
             "github-cli",
@@ -454,7 +539,157 @@ def resolve_github_issue(reference: str, cwd: Path) -> dict[str, Any]:
     return normalize_issue(payload, reference, "github-cli")
 
 
-def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]:
+def graphql_issue_batch_command(references: list[str]) -> list[str] | None:
+    """Build one read-only GraphQL request for repository-qualified Issue references."""
+    matches = [REPO_ISSUE_RE.match(reference) for reference in references]
+    if not references or any(match is None for match in matches):
+        return None
+
+    declarations: list[str] = []
+    selections: list[str] = []
+    command = ["gh", "api", "graphql"]
+    for index, match in enumerate(matches):
+        assert match is not None
+        owner, name = match.group("repo").split("/", 1)
+        declarations.extend([
+            f"$owner_{index}: String!",
+            f"$name_{index}: String!",
+            f"$number_{index}: Int!",
+        ])
+        selections.append(
+            f"issue_{index}: repository(owner: $owner_{index}, name: $name_{index}) {{ "
+            f"issue(number: $number_{index}) {{ number title body url state "
+            "labels(first: 100) { nodes { name } } repository { nameWithOwner } } }"
+        )
+        command.extend([
+            "-F", f"owner_{index}={owner}",
+            "-F", f"name_{index}={name}",
+            "-F", f"number_{index}={match.group('number')}",
+        ])
+    query = f"query({', '.join(declarations)}) {{ {' '.join(selections)} }}"
+    command.extend(["-f", f"query={query}"])
+    return command
+
+
+def normalize_graphql_issue(payload: dict[str, Any], reference: str) -> dict[str, Any]:
+    labels_payload = payload.get("labels")
+    label_nodes = labels_payload.get("nodes", []) if isinstance(labels_payload, dict) else []
+    repository_payload = payload.get("repository")
+    repository = (
+        repository_payload.get("nameWithOwner")
+        if isinstance(repository_payload, dict) else reference_repository(reference)
+    )
+    return normalize_issue(
+        {
+            **payload,
+            "labels": label_nodes,
+            "repository": repository,
+        },
+        reference,
+        "github-graphql-batch",
+    )
+
+
+def batch_resolve_github_issues(
+    references: list[str], cwd: Path, deadline: float | None = None,
+) -> dict[str, Any]:
+    """Resolve multiple Issue bodies in one read-only GraphQL request."""
+    command = graphql_issue_batch_command(references)
+    if command is None:
+        return {
+            "results": {},
+            "attempted": False,
+            "warning": "Issue batch lookup requires repository-qualified references",
+            "deadline_exceeded": github_deadline_exceeded(deadline),
+        }
+    if not shutil.which("gh"):
+        return {
+            "results": {},
+            "attempted": False,
+            "warning": "GitHub CLI `gh` is not available",
+            "deadline_exceeded": False,
+        }
+    timeout = bounded_github_timeout(GH_BODY_TIMEOUT_SECONDS, deadline)
+    if timeout is None:
+        return {
+            "results": {},
+            "attempted": False,
+            "warning": "GitHub Issue batch lookup skipped after total GitHub analysis deadline",
+            "deadline_exceeded": True,
+        }
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        deadline_hit = github_deadline_exceeded(deadline)
+        return {
+            "results": {},
+            "attempted": True,
+            "warning": (
+                "GitHub Issue batch lookup reached the total GitHub analysis deadline"
+                if deadline_hit else
+                f"GitHub Issue batch lookup timed out after {GH_BODY_TIMEOUT_SECONDS} seconds"
+            ),
+            "deadline_exceeded": deadline_hit,
+        }
+    if proc.returncode != 0:
+        return {
+            "results": {},
+            "attempted": True,
+            "warning": proc.stderr.strip() or "GitHub Issue batch lookup failed",
+            "deadline_exceeded": github_deadline_exceeded(deadline),
+        }
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "results": {},
+            "attempted": True,
+            "warning": f"GitHub Issue batch lookup returned invalid JSON: {exc}",
+            "deadline_exceeded": github_deadline_exceeded(deadline),
+        }
+    if not isinstance(payload, dict):
+        return {
+            "results": {},
+            "attempted": True,
+            "warning": "GitHub Issue batch lookup returned a non-object payload",
+            "deadline_exceeded": github_deadline_exceeded(deadline),
+        }
+
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    results: dict[str, dict[str, Any]] = {}
+    for index, reference in enumerate(references):
+        repository_payload = data.get(f"issue_{index}")
+        issue_payload = (
+            repository_payload.get("issue")
+            if isinstance(repository_payload, dict) else None
+        )
+        if isinstance(issue_payload, dict):
+            results[reference] = normalize_graphql_issue(issue_payload, reference)
+    errors = payload.get("errors")
+    warning = None
+    if errors:
+        warning = f"GitHub Issue batch lookup returned partial GraphQL errors: {errors}"
+    elif len(results) != len(references):
+        warning = "GitHub Issue batch lookup did not return every requested Issue"
+    return {
+        "results": results,
+        "attempted": True,
+        "warning": warning,
+        "deadline_exceeded": github_deadline_exceeded(deadline),
+    }
+
+
+def collect_issue_snapshot(
+    repositories: list[dict[str, Any]], deadline: float | None = None,
+) -> dict[str, Any]:
     """Collect one bounded, read-only metadata snapshot for affected repositories."""
     strong_candidates: list[dict[str, Any]] = []
     repository_candidates: list[dict[str, Any]] = []
@@ -462,6 +697,7 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
     repository_scans: dict[str, dict[str, Any]] = {}
     scan_warnings: list[str] = []
     affected_repositories: list[str] = []
+    affected_repo_records: list[tuple[str, Path]] = []
     for repo_info in repositories:
         if not repo_info.get("change_count"):
             continue
@@ -473,7 +709,8 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
             )
             continue
         affected_repositories.append(repository)
-        pr_payload = current_pr_payload(repo, scan_warnings)
+        affected_repo_records.append((repository, repo))
+        pr_payload = current_pr_payload(repo, scan_warnings, deadline)
         if pr_payload:
             strong_candidates.extend(pr_reference_candidates(pr_payload, repository))
         strong_candidates.extend(closing_reference_candidates(
@@ -484,26 +721,60 @@ def collect_issue_snapshot(repositories: list[dict[str, Any]]) -> dict[str, Any]
         ))
         strong_candidates.extend(branch_reference_candidates(repo_info.get("branch"), repository))
 
-        issues, warning = list_repository_issues(
-            repository, repo, limit=ISSUE_METADATA_SCAN_LIMIT,
+    authoritative_candidates = [
+        item for item in strong_candidates
+        if item.get("priority", 99) <= AUTHORITATIVE_CANDIDATE_PRIORITY_MAX
+    ]
+    authoritative_references = sorted({
+        item["reference"] for item in authoritative_candidates
+    })
+    affected_repository_set = sorted(set(affected_repositories))
+    authoritative_scope_complete = len(affected_repository_set) == 1
+    pr_lookup_incomplete = any(
+        warning.startswith("Current PR lookup") for warning in scan_warnings
+    )
+    authoritative_fast_path_reference = (
+        authoritative_references[0]
+        if (
+            authoritative_scope_complete
+            and len(authoritative_references) == 1
+            and not pr_lookup_incomplete
         )
-        if warning:
-            scan_warnings.append(warning)
-        repository_scans[repository] = {
-            "status": "failed" if warning else "succeeded",
-            "scanned_count": len(issues),
-            "warning": warning,
-        }
-        repository_issue_counts[repository] = len(issues)
-        repository_candidates.extend(repository_issue_candidates(issues, repository))
+        else None
+    )
+
+    if authoritative_fast_path_reference:
+        for repository, _repo in affected_repo_records:
+            repository_scans[repository] = {
+                "status": "skipped-authoritative",
+                "scanned_count": 0,
+                "warning": None,
+            }
+    else:
+        for repository, repo in affected_repo_records:
+            issues, warning = list_repository_issues(
+                repository, repo, limit=ISSUE_METADATA_SCAN_LIMIT, deadline=deadline,
+            )
+            if warning:
+                scan_warnings.append(warning)
+            repository_scans[repository] = {
+                "status": "failed" if warning else "succeeded",
+                "scanned_count": len(issues),
+                "warning": warning,
+            }
+            repository_issue_counts[repository] = len(issues)
+            repository_candidates.extend(repository_issue_candidates(issues, repository))
 
     return {
         "metadata_limit_per_repository": ISSUE_METADATA_SCAN_LIMIT,
-        "affected_repositories": sorted(set(affected_repositories)),
+        "affected_repositories": affected_repository_set,
         "strong_candidates": strong_candidates,
         "repository_candidates": repository_candidates,
         "repository_issue_counts": repository_issue_counts,
         "repository_scans": repository_scans,
+        "authoritative_fast_path_reference": authoritative_fast_path_reference,
+        "authoritative_scope_complete": authoritative_scope_complete,
+        "deadline_exceeded": github_deadline_exceeded(deadline),
         "warnings": scan_warnings,
     }
 
@@ -529,12 +800,18 @@ def shortlist_issue_candidates(
                 terms.update(search_terms(str(module.get(key) or "")))
 
     object_terms_by_repo: dict[str, set[str]] = {}
+    path_terms_by_repo: dict[str, set[str]] = {}
     for changed in changed_objects:
         repo = str(changed.get("repo") or "")
         terms = object_terms_by_repo.setdefault(repo, set())
         for symbol in changed.get("symbols") or []:
             if isinstance(symbol, dict):
                 terms.update(search_terms(str(symbol.get("name") or "")))
+        path_terms = path_terms_by_repo.setdefault(repo, set())
+        path = Path(str(changed.get("path") or ""))
+        path_terms.update(search_terms(path.stem))
+        for part in path.parts[-3:-1]:
+            path_terms.update(search_terms(part))
 
     enriched: list[dict[str, Any]] = []
     affected_repositories = set(snapshot.get("affected_repositories", []))
@@ -546,12 +823,16 @@ def shortlist_issue_candidates(
         title_terms = search_terms(str(item.get("title") or ""))
         labels = item.get("labels", [])
         label_terms = set().union(*(search_terms(str(label)) for label in labels)) if labels else set()
-        candidate_terms = title_terms | label_terms
-        module_matches = sorted(candidate_terms & module_terms_by_repo.get(local_repo, set()))
-        object_matches = sorted(candidate_terms & object_terms_by_repo.get(local_repo, set()))
+        module_terms = module_terms_by_repo.get(local_repo, set())
+        object_terms = object_terms_by_repo.get(local_repo, set())
+        path_terms = path_terms_by_repo.get(local_repo, set())
+        module_matches = sorted(title_terms & module_terms)
+        object_matches = sorted(title_terms & object_terms)
+        path_matches = sorted(title_terms & path_terms)
+        all_change_terms = module_terms | object_terms | path_terms
         matching_labels = sorted(
             str(label) for label in labels
-            if search_terms(str(label)) & (set(module_matches) | set(object_matches))
+            if search_terms(str(label)) & all_change_terms
         )
         repository_match = repository in affected_repositories
         reasons: list[str] = []
@@ -563,15 +844,20 @@ def shortlist_issue_candidates(
             reasons.append(f"module-match:{','.join(module_matches)}")
         if object_matches:
             reasons.append(f"object-match:{','.join(object_matches)}")
+        if path_matches:
+            reasons.append(f"path-match:{','.join(path_matches)}")
         if matching_labels:
             reasons.append(f"label-match:{','.join(matching_labels)}")
-        if not module_matches and not object_matches and item.get("priority", 99) > STRONG_CANDIDATE_PRIORITY_MAX:
+        has_search_signal = bool(module_matches or object_matches or path_matches or matching_labels)
+        if not has_search_signal and item.get("priority", 99) > STRONG_CANDIDATE_PRIORITY_MAX:
             reasons.append("repository-fallback")
         item.update({
             "repository_match": repository_match,
             "module_matches": module_matches,
             "object_matches": object_matches,
+            "path_matches": path_matches,
             "matching_labels": matching_labels,
+            "has_search_signal": has_search_signal,
             "shortlist_reasons": [reason for reason in reasons if reason],
         })
         enriched.append(item)
@@ -581,6 +867,7 @@ def shortlist_issue_candidates(
             item.get("priority", 99),
             0 if item.get("repository_match") else 1,
             -len(item.get("object_matches", [])),
+            -len(item.get("path_matches", [])),
             -len(item.get("module_matches", [])),
             -len(item.get("matching_labels", [])),
             -updated_timestamp(item.get("updated_at")),
@@ -598,8 +885,13 @@ def shortlist_issue_candidates(
     ]
     selected = strong[:limit]
     selected_refs = {item["reference"] for item in selected}
+    fallback_selected_refs: set[str] = set()
+    signaled = [item for item in ordinary if item.get("has_search_signal")]
+    fallback = [item for item in ordinary if not item.get("has_search_signal")]
 
-    # Reserve one candidate per affected repository before filling globally.
+    # Reserve one candidate per affected repository. Prefer a real search signal;
+    # otherwise allow exactly one repository fallback without filling the budget
+    # with unrelated recent Issues.
     for repository in snapshot.get("affected_repositories", []):
         if len(selected) >= limit:
             break
@@ -607,16 +899,26 @@ def shortlist_issue_candidates(
             continue
         candidate = next(
             (
-                item for item in ordinary
+                item for item in signaled
                 if item.get("repository") == repository and item["reference"] not in selected_refs
             ),
             None,
         )
+        if candidate is None:
+            candidate = next(
+                (
+                    item for item in fallback
+                    if item.get("repository") == repository and item["reference"] not in selected_refs
+                ),
+                None,
+            )
         if candidate:
             selected.append(candidate)
             selected_refs.add(candidate["reference"])
+            if not candidate.get("has_search_signal"):
+                fallback_selected_refs.add(candidate["reference"])
 
-    for candidate in ordinary:
+    for candidate in signaled:
         if len(selected) >= limit:
             break
         if candidate["reference"] not in selected_refs:
@@ -629,7 +931,7 @@ def shortlist_issue_candidates(
     for item in excluded:
         if item.get("priority", 99) <= STRONG_CANDIDATE_PRIORITY_MAX:
             reason = "strong-reference-overflow"
-        elif not item.get("module_matches") and not item.get("object_matches"):
+        elif not item.get("has_search_signal"):
             reason = "no-module-or-object-signal"
         else:
             reason = "shortlist-budget"
@@ -654,6 +956,8 @@ def shortlist_issue_candidates(
         "exclusion_reasons": exclusion_reasons,
         "shortlisted_by_repository": shortlisted_by_repository,
         "excluded_by_repository": excluded_by_repository,
+        "signal_candidate_count": len(signaled),
+        "fallback_selected_count": len(fallback_selected_refs),
         "strong_candidate_count": len(strong),
         "strong_candidate_overflow_count": max(0, len(strong) - limit),
         "strong_overflow_references": [item["reference"] for item in strong[limit:]],
@@ -661,30 +965,81 @@ def shortlist_issue_candidates(
 
 
 def hydrate_issue_candidates(
-    candidates: list[dict[str, Any]], workspace_root: Path,
+    candidates: list[dict[str, Any]],
+    workspace_root: Path,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
-    """Attempt a full read for every shortlisted candidate without a second cutoff."""
+    """Hydrate the shortlist with one batch request and a bounded fallback."""
     hydrated: list[dict[str, Any]] = []
     warnings: list[str] = []
     succeeded = 0
-    max_workers = min(ISSUE_HYDRATION_MAX_WORKERS, len(candidates)) if candidates else 0
+    resolved_by_reference: dict[str, dict[str, Any]] = {}
+    batch_request_count = 0
+    fallback_request_count = 0
+    max_workers = 0
+    mode = "none"
+
+    if candidates and github_deadline_exceeded(deadline):
+        mode = "deadline-exceeded"
+        warning = "Issue hydration skipped after total GitHub analysis deadline"
+        warnings.append(warning)
+        for candidate in candidates:
+            resolved_by_reference[candidate["reference"]] = unresolved(
+                candidate["reference"], "github-cli", warning,
+            )
+
+    if len(candidates) > 1 and not resolved_by_reference:
+        batch = batch_resolve_github_issues(
+            [candidate["reference"] for candidate in candidates],
+            workspace_root,
+            deadline,
+        )
+        batch_request_count = 1 if batch.get("attempted") else 0
+        resolved_by_reference.update(batch.get("results", {}))
+        if batch.get("warning"):
+            warnings.append(str(batch["warning"]))
+        if len(resolved_by_reference) == len(candidates):
+            mode = "batch"
 
     def resolve_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         try:
-            return resolve_github_issue(candidate["reference"], workspace_root)
+            if deadline is None:
+                return resolve_github_issue(candidate["reference"], workspace_root)
+            return resolve_github_issue(candidate["reference"], workspace_root, deadline)
         except (OSError, subprocess.SubprocessError, ValueError) as exc:
             return unresolved(
                 candidate["reference"], "github-cli",
                 f"GitHub Issue lookup failed unexpectedly: {exc}",
             )
 
-    if max_workers:
+    fallback_candidates = [
+        candidate for candidate in candidates
+        if candidate["reference"] not in resolved_by_reference
+    ]
+    if fallback_candidates and not github_deadline_exceeded(deadline):
+        fallback_request_count = len(fallback_candidates)
+        max_workers = min(ISSUE_HYDRATION_MAX_WORKERS, len(fallback_candidates))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            resolved_candidates = list(executor.map(resolve_candidate, candidates))
-    else:
-        resolved_candidates = []
+            fallback_results = list(executor.map(resolve_candidate, fallback_candidates))
+        resolved_by_reference.update({
+            candidate["reference"]: resolved
+            for candidate, resolved in zip(fallback_candidates, fallback_results)
+        })
+        mode = "batch-fallback" if batch_request_count else "single" if len(candidates) == 1 else "fallback"
+    elif fallback_candidates:
+        mode = "deadline-exceeded"
+        warning = "Issue hydration stopped at total GitHub analysis deadline"
+        if warning not in warnings:
+            warnings.append(warning)
+        for candidate in fallback_candidates:
+            resolved_by_reference[candidate["reference"]] = unresolved(
+                candidate["reference"], "github-cli", warning,
+            )
 
-    for candidate, resolved in zip(candidates, resolved_candidates):
+    for candidate in candidates:
+        resolved = resolved_by_reference.get(candidate["reference"]) or unresolved(
+            candidate["reference"], "github-cli", "Issue body lookup did not produce a result",
+        )
         item = dict(candidate)
         item.update({
             "hydration_status": "succeeded" if resolved.get("resolved") else "failed",
@@ -707,6 +1062,10 @@ def hydrate_issue_candidates(
         "succeeded_count": succeeded,
         "failed_count": len(candidates) - succeeded,
         "max_workers": max_workers,
+        "mode": mode,
+        "batch_request_count": batch_request_count,
+        "fallback_request_count": fallback_request_count,
+        "deadline_exceeded": github_deadline_exceeded(deadline),
         "warnings": warnings,
     }
 
@@ -723,6 +1082,8 @@ def issue_scan_status(snapshot: dict[str, Any]) -> tuple[str, dict[str, dict[str
     statuses = {scan.get("status") for scan in scans.values()}
     if not statuses:
         return "not-run", scans
+    if statuses == {"skipped-authoritative"}:
+        return "skipped-authoritative", scans
     if statuses == {"failed"}:
         return "failed", scans
     if "failed" in statuses:
@@ -735,23 +1096,74 @@ def finalized_auto_issue_context(
     snapshot: dict[str, Any],
     modules_by_repository: dict[str, list[dict[str, Any]]] | None = None,
     changed_objects: list[dict[str, Any]] | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
-    shortlist = shortlist_issue_candidates(
-        snapshot, modules_by_repository, changed_objects, ISSUE_SHORTLIST_LIMIT,
+    reference_candidates = snapshot.get("strong_candidates", [])
+    authoritative_candidates = [
+        item for item in reference_candidates
+        if item.get("priority", 99) <= AUTHORITATIVE_CANDIDATE_PRIORITY_MAX
+    ]
+    authoritative_scope_complete = snapshot.get(
+        "authoritative_scope_complete",
+        len(set(snapshot.get("affected_repositories", []))) == 1,
     )
-    hydration = hydrate_issue_candidates(shortlist["candidates"], workspace_root)
+    selectable_authoritative_candidates = (
+        authoritative_candidates if authoritative_scope_complete else []
+    )
+    repository_local_authoritative_candidates = (
+        [] if authoritative_scope_complete else authoritative_candidates
+    )
+    reference_hints = [
+        item for item in reference_candidates
+        if AUTHORITATIVE_CANDIDATE_PRIORITY_MAX < item.get("priority", 99)
+        <= STRONG_CANDIDATE_PRIORITY_MAX
+    ]
+    selected, authoritative_ordered = select_issue_candidate(
+        selectable_authoritative_candidates,
+    )
+    fast_path_reference = snapshot.get("authoritative_fast_path_reference")
+    shortlist_snapshot = snapshot
+    if selected and fast_path_reference == selected["reference"]:
+        shortlist_snapshot = {
+            **snapshot,
+            "strong_candidates": [
+                candidate for candidate in reference_candidates
+                if candidate["reference"] == fast_path_reference
+            ],
+            "repository_candidates": [],
+        }
+    shortlist = shortlist_issue_candidates(
+        shortlist_snapshot, modules_by_repository, changed_objects, ISSUE_SHORTLIST_LIMIT,
+    )
+    hydration = hydrate_issue_candidates(
+        shortlist["candidates"], workspace_root, deadline,
+    )
     scan_status, repository_scans = issue_scan_status(snapshot)
-    selected, strong_ordered = select_issue_candidate(snapshot.get("strong_candidates", []))
     hydrated_by_reference = {
         candidate["reference"]: candidate for candidate in hydration["candidates"]
     }
 
     if selected is None:
-        if strong_ordered:
+        if repository_local_authoritative_candidates:
             warning = (
-                "Multiple equally strong Issue references were found; compare them with the Diff or provide --issue"
+                "Current-PR Issue references are repository-local, but multiple affected repositories "
+                "were found; all affected repositories were scanned and workspace Issue alignment "
+                "requires semantic review"
+            )
+            discovery_mode = "affected-repository-scan"
+            analysis_status = "semantic-review-required"
+        elif authoritative_ordered:
+            warning = (
+                "Multiple equally authoritative Issue references were found; compare them with the Diff or provide --issue"
             )
             discovery_mode = "auto-ambiguous"
+            analysis_status = "semantic-review-required"
+        elif reference_hints:
+            warning = (
+                "Commit or branch Issue references are search hints only; compare their full content with "
+                "the changed modules and objects before selecting an Issue"
+            )
+            discovery_mode = "auto-reference-hint"
             analysis_status = "semantic-review-required"
         elif scan_status == "failed":
             warning = (
@@ -829,15 +1241,26 @@ def finalized_auto_issue_context(
         "hydration_succeeded_count": hydration["succeeded_count"],
         "hydration_failed_count": hydration["failed_count"],
         "hydration_max_workers": hydration["max_workers"],
+        "hydration_mode": hydration["mode"],
+        "hydration_batch_request_count": hydration["batch_request_count"],
+        "hydration_fallback_request_count": hydration["fallback_request_count"],
         "metadata_timeout_seconds": GH_METADATA_TIMEOUT_SECONDS,
         "body_timeout_seconds": GH_BODY_TIMEOUT_SECONDS,
+        "total_timeout_seconds": GH_TOTAL_TIMEOUT_SECONDS,
+        "deadline_exceeded": snapshot.get("deadline_exceeded", False) or hydration["deadline_exceeded"],
+        "authoritative_fast_path": bool(fast_path_reference),
+        "authoritative_scope_complete": authoritative_scope_complete,
         "deduplicated_candidate_count": shortlist["deduplicated_candidate_count"],
         "duplicate_reference_count": shortlist["duplicate_reference_count"],
         "excluded_count": shortlist["excluded_count"],
         "exclusion_reasons": shortlist["exclusion_reasons"],
         "shortlisted_by_repository": shortlist["shortlisted_by_repository"],
         "excluded_by_repository": shortlist["excluded_by_repository"],
+        "signal_candidate_count": shortlist["signal_candidate_count"],
+        "fallback_selected_count": shortlist["fallback_selected_count"],
         "strong_candidate_count": shortlist["strong_candidate_count"],
+        "authoritative_candidate_count": len(authoritative_candidates),
+        "reference_hint_count": len(reference_hints),
         "strong_candidate_overflow_count": shortlist["strong_candidate_overflow_count"],
         "strong_overflow_references": shortlist["strong_overflow_references"],
     }
@@ -856,9 +1279,10 @@ def auto_discover_issue(
     modules_by_repository: dict[str, list[dict[str, Any]]] | None = None,
     changed_objects: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    snapshot = collect_issue_snapshot(repositories)
+    deadline = github_deadline()
+    snapshot = collect_issue_snapshot(repositories, deadline)
     return finalized_auto_issue_context(
-        workspace_root, snapshot, modules_by_repository, changed_objects,
+        workspace_root, snapshot, modules_by_repository, changed_objects, deadline,
     )
 
 
@@ -887,4 +1311,4 @@ def collect_issue_context(
             modules_by_repository,
             changed_objects,
         )
-    return resolve_github_issue(issue_ref, workspace_root)
+    return resolve_github_issue(issue_ref, workspace_root, github_deadline())

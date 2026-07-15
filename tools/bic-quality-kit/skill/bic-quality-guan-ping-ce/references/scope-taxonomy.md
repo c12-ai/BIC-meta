@@ -22,8 +22,11 @@ capabilities.
 
 Files without a stable source-root path remain visible as `unmapped`. Changes
 in more than one discovered repository set the factual
-`direct_cross_repository` flag; no additional label is derived.
+`direct_cross_repository` flag. Despite the legacy field name, it means only
+that two or more repositories changed. It is not evidence of one business,
+contract, API, event, or E2E chain.
 
 The public scope contract exposes `affected_repositories` with actual discovered
 Git repository names, `modules_by_repository` grouping module evidence under
-those names, and `direct_cross_repository` as the only cross-repository fact.
+those names, and `direct_cross_repository` as the only multi-repository change
+fact. Business-chain attribution is outside the current analyzer contract.

@@ -16,21 +16,32 @@ Use only concrete evidence from:
 - direct, safe indirect, possible, disabled, assertion-free, and missing tests.
 
 Do not use a path, label, filename, or keyword match by itself to assign risk.
-Do not choose among equally strong Issue candidates; keep the overall result
+Do not choose among equally authoritative Issue candidates; keep the overall result
 `unassessed` until the association is strongly linked or uniquely supported by
 semantic Diff/module evidence.
 
 ## Affected-repository Issue analysis
 
 Run Issue analysis only after the Diff identifies affected repositories and
-modules. Scan open Issues for each affected repository. A current-PR link,
-closing reference, Diff-commit reference, or strong branch reference remains
-authoritative.
+modules. Scan open Issues for each affected repository. An explicit override is
+authoritative. A unique current-PR linked/closing reference may resolve directly
+and skip the broad scan only when exactly one affected GitHub repository exists.
+With multiple affected repositories, scan every repository and keep that
+current-PR Issue as a repository-local candidate; it cannot resolve workspace
+Issue alignment by itself. A Diff-commit closing reference or `issue-123` branch
+reference is a protected search hint, not sufficient evidence for automatic
+selection.
 
-When no strong link exists, use Issue titles and labels only to shortlist. Read
+When no authoritative link exists, use Issue titles and labels only to shortlist.
+Match English, Chinese, and mixed-language module/object/path terms. Require a
+module, object, path, or label signal for ordinary candidates, while allowing at
+most one no-signal fallback per affected repository. Do not fill the shortlist
+with unrelated candidates merely because budget remains. Read
 at most 100 metadata records per affected repository, reduce ordinary candidates
 to at most 10 after module and changed-object mapping, and read the full body of
 every shortlisted candidate. Do not select a smaller body subset from metadata.
+Use one GraphQL batch for multiple bodies, a bounded fallback for unresolved
+candidates, and one shared 60-second deadline for the complete GitHub phase.
 Require repository identity plus a concrete match between the Issue goal or
 acceptance item and a changed module, file, or object. If exactly one candidate
 meets that standard, use it for final Issue alignment. If none or several remain,
@@ -38,7 +49,7 @@ show the candidates and keep the overall result `unassessed`.
 
 Treat `scan-failed` and `partial-scan` as unavailable or incomplete Issue
 evidence, never as proof that no open Issue exists. Keep overall risk
-`unassessed` unless a separately preserved strong reference resolves and aligns.
+`unassessed` unless a separately preserved authoritative reference resolves and aligns.
 
 ## Deterministic floor
 
@@ -65,7 +76,9 @@ hint only. Do not lower risk because an Issue checkbox is already checked.
 
 ## Overall risk
 
-Use the highest row after Issue alignment. If no Issue was strongly linked or
+Use the highest row after Issue alignment. If no Issue was authoritatively linked or
 uniquely selected by semantic affected-repository analysis, overall risk is
 `unassessed`, even when deterministic Diff/test rows are available. State
-explicitly that tests were not executed.
+explicitly that tests were not executed. The current analyzer returns one
+workspace-level risk assessment. Do not infer business streams or allocate
+workspace test counts and risk rows among guessed streams.

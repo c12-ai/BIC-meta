@@ -43,13 +43,18 @@ path. Each record retains `change_sources`, `change_types`, and `old_path` for
 renames. Repository metadata records branch, head, base, merge base, resolution
 source, and warnings.
 
+
 ## Issue Context
 
 Issue collection is Diff-driven and staged. After change collection identifies
-repositories with `change_count > 0`, `collect_issue_snapshot` lists at most 100
-open-Issue metadata records per corresponding GitHub repository and captures
+repositories with `change_count > 0`, `collect_issue_snapshot` first captures
 current-PR links, PR closing text, Diff-commit references, and strong
-`issue-123` branch references in the same immutable analysis snapshot.
+`issue-123` branch references in the same immutable analysis snapshot. Exactly
+one authoritative current-PR reference activates a fast path only when exactly
+one affected GitHub repository exists. With multiple affected repositories,
+every repository is scanned and the current-PR Issue remains repository-local;
+it cannot resolve workspace Issue alignment. The snapshot otherwise lists at
+most 100 open-Issue metadata records per corresponding GitHub repository.
 
 Module mapping and changed-object extraction run before candidate reduction.
 `shortlist_issue_candidates` merges duplicate references, protects explicit and
@@ -59,9 +64,20 @@ candidates. It reports excluded counts and categorized reasons without carrying
 excluded Issue titles or bodies into Agent-facing JSON. Keyword or repository
 membership remains a search hint and never selects an Issue.
 
+Explicit overrides can be selected authoritatively. A unique current-PR
+linked/closing reference can be selected automatically only for a
+single-affected-repository workspace. Commit-message and branch-name references
+stay ahead of ordinary candidates but require later semantic confirmation. Candidate terms
+support English plus bounded Chinese n-grams and project aliases. Ordinary
+candidates require a module, object, changed-path, or label signal; repository
+diversity may add one no-signal fallback per affected repository, but unused
+shortlist capacity is not filled with unrelated recent Issues.
+
 `hydrate_issue_candidates` attempts a read-only full-body lookup for every
-shortlisted candidate. There is no second five-body selection gate. Per-candidate
-failure remains visible while other lookups continue. Strong-reference overflow
+shortlisted candidate. There is no second five-body selection gate. Multiple
+references use one GraphQL batch request; only missing or failed batch items use
+the fixed-size ordered fallback. Per-candidate failure remains visible while
+other lookups continue. Strong-reference overflow
 is reported as ambiguity rather than silently discarded or automatically
 selected. An explicit number, URL, `owner/repo#number`, or local Issue file
 continues to override discovery.
@@ -71,16 +87,16 @@ snapshot through Issue, module, test, and risk analysis. Intermediate wrappers
 remain diagnostic entry points and may perform their own standalone collection.
 No persistent live-Issue cache or repository artifact is introduced.
 
-All `gh` subprocesses have bounded timeouts. Metadata/PR lookup and full-body
-lookup may use different timeout constants, but no request may block the whole
-analysis indefinitely. Body hydration uses a fixed-size thread pool and
-`executor.map`-style ordered collection so at most a small number of read-only
-requests run concurrently while output remains in shortlist order. A timeout or
-lookup failure becomes candidate-local warning data and does not cancel the
-remaining shortlist.
+All `gh` subprocesses have bounded timeouts and the complete GitHub analysis has
+a 60-second monotonic deadline. Metadata/PR lookup and full-body lookup may use
+different per-request limits, but no new request starts after the shared
+deadline. GraphQL batch hydration is primary; a fixed-size thread pool with
+ordered collection is only the fallback. A timeout or lookup failure becomes
+candidate-local warning data and does not erase successful results.
 
 The snapshot records a per-repository scan status in addition to counts. A
-successful empty response is `succeeded` with zero candidates. A request error
+successful empty response is `succeeded` with zero candidates. A single-repository
+fast-path scan is `skipped-authoritative`, never an empty result. A request error
 or timeout is `failed`. The aggregate status is `failed` when every attempted
 repository fails, `partial` when success and failure coexist, `succeeded` when
 all attempted scans succeed, and `not-run` when no GitHub repository can be
@@ -151,6 +167,17 @@ targets. These expressions and command strings are parsed as AST data and are
 never evaluated or executed. A proven entrypoint may contribute safe one-hop
 relations through its static imports; an active assertion in the originating
 test case is still required to clear a gap.
+
+Dynamic target calls carry a separate assertion-link fact. The parser marks a
+target assertion-linked only when the target call is inside an assertion or
+expected-exception context, or when its direct/helper return value flows into
+an asserted expression. Merely placing any assertion in the same test case does
+not upgrade a dynamic relation to no-obvious-gap evidence.
+
+For command-selected Python entrypoints, safe one-hop imports are derived from
+the statically reachable entrypoint functions and the imported aliases those
+functions actually reference. Whole-file import presence remains diagnostic
+context but cannot make a sibling command's dependency object-related evidence.
 
 Relation facts and add-test guidance are separate. Each affected repository and
 module retains its changed files and objects plus directly related tests,

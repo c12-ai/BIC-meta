@@ -7,16 +7,16 @@ BIC 质量简报
 
 核心结论
 - 影响范围：<affected repositories, core modules, and change size>
-- 跨仓判断：<single/multi-repository; whether the changes form one direct business or contract chain>
+- 多仓事实：<single/multi-repository only; repository count is not business-chain evidence>
 - Issue 对齐：<repository -> selected Issue, unresolved, or no unique Issue>
 - 测试判断：<strongest existing test evidence and the key behavior gaps>
-- 风险结论：<pre-test risk per independent change stream; do not hide an assessed stream behind an unrelated unassessed stream>
+- 风险结论：<workspace-level pre-test risk; do not invent per-stream attribution>
 
 变更集
 - 比较基线：
 - 变更摘要：
 - 变更仓库：
-- 是否直接跨仓：
+- 是否多仓发生改动：
 
 需求与问题单
 - 发现方式：
@@ -64,12 +64,12 @@ brief concise:
 - Write `核心结论` first as a three-to-five-bullet executive summary. Derive every
   statement from evidence repeated in the detailed sections; do not introduce a
   new conclusion, label, or recommendation there. Name affected repositories and
-  core modules, distinguish a multi-repository change set from one direct
-  business/contract chain, summarize Issue alignment and the strongest existing
-  test evidence plus key gaps, and state pre-test risk per independent change
-  stream. When one stream is assessed and another is unresolved, show both
-  statuses instead of replacing the assessed result with one ambiguous workspace
-  verdict.
+  core modules, report multi-repository change only as a workspace fact, and do
+  not infer one business/contract chain from repository count. Summarize the
+  workspace Issue alignment, strongest existing test evidence, key gaps, and
+  workspace-level pre-test risk. If changes appear unrelated, state that
+  business-flow attribution is unresolved rather than inventing streams or
+  assigning global counts to them.
 - Do not print `mapping_source`; it is raw diagnostic metadata. If the module is
   unmapped, write `功能模块：暂未识别` and cite the changed files.
 - Keep direct, indirect, and possible relations in their own fields. Cite the
@@ -85,13 +85,24 @@ brief concise:
   cannot be compared with concrete evidence. This is a pre-test matrix, not a
   claim about executed verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
-  Prefer strong links from the current PR, PR closing text, Diff commits, or an
-  `issue-123` branch. Scan at most 100 metadata records per affected repository,
-  compare them with modules and changed objects, and retain at most 10 ordinary
-  shortlist candidates. Read every shortlisted body before semantic alignment;
-  do not perform a second five-body or metadata-only cutoff. Use bounded `gh`
-  timeouts and at most three concurrent body lookups while preserving shortlist
-  order. Report per-repository and aggregate scan status, scanned, shortlisted,
+  Treat an explicit override as authoritative. A unique current-PR
+  linked/closing reference may use the authoritative fast path only when exactly
+  one affected GitHub repository exists. With multiple affected repositories,
+  scan every repository and keep the current-PR Issue as a repository-local
+  candidate without resolving workspace Issue alignment. Preserve Diff-commit
+  and `issue-123` branch references as shortlist hints that still require
+  semantic confirmation. Scan at most 100
+  metadata records per affected repository, compare them with multilingual
+  module, changed-object, changed-path, and label signals, and retain at most 10
+  ordinary shortlist candidates. Keep at most one no-signal fallback per
+  affected repository and do not fill unused budget with unrelated Issues. Read
+  every shortlisted body before semantic alignment;
+  do not perform a second five-body or metadata-only cutoff. Batch multiple
+  bodies into one read-only GraphQL request, then use at most three concurrent
+  fallback lookups only for unresolved candidates. Apply bounded per-request
+  timeouts and a shared 60-second GitHub deadline while preserving shortlist
+  order. Report fast-path use, hydration mode, request counts, deadline state,
+  per-repository and aggregate scan status, scanned, shortlisted,
   excluded, hydration attempted/succeeded/failed, and strong overflow counts
   plus categorized reasons. Use `scan-failed` when every attempted scan fails,
   `partial-scan` when only some repositories succeed, and `no-candidates` only
