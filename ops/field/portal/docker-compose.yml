@@ -1,15 +1,28 @@
-# BIC V2 field — portal (static nginx SPA). VITE_* (BE/lab/issuer URLs) are BAKED
-# INTO THE IMAGE at build time, so this container has no runtime config — it just
-# serves the field-<sha> bundle on :15173. Use the `field` image variant built
-# with the on-site VITE_* build-args (see the portal repo docker-build.yml).
+# BIC V2 field — portal (static nginx SPA). Since BIC-agent-portal#86 the image
+# is SITE-AGNOSTIC: backend/issuer URLs are runtime config — the container
+# entrypoint renders /env.js (window.__BIC_ENV__) from the env vars below at
+# startup. One shared image (latest / sha-<full sha>) serves every site; the
+# old per-site field-<sha> build variants are retired.
 services:
   portal:
-    image: ghcr.io/c12-ai/bic-agent-portal:${PORTAL_IMAGE_TAG:?set PORTAL_IMAGE_TAG (field-<sha>) in the field .env}
+    # latest for steady-state; pin sha-<full sha> in the field .env to hold a
+    # version (rollback = re-pin + up).
+    image: ghcr.io/c12-ai/bic-agent-portal:${PORTAL_IMAGE_TAG:-latest}
     container_name: ${PORTAL_CONTAINER_NAME:-bic-agent-portal}
     restart: unless-stopped
     # Host 15173 (5173+10000); the nginx container listens on 80 internally.
     ports:
       - "${PORTAL_PORT:-15173}:80"
+    environment:
+      # Runtime config rendered into /env.js at container startup. Defaults
+      # derive from FIELD_HOST / KEYCLOAK_ISSUER_URL so the three OIDC points
+      # (portal authority, BE issuer, KC_HOSTNAME) stay byte-identical; keep
+      # LAB_API_BASE_URL's origin in sync with lab CORS_ALLOW_ORIGINS.
+      STAGE: ${PORTAL_STAGE:-production}
+      API_BASE_URL: ${PORTAL_API_BASE_URL:-http://${FIELD_HOST:-192.168.12.150}:${BE_PORT:-8800}}
+      LAB_API_BASE_URL: ${PORTAL_LAB_API_BASE_URL:-http://${FIELD_HOST:-192.168.12.150}:${LAB_PORT:-8192}}
+      OIDC_AUTHORITY: ${PORTAL_OIDC_AUTHORITY:-${KEYCLOAK_ISSUER_URL:-http://192.168.12.150:18080/realms/bic}}
+      OIDC_CLIENT_ID: ${PORTAL_OIDC_CLIENT_ID:-bic-portal}
     networks:
       - infra-net
 

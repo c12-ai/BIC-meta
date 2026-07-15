@@ -32,7 +32,9 @@ ops/field/
 All five services attach to the existing external `infra-net` and address the
 shared infra by container name (`bic-postgres`, `bic-redis`, `bic-minio`,
 `bic-rabbitmq`). Images come from `ghcr.io/c12-ai/<repo>:${IMAGE_TAG}` (portal:
-`${PORTAL_IMAGE_TAG}` = the `field-<sha>` variant).
+`${PORTAL_IMAGE_TAG}` — shared tags `latest` / `sha-<full sha>` since
+BIC-agent-portal#86; backend/issuer URLs are runtime config via `/env.js`, no
+per-site build variants).
 
 ## Prerequisites on orin
 
@@ -92,7 +94,8 @@ self-migrate on boot (`alembic upgrade head`).
 - [ ] 5 ports answer health: keycloak `/realms/bic/.well-known/openid-configuration`,
       chem/lab/agent `/health`, portal `/` → 200.
 - [ ] Keycloak issuer == `http://192.168.12.150:18080/realms/bic` (matches BE
-      `KEYCLOAK_ISSUER_URL` and the portal's baked `VITE_OIDC_AUTHORITY`).
+      `KEYCLOAK_ISSUER_URL` and the portal's runtime `OIDC_AUTHORITY` — check
+      `curl http://192.168.12.150:15173/env.js`).
 - [ ] Portal real login (self-register a chemist, or admin-create) → session opens.
 - [ ] One TLC dispatch round-trip (portal → BE → lab → robot mock/real → result).
 - [ ] **Mind real endpoint**: one parameter recommendation / result analysis over
@@ -131,7 +134,7 @@ One service changed (typical):
 # 1. build the new image (from your Mac; repo = the changed service)
 gh workflow run docker-build.yml --repo c12-ai/BIC-agent-service --ref main
 gh run watch --repo c12-ai/BIC-agent-service   # wait for green
-# portal needs the field build-args variant — pass the same inputs used for field-<sha>
+# portal builds the same way since #86 — no variant, no build-args
 
 # 2. on orin (or via ssh): pull + recreate ONLY the changed service
 cd ~/bic-v2
@@ -143,6 +146,30 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8800/health   # gate
 
 Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
 (Keycloak/DB state persists in `keycloak_db`; realm re-import is skipped.)
+
+### Portal runtime config — ONE-TIME migration per site (after BIC-agent-portal#87)
+
+The portal image is site-agnostic since #86/#87: URLs live in compose env →
+`/env.js`, tags are `latest` / `sha-<full sha>`. A site still running a
+pre-#86 `field-*` image needs one manual hop (its old image has no OCI
+revision label, so `update.sh` survey reports portal "unknown" until then):
+
+```bash
+# 0. sync this package to the site first (portal compose gains the env keys)
+gh workflow run docker-build.yml --repo c12-ai/BIC-agent-portal --ref main   # no args
+gh run watch --repo c12-ai/BIC-agent-portal                                  # wait for green
+ssh <site> "cd ~/bic-v2 && sed -i 's|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=latest|' .env \
+  && docker compose -f portal/docker-compose.yml --env-file .env pull -q \
+  && docker compose -f portal/docker-compose.yml --env-file .env up -d"
+curl -s http://<site-ip>:15173/env.js    # must show the site's OIDC_AUTHORITY + API_BASE_URL
+```
+
+Then do one real login in a browser. From here `update.sh` handles portal like
+any backend (survey via image label, pin `sha-<full sha>` on roll). The old
+`field-*` tags stay in GHCR as emergency anchors but are no longer built.
+DANGER: rolling a pre-#86 site to the new image WITHOUT the synced compose
+gives an empty `/env.js` → the SPA boots with no OIDC authority (fail-loud by
+design) while `/health` stays green — always sync the package first.
 
 ### Ready-to-paste Claude prompt (hand this to a Claude Code session)
 
@@ -162,9 +189,9 @@ Full-stack refresh: `./deploy.sh pull && ./deploy.sh down && ./deploy.sh up`
 > ## 步骤
 > 1. 盘点：五仓 git fetch 后比较现场运行版本 vs origin/main；PR 合并通知≠进 main（gh pr view --json baseRefName 核对）；纯 CI/docs 变更跳过。
 > 2. 兼容性预检（lab/shared-types 变更时必做）：mock 的 shared-types pin 与新技能 handler 先适配再滚 lab；diff compose 与 .env.example，新增 env knob 先定值。
-> 3. 构建：变更仓 gh workflow run docker-build.yml --ref main 等绿；portal 必须 -f image_variant=field 且带三个显式 URL（api=http://192.168.12.150:8800 / lab=…:8192 / authority=…:18080/realms/bic），漏传会被 CI 守卫打红。
-> 4. 滚更：逐服务 pull + up -d（portal 先改 .env PORTAL_IMAGE_TAG=field-<新sha>），每服务 health-gate（40×2s 内 200）；全栈才用 deploy.sh down && up。
-> 5. 验证：deploy.sh status 全 healthy；BE 滚更后 rabbitmqctl 确认 agent.task.status/results/hb 消费者归位（启动见 lab_task_lost absorbed WARN 属正常自愈）；portal 滚更后断言 bundle 0 处 localhost:18080 且现场 authority 在场；关键修复容器内 grep 符号自证。
+> 3. 构建：变更仓 gh workflow run docker-build.yml --ref main 等绿；portal 自 #86 起免参数（共享镜像，runtime config，无 variant/无 vite 输入）。
+> 4. 滚更：逐服务 pull + up -d（portal 先改 .env PORTAL_IMAGE_TAG=sha-<新全长sha>），每服务 health-gate（40×2s 内 200）；全栈才用 deploy.sh down && up。
+> 5. 验证：deploy.sh status 全 healthy；BE 滚更后 rabbitmqctl 确认 agent.task.status/results/hb 消费者归位（启动见 lab_task_lost absorbed WARN 属正常自愈）；portal 滚更后断言 /env.js 含现场 OIDC_AUTHORITY 与 API_BASE_URL（curl :15173/env.js）；关键修复容器内 grep 符号自证。
 > 6. 报告：旧 sha→新 sha、digest、health 证据、失败项如实；回滚=IMAGE_TAG 固定回上一 sha- tag 再 up -d。
 
 ## Known operational notes (from the 2026-07-11 first deployment)
@@ -192,10 +219,11 @@ containers (`bic-agent-frontend`, `bic-agent-copilot-bff`, `bic-agent-backend`,
 | Mind / ChemEngine | LAN host (`MIND_HOST` bare, `MIND_PORT`) | cloud: `MIND_HOST=52.83.119.132`, `MIND_PORT=8010` |
 | S3 | local MinIO (defaults) | real AWS S3 — uncomment the cloud-Mind block in `.env.example`; creds on a1 at `~/.config/bic-v2/s3-bic.env` (IAM user `bic-a1-s3`, scoped to the one shared bucket) |
 | LLM | host `:8000` model server | DashScope: `BE_LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`, model `qwen3.7-plus-2026-05-26` |
-| Portal image | `field-<sha>` | `field-a1-<sha>` (build with a1 URLs; tags must not share a prefix across sites — the bundle bakes absolute URLs) |
+| Portal image | shared (`latest` / `sha-<sha>`) | SAME shared image since BIC-agent-portal#86 — URLs are runtime config (`/env.js` from compose env); the old `field-` / `field-a1-` variants are retired |
 | Robot | mock or real | mock only for now; `TLC_DEVELOP_WAIT_SECONDS=30` (restore 180 on a real robot) |
 
-Routine updates: `FIELD_SSH=a1 FIELD_HOST_IP=192.168.12.239 PORTAL_VARIANT=field-a1 ./update.sh`
+Routine updates: `FIELD_SSH=a1 FIELD_HOST_IP=192.168.12.239 ./update.sh`
+(no `PORTAL_VARIANT` since #86 — the portal image is site-agnostic)
 
 Why AWS S3: Mind is cloud-side, so presigned image URLs must be public-internet
 reachable — a LAN MinIO presign dies at 52.83.119.132. All four S3 writers (BE,
