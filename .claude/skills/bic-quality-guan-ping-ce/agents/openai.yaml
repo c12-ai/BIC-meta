@@ -1,0 +1,4 @@
+interface:
+  display_name: "BIC Quality Review"
+  short_description: "Review BIC diffs, test gaps, and pre-test risk"
+  default_prompt: "Use $bic-quality-guan-ping-ce to review the current BIC diff, map affected modules and tests, and assess issue-aware pre-test risk."

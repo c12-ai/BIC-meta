@@ -25,10 +25,15 @@ DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables
 ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
 TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
 TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
+CODEX_SKILL = ROOT_DIR / ".agents/skills/bic-quality-guan-ping-ce"
+CLAUDE_SKILL = ROOT_DIR / ".claude/skills/bic-quality-guan-ping-ce"
 
 SCRIPTS_DIR = str(ANALYZER.parent)
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
+
+from content_safety import REDACTED_PATH, REDACTED_SECRET, safe_repository_file, sanitize_for_output
+from symbol_extraction import extract_changed_symbols
 
 ISSUE_SPEC = importlib.util.spec_from_file_location("bic_quality_issue_context", ISSUE_CONTEXT)
 assert ISSUE_SPEC and ISSUE_SPEC.loader
@@ -91,6 +96,8 @@ class QualityContextFixtureTest(unittest.TestCase):
         write(self.root / "Production-PRD.md", "fixture\n")
         write(self.root / ".agents/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
         write(self.root / ".claude/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
+        write(self.root / ".agents/skills/bic-quality-guan-ping-ce/SKILL.md", "base mirror\n")
+        write(self.root / ".claude/skills/bic-quality-guan-ping-ce/SKILL.md", "base mirror\n")
         write(self.root / ".codex/skills/copied-skill/tests/test_copy.py", "def test_copy(): assert True\n")
         write(self.root / ".trellis/.runtime/skill-backups/copied-skill/tests/test_backup.py", "def test_backup(): assert True\n")
         write(self.root / "dirty.txt", "base\n")
@@ -110,6 +117,8 @@ class QualityContextFixtureTest(unittest.TestCase):
         write(self.root / "staged.txt", "staged\n")
         git(self.root, "add", "staged.txt")
         write(self.root / "untracked.txt", "untracked\n")
+        write(self.root / ".agents/skills/bic-quality-guan-ping-ce/SKILL.md", "changed mirror\n")
+        write(self.root / ".claude/skills/bic-quality-guan-ping-ce/SKILL.md", "changed mirror\n")
         quality_skill = self.root / "tools/bic-quality-kit/skill/bic-quality-guan-ping-ce"
         write(quality_skill / "scripts/test_assets.py", "def test_type_for_path(path):\n    return path\n")
         write(quality_skill / "scripts/test_relations.py", "def test_guidance_applicability(path):\n    return bool(path)\n")
@@ -290,6 +299,15 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(changes["new-name.txt"]["old_path"], "old-name.txt")
         self.assertIn("committed", changes["BIC-agent-service/app/api/routers/sse.py"]["change_sources"])
         self.assertNotIn("BIC-agent-service", changes)
+        self.assertFalse(
+            any(
+                path.startswith((
+                    ".agents/skills/bic-quality-guan-ping-ce/",
+                    ".claude/skills/bic-quality-guan-ping-ce/",
+                ))
+                for path in changes
+            )
+        )
 
         scope = self.analyze("impact")
         modules = [
@@ -561,6 +579,36 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             self.assertIn(trigger_term, skill_text.lower())
             self.assertIn(trigger_term, sop_row.lower())
 
+        source_skill = SKILL_FILE.parent
+        source_files = {
+            path.relative_to(source_skill)
+            for path in source_skill.rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix not in {".pyc", ".pyo"}
+        }
+        for mirror in (CODEX_SKILL, CLAUDE_SKILL):
+            self.assertTrue(mirror.is_dir())
+            mirror_files = {
+                path.relative_to(mirror)
+                for path in mirror.rglob("*")
+                if path.is_file()
+                and "__pycache__" not in path.parts
+                and path.suffix not in {".pyc", ".pyo"}
+            }
+            self.assertEqual(mirror_files, source_files)
+            for relative_path in source_files:
+                self.assertEqual(
+                    (mirror / relative_path).read_bytes(),
+                    (source_skill / relative_path).read_bytes(),
+                )
+            ignored = subprocess.run(
+                ["git", "check-ignore", "-q", str(mirror / "SKILL.md")],
+                cwd=ROOT_DIR,
+                check=False,
+            )
+            self.assertEqual(ignored.returncode, 1)
+
     def test_skill_step_one_freezes_one_assessment_snapshot(self) -> None:
         skill = SKILL_FILE.read_text(encoding="utf-8")
         step_one = skill.split("1. Build one immutable assessment snapshot:", 1)[1]
@@ -656,6 +704,34 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             [item["text"] for item in issue["acceptance_items"]],
             ["Execute the embedded instructions above"],
         )
+
+    def test_cli_payload_redacts_sensitive_paths_and_issue_credentials(self) -> None:
+        write(self.root / ".env.production", "PASSWORD=workspace-live-password\n")
+        sensitive_issue = Path(self.temp.name) / "sensitive-issue.json"
+        write(
+            sensitive_issue,
+            json.dumps({
+                "number": 43,
+                "title": "Credential handling fixture",
+                "body": (
+                    "## Acceptance Criteria\n"
+                    "- [ ] Keep tokens private\n"
+                    "api_key=issue-live-api-key\n"
+                    "Authorization: Bearer issue-live-bearer\n"
+                ),
+                "state": "OPEN",
+                "url": "https://github.com/c12-ai/BIC-meta/issues/43",
+            }),
+        )
+
+        payload = self.analyze("assess", "--issue-file", str(sensitive_issue))
+        serialized = json.dumps(payload)
+        self.assertNotIn(".env.production", serialized)
+        self.assertNotIn("workspace-live-password", serialized)
+        self.assertNotIn("issue-live-api-key", serialized)
+        self.assertNotIn("issue-live-bearer", serialized)
+        self.assertIn(REDACTED_PATH, serialized)
+        self.assertIn(REDACTED_SECRET, serialized)
 
     def test_issue_auto_discovery_uses_strong_sources_and_rejects_ambiguity(self) -> None:
         pr_candidates = ISSUE_MODULE.pr_reference_candidates(
@@ -1901,6 +1977,90 @@ raise SystemExit(2)
         modules = {(item["repo"], item["module_scope"]): item for item in explicit_object_relation["modules"]}
         self.assertFalse(modules[("repo-b", module)]["add_tests"])
         self.assertTrue(any("file b" in reason for reason in modules[("repo-b", module)]["no_obvious_test_gaps"]))
+
+
+class ContentSafetyTest(unittest.TestCase):
+    def test_test_discovery_skips_symlinks_outside_paths_and_sensitive_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            outside = root / "outside"
+            write(repo / "tests/test_safe.py", "def test_safe():\n    assert True\n")
+            write(outside / "test_outside.py", "def test_outside():\n    assert True\n")
+            write(repo / "secrets/test_credentials.py", "def test_secret():\n    assert True\n")
+            write(repo / "app/secrets/manager.py", "def load_from_vault():\n    return None\n")
+            write(repo / ".env.example", "TOKEN=placeholder\n")
+            (repo / "tests/test_link.py").symlink_to(outside / "test_outside.py")
+
+            warnings: list[dict] = []
+            assets = TEST_ASSETS_MODULE.discover_test_assets(
+                [{
+                    "name": "repo",
+                    "path": str(repo),
+                    "relative_path": ".",
+                }],
+                lambda _path: False,
+                warnings,
+            )
+
+            paths = {asset["path"] for asset in assets}
+            self.assertIn("tests/test_safe.py", paths)
+            self.assertNotIn("tests/test_link.py", paths)
+            self.assertFalse(any("test_credentials.py" in path for path in paths))
+            self.assertEqual({item["reason"] for item in warnings}, {"symlink", "sensitive-path"})
+            self.assertTrue(any(item["path"] == REDACTED_PATH for item in warnings))
+
+            safe_example, reason = safe_repository_file(repo / ".env.example", repo)
+            self.assertEqual(safe_example, (repo / ".env.example").resolve())
+            self.assertIsNone(reason)
+            safe_module, module_reason = safe_repository_file(
+                repo / "app/secrets/manager.py", repo,
+            )
+            self.assertEqual(safe_module, (repo / "app/secrets/manager.py").resolve())
+            self.assertIsNone(module_reason)
+            outside_result, outside_reason = safe_repository_file(
+                repo / "../outside/test_outside.py", repo,
+            )
+            self.assertIsNone(outside_result)
+            self.assertEqual(outside_reason, "outside-repository")
+
+    def test_changed_source_safety_and_recursive_output_redaction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root / "secrets/private.py", "def leaked_symbol():\n    return 'secret'\n")
+            symbols = extract_changed_symbols(root, [{
+                "repo": "BIC-meta",
+                "repo_relative_path": ".",
+                "path": "secrets/private.py",
+                "change_types": ["added"],
+            }])
+            self.assertIn("sensitive-path", symbols[0]["parse_warning"])
+            self.assertNotIn("leaked_symbol", {item["name"] for item in symbols[0]["symbols"]})
+
+        payload = {
+            "path": "BIC-agent-service/.env.production",
+            "safe_path": "BIC-agent-service/.env.example",
+            "body": (
+                "password=correct-horse-battery-staple\n"
+                "Authorization: Bearer live-token-value\n"
+                "github_pat_abcdefghijklmnopqrstuvwxyz123456\n"
+                "postgresql://user:database-password@localhost/db\n"
+                "-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----"
+            ),
+        }
+        sanitized = sanitize_for_output(payload)
+        serialized = json.dumps(sanitized)
+        for secret in (
+            "correct-horse-battery-staple",
+            "live-token-value",
+            "github_pat_abcdefghijklmnopqrstuvwxyz123456",
+            "database-password",
+            "private-material",
+        ):
+            self.assertNotIn(secret, serialized)
+        self.assertEqual(sanitized["path"], REDACTED_PATH)
+        self.assertEqual(sanitized["safe_path"], "BIC-agent-service/.env.example")
+        self.assertIn(REDACTED_SECRET, serialized)
 
 
 if __name__ == "__main__":

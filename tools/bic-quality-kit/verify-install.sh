@@ -57,6 +57,7 @@ check_file "$SOURCE_DIR/config/test-inventory.yaml"
 check_file "$SOURCE_DIR/config/risk-model.yaml"
 check_file "$SOURCE_DIR/references/risk-model.md"
 check_file "$SOURCE_DIR/references/test-analysis-rules.md"
+check_file "$SOURCE_DIR/scripts/content_safety.py"
 check_file "$SOURCE_DIR/scripts/quality_context.py"
 check_file "$SOURCE_DIR/scripts/issue_context.py"
 check_file "$SOURCE_DIR/scripts/risk_assessment.py"
@@ -80,22 +81,16 @@ bash "$SOURCE_DIR/scripts/inspect-test-inventory.sh" >/dev/null
 check_workspace_root "$SOURCE_DIR/scripts/suggest-test-scope.sh"
 check_workspace_root "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
 
-if [[ -d "$ROOT_DIR/.agents/skills/$SKILL_NAME" ]]; then
-  echo "Codex project skill installed: $ROOT_DIR/.agents/skills/$SKILL_NAME"
-  compare_skill_copy "$ROOT_DIR/.agents/skills/$SKILL_NAME"
-  check_file "$ROOT_DIR/.agents/skills/$SKILL_NAME/agents/openai.yaml"
-  check_workspace_root "$ROOT_DIR/.agents/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
-else
-  echo "Codex project skill not installed yet. Run install.sh if desired."
-fi
+check_dir "$ROOT_DIR/.agents/skills/$SKILL_NAME"
+echo "Codex project skill tracked: $ROOT_DIR/.agents/skills/$SKILL_NAME"
+compare_skill_copy "$ROOT_DIR/.agents/skills/$SKILL_NAME"
+check_file "$ROOT_DIR/.agents/skills/$SKILL_NAME/agents/openai.yaml"
+check_workspace_root "$ROOT_DIR/.agents/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
 
-if [[ -d "$ROOT_DIR/.claude/skills/$SKILL_NAME" ]]; then
-  echo "Claude project skill installed: $ROOT_DIR/.claude/skills/$SKILL_NAME"
-  compare_skill_copy "$ROOT_DIR/.claude/skills/$SKILL_NAME"
-  check_file "$ROOT_DIR/.claude/skills/$SKILL_NAME/agents/openai.yaml"
-  check_workspace_root "$ROOT_DIR/.claude/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
-else
-  echo "Claude project skill not installed yet. Run install.sh if desired."
-fi
+check_dir "$ROOT_DIR/.claude/skills/$SKILL_NAME"
+echo "Claude project skill tracked: $ROOT_DIR/.claude/skills/$SKILL_NAME"
+compare_skill_copy "$ROOT_DIR/.claude/skills/$SKILL_NAME"
+check_file "$ROOT_DIR/.claude/skills/$SKILL_NAME/agents/openai.yaml"
+check_workspace_root "$ROOT_DIR/.claude/skills/$SKILL_NAME/scripts/suggest-test-scope.sh"
 
 echo "BIC quality kit verification passed."

@@ -33,7 +33,8 @@ The skill source lives at:
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/
 ```
 
-This keeps the committed source separate from locally installed Claude/Codex skill copies.
+This keeps one editable source separate from the repository-tracked Codex and
+Claude discovery mirrors.
 
 ## 3. Added The Skill Entry Point
 
@@ -180,26 +181,33 @@ For each repository it resolves a local base, reads
 then performs module mapping, changed-object extraction, and test
 correspondence analysis. It never fetches or checks out refs.
 
-## 9. Added Install And Verify
+## 9. Added Repository Discovery Mirrors And Verification
 
-`install.sh` installs the skill into local project skill locations:
+New clones already contain synchronized Skill mirrors at:
 
 ```text
 .agents/skills/bic-quality-guan-ping-ce
 .claude/skills/bic-quality-guan-ping-ce
 ```
 
-`verify-install.sh` checks required files, validates JSON-compatible config, and runs every read-only script.
+`install.sh` is a maintainer synchronization command after source edits; it is
+not a prerequisite for Skill use. `verify-install.sh` requires both mirrors,
+checks that they match the source, validates JSON-compatible config, and runs
+every read-only script.
 
 It also runs temporary multi-repository Git fixtures covering committed and
 worktree changes, rename/delete, missing bases, dynamic repositories, scope
 inference, test discovery, recommendation isolation, and read-only Git state.
 
-The verification script also checks that source and installed scripts resolve `workspace_root` back to `BIC-meta`. This prevents installed skill copies under `.agents/skills` or `.claude/skills` from silently analyzing the wrong parent directory.
+The verification script also checks that source and mirrored scripts resolve
+`workspace_root` back to `BIC-meta`. This prevents discovery mirrors under
+`.agents/skills` or `.claude/skills` from silently analyzing the wrong parent
+directory.
 
 ## 10. Added User Documentation
 
-`README.md` explains install, usage, read-only boundaries, and direct script debugging commands.
+`README.md` explains zero-install discovery, maintainer synchronization, usage,
+read-only boundaries, and direct script debugging commands.
 
 The intended user prompt is:
 
@@ -245,7 +253,7 @@ The current implementation is considered ready when:
 - module output preserves repository identity and test conclusions cite concrete
   changed objects, imports/references, scenarios, assertions, or explicit
   relations;
-- generated skill copies, backups, and separately discovered child repositories
+- generated Skill mirrors, backups, and separately discovered child repositories
   are not duplicated as root-repository test assets;
 - test conclusions separate tests to add, tests to strengthen, and modules with
   no obvious static gap without confidence or priority labels;
@@ -257,7 +265,8 @@ The current implementation is considered ready when:
 - the pre-test Risk Matrix binds every row to Issue, Diff, and test evidence and
   never claims that tests ran or passed;
 - scripts run without mutating project state;
-- install script can sync the skill into Claude/Codex project skill paths;
+- a fresh clone includes non-ignored Claude/Codex Skill mirrors, while the sync
+  script refreshes them after source edits;
 - verification script passes;
 - the skill can support a read-only diff quality analysis conversation.
 

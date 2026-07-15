@@ -19,27 +19,42 @@ It is intentionally read-only:
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
 - It outputs one `BIC Quality Brief`.
+- It reads content only from regular files contained by their discovered
+  repository, skips symbolic links and credential-bearing paths, and redacts
+  common credential values and sensitive paths from CLI JSON output.
 - It does not execute tests, start services, reset data, kill processes, or invoke E2E.
 
-## Install
+## Repository Availability
 
-From `BIC-meta`:
+The source of truth is committed under:
 
-```bash
-./tools/bic-quality-kit/install.sh
-./tools/bic-quality-kit/verify-install.sh
+```text
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce
 ```
 
-The installer copies the skill to:
+Two synchronized discovery mirrors are also committed:
 
 ```text
 .agents/skills/bic-quality-guan-ping-ce
 .claude/skills/bic-quality-guan-ping-ce
 ```
 
-Those installed copies are local tool state. The source of truth remains under `tools/bic-quality-kit/skill/`.
-Existing installed copies and legacy in-directory backups are preserved under
-`.trellis/.runtime/skill-backups/`, outside Codex and Claude skill discovery.
+New clones therefore expose the Skill directly to Codex and Claude without an
+installation step. The source of truth remains under
+`tools/bic-quality-kit/skill/`; do not edit either discovery mirror directly.
+
+After changing the source, maintainers synchronize and verify the committed
+mirrors with:
+
+```bash
+./tools/bic-quality-kit/install.sh
+./tools/bic-quality-kit/verify-install.sh
+```
+
+The synchronization command preserves replaced copies under
+`.trellis/.runtime/skill-backups/`, outside Skill discovery. Commit source and
+mirror changes together. Verification fails when either mirror is absent or
+different from the source.
 
 Skill discovery has three complementary entry points:
 

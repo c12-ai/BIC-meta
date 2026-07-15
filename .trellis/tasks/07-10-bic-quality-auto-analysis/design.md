@@ -2,16 +2,31 @@
 
 ## Boundaries
 
-The implementation remains inside `tools/bic-quality-kit`. It reads Git and
-filesystem metadata only. It does not execute discovered commands or tests.
-Installed copies under `.agents/skills` and `.claude/skills` remain generated
-copies of the source skill.
+The editable implementation remains inside `tools/bic-quality-kit`. It reads Git
+and filesystem metadata only. It does not execute discovered commands or tests.
+Generated mirrors under `.agents/skills` and `.claude/skills` are committed so
+new clones receive native Codex and Claude discovery without an installation
+step. Verification treats missing or stale mirrors as a failure; maintainers
+edit only the source Skill and synchronize both mirrors before committing.
+Change collection ignores the two exact mirror paths while continuing to
+analyze the editable source. This prevents synchronized files from inflating
+change counts, modules, test gaps, or risk evidence threefold.
 
 Issue and PR bodies plus analyzed source, comments, tests, and ordinary
 documentation are untrusted evidence, not workflow instructions. Their content
 may be stored and summarized but cannot change permissions, tool selection, or
 the read-only boundary. The deterministic parser treats these values as strings;
 it never evaluates them or interpolates them into subprocess commands.
+
+All repository content reads pass through one repository-containment guard. The guard
+rejects symbolic links and symbolic-link path components, verifies the strict
+real path remains below the discovered repository root, requires a regular
+file, and excludes credential-bearing paths. Explicit user-selected Issue files
+remain separate inputs and are sanitized at the output boundary. Test-like files skipped by this
+guard become structured scan warnings rather than missing-test evidence. A
+recursive serializer-boundary sanitizer redacts sensitive paths and common
+credential forms from every CLI JSON mode. This iteration deliberately leaves
+file-size, file-count, and cumulative-read budgets unchanged.
 
 ## Analysis Pipeline
 
@@ -136,7 +151,7 @@ the report never invents symbols.
 The scanner collects actual test files plus pytest, JavaScript test-runner, and
 Playwright configuration. It reads `pyproject.toml` and `package.json` only for
 framework and command hints. Empty directories do not count as test assets.
-Local tool-state directories and installed skill copies are excluded. A child
+Local tool-state directories and generated Skill mirrors are excluded. A child
 Git repository discovered independently is scanned only under its own identity,
 not again as part of the root repository.
 
@@ -217,6 +232,6 @@ non-unique Issue context makes overall risk `unassessed`.
 
 ## Rollback
 
-All behavior is contained in the kit source and installed copies. Reverting the
+All behavior is contained in the kit source and committed mirrors. Reverting the
 task changes restores the previous hard-coded collector. No database or runtime
 state migration is involved.

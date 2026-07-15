@@ -48,4 +48,5 @@ install_one() {
 install_one "$ROOT_DIR/.agents/skills" "codex"
 install_one "$ROOT_DIR/.claude/skills" "claude"
 
-echo "Done. Run: $KIT_DIR/verify-install.sh"
+echo "Synchronized repository-tracked Codex and Claude Skill mirrors."
+echo "Commit source and mirror changes together after running: $KIT_DIR/verify-install.sh"

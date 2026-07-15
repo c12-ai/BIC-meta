@@ -118,6 +118,12 @@ and root/unusual files remain visible.
   documentation relations and runtime-configuration analysis.
 - Exclude local skill copies, backups, and independently discovered child
   repositories from duplicate root-repository test discovery.
+- Route file-content reads through a shared guard that rejects symbolic links,
+  outside-repository real paths, non-regular files, and sensitive credential
+  paths. Carry skipped test-like candidates as scan warnings, and sanitize all
+  CLI JSON strings for sensitive paths and common secret forms immediately
+  before serialization. Keep file-size, file-count, and byte budgets outside
+  this iteration.
 
 Validation: fixture repositories must cover Python and TypeScript symbols,
 imports/references, assertions, disabled tests, unrelated same-name files,
@@ -127,6 +133,10 @@ implementation modules are not test assets and documentation-only changes do
 not create missing-test guidance. Dynamic-import and subprocess-helper fixtures
 must prove exact target mapping, one-hop entrypoint imports, assertion gating,
 and that a target which would write a marker is never executed.
+Additional safety fixtures must prove that test symlinks and sensitive paths are
+not read, real-path containment rejects repository escapes, skipped candidates
+remain warnings, example environment files remain eligible, and serialized
+output contains neither credential values nor sensitive paths.
 
 ## 4. Skill and Documentation
 
@@ -143,7 +153,8 @@ and that a target which would write a marker is never executed.
   trigger subprocess execution.
 - Remove raw `test_inventory` from the final `assess` payload after correspondence
   and risk derivation; retain it in standalone inventory/suggest diagnostics.
-- Reinstall source to `.agents` and `.claude` only after source verification.
+- Synchronize source to the committed `.agents` and `.claude` mirrors only after
+  source verification.
 
 ## 5. Final Verification
 
@@ -158,8 +169,8 @@ prompt completed in 4.88 seconds. Missing-test guidance decreased from the prior
 changed objects gained active direct or safe-indirect assertion evidence.
 
 - Run syntax/config validation and the temporary behavior fixture suite.
-- Run the full `verify-install.sh` chain after installation.
-- Compare source and installed skill directories.
+- Run the full `verify-install.sh` chain after synchronizing the mirrors.
+- Compare the source and repository-tracked Skill mirrors.
 - Confirm `git status` before and after analyzer runs is unchanged except for the
   intended task and kit edits.
 - Confirm public test-analysis JSON contains no confidence fields,
@@ -171,15 +182,16 @@ changed objects gained active direct or safe-indirect assertion evidence.
   `short_description`, and a one-sentence `$bic-quality-guan-ping-ce` default
   prompt. Do not add unprovided icons, branding, MCP dependencies, or an
   unnecessary implicit-invocation override.
-- Add one root SOP Index entry that points to the committed source Skill, not
-  `.agents/skills` or `.claude/skills` generated copies.
+- Add one root SOP Index entry that points to the editable source Skill, while
+  committing `.agents/skills` and `.claude/skills` discovery mirrors for
+  zero-install use by new clones.
 - Document explicit and implicit invocation plus the responsibilities of
-  `SKILL.md`, `agents/openai.yaml`, the SOP Index, and the installer.
+  `SKILL.md`, `agents/openai.yaml`, the SOP Index, and mirror synchronization.
 - Add contract tests for metadata shape, Skill-name consistency, description
   length, default-prompt invocation, and the stable SOP route.
-- Extend installation verification to require `agents/openai.yaml` in the
-  source and in both installed copies.
+- Extend verification to require `agents/openai.yaml` in the source and in both
+  repository-tracked mirrors, and fail when either mirror is absent or stale.
 
-Validation: run the unit suite, install the Skill, run the complete
+Validation: run the unit suite, synchronize the Skill mirrors, run the complete
 `verify-install.sh` chain, run Skill Creator validation, and finish with
 `git diff --check`.

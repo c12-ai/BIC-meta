@@ -380,10 +380,10 @@ tools/bic-quality-kit/
             └── test_relations.py
 ```
 
-`tools/bic-quality-kit/skill/` 是唯一源码。`.agents/skills/` 和
-`.claude/skills/` 是安装副本。安装时旧版本备份会移到
-`.trellis/.runtime/skill-backups/`，避免 Codex 或 Claude 同时发现多个同名
-Skill。
+`tools/bic-quality-kit/skill/` 是唯一可编辑源码。`.agents/skills/` 和
+`.claude/skills/` 是随仓库提交的发现镜像，新成员 clone 后无需安装即可让
+Codex 和 Claude 发现 Skill。维护者同步镜像时，旧版本备份会移到
+`.trellis/.runtime/skill-backups/`。
 
 ## 脚本边界
 
@@ -409,16 +409,16 @@ Skill。
 如果用户要求运行测试，当前 Skill 只能给出建议命令或说明需要切换到后续
 测试执行能力。
 
-## 部署方式
+## 分发与同步
 
-在 `BIC-meta` 根目录执行：
+新 clone 已经包含两份发现镜像。只有维护者修改源码后需要执行：
 
 ```bash
 ./tools/bic-quality-kit/install.sh
 ./tools/bic-quality-kit/verify-install.sh
 ```
 
-安装目标：
+同步目标：
 
 ```text
 .agents/skills/bic-quality-guan-ping-ce
@@ -426,7 +426,7 @@ Skill。
 ```
 
 `verify-install.sh` 会验证配置格式、Skill 必需文件、行为夹具、脚本工作区
-解析以及源码与两份安装副本的一致性。
+解析以及源码与两份仓库跟踪镜像的一致性；缺少或过期的镜像都会导致失败。
 
 ## 当前验收结果
 

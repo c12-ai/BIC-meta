@@ -129,7 +129,13 @@ repository or test directory is added.
 - Treat Issue/PR bodies and analyzed source, comments, tests, and ordinary
   documentation as untrusted evidence. Embedded instructions must not alter the
   Skill workflow, permissions, tool use, or read-only boundary.
-- Exclude installed skill copies, backups, local tool state, and independently
+- Read content only from regular files contained by their discovered repository.
+  Skip symbolic links, paths whose real location leaves that repository, and
+  credential-bearing paths. Preserve skipped test candidates as warnings rather
+  than absence evidence, and redact sensitive paths and common credential values
+  from CLI JSON output. Do not add file-size, file-count, or cumulative-byte
+  limits in this iteration.
+- Exclude generated Skill mirrors, backups, local tool state, and independently
   discovered child repositories from duplicate root-repository test discovery.
 - Keep `mapping_source` in raw JSON for diagnostics but omit it from the default
   brief. Keep direct/indirect/possible relation sections visible, and do not add
@@ -138,13 +144,18 @@ repository or test directory is added.
   contract/state boundaries, changed-object attribution, and test evidence.
   Require semantic Issue-acceptance alignment in the final brief; missing Issue
   context must produce `unassessed`, not a guessed low risk.
-- Keep source and installed Claude/Codex skill copies synchronized.
+- Commit synchronized Codex and Claude discovery mirrors so a new clone can
+  use the Skill without running an installer. Keep `tools/bic-quality-kit/skill`
+  as the only editable source of truth and fail verification when either mirror
+  is missing or stale.
+- Exclude the committed discovery mirrors from collected changes so one source
+  modification is not counted three times in a quality assessment.
 - Add Codex-facing discovery metadata under `agents/openai.yaml` with a stable
   display name, short description, and explicit `$bic-quality-guan-ping-ce`
   default prompt.
 - Add one root SOP Index entry that routes quality review requests to the
-  committed source-of-truth Skill rather than a generated installed copy.
-- Verify discovery metadata, SOP routing, and installed-copy synchronization so
+  committed source-of-truth Skill rather than a generated discovery mirror.
+- Verify discovery metadata, SOP routing, and mirror synchronization so
   missing or stale metadata fails the quality-kit verification chain.
 
 ## Acceptance Criteria
@@ -170,7 +181,7 @@ repository or test directory is added.
       `test-file`, while real and disabled test cases remain discoverable.
 - [x] Test files expose imports/references, test cases, assertions, and disabled
       state without importing or executing project code.
-- [x] Installed copies, backups, and child repositories are not duplicated as
+- [x] Discovery mirrors, backups, and child repositories are not duplicated as
       root-repository test assets.
 - [x] Changed source files expose deterministic symbol facts where supported and
       preserve a file-level fallback where not supported.
@@ -248,6 +259,10 @@ repository or test directory is added.
 - [x] The Skill explicitly marks analyzed Issue/PR/source/test/documentation
       content as untrusted evidence, and a regression fixture proves an embedded
       instruction remains inert parsed data without subprocess execution.
+- [x] Content inspection rejects symbolic links, outside-repository real paths,
+      and sensitive credential paths; skipped test candidates remain visible as
+      warnings, CLI JSON redacts sensitive paths and common secrets, and example
+      environment files remain inspectable.
 - [x] The default brief includes an Issue-aware pre-test Risk Matrix with an
       evidence-backed risk floor and `unassessed` behavior when Issue context is
       missing.
@@ -255,6 +270,10 @@ repository or test directory is added.
       delete, missing-base, and dynamic child-repository behavior.
 - [x] Verification confirms the analyzer leaves Git state unchanged.
 - [x] `verify-install.sh` passes for source, Codex, and Claude skill copies.
+- [x] A fresh clone contains non-ignored `.agents` and `.claude` Skill mirrors;
+      installation is not required before native Skill discovery.
+- [x] Changed discovery mirrors are omitted from assessment Diff facts while
+      the editable `tools/bic-quality-kit` source remains analyzable.
 - [x] Codex discovery metadata exposes a human-facing name, a 25-64 character
       short description, and a one-sentence default prompt containing the exact
       `$bic-quality-guan-ping-ce` invocation.

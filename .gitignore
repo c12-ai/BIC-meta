@@ -14,8 +14,17 @@ CLAUDE.local.md
 /.claude/skills/*
 !/.claude/skills/prd/
 !/.claude/skills/prd/SKILL.md
+!/.claude/skills/bic-quality-guan-ping-ce/
+!/.claude/skills/bic-quality-guan-ping-ce/**
 /.agents/skills/*
 !/.agents/skills/prd
+!/.agents/skills/bic-quality-guan-ping-ce/
+!/.agents/skills/bic-quality-guan-ping-ce/**
+
+# Generated Python bytecode remains local even inside tracked Skill mirrors.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
 
 # Child repositories are cloned into this workspace but remain independently
 # managed Git repositories. The root meta repo tracks only workspace docs,
