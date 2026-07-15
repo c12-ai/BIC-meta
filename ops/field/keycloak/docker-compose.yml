@@ -1,0 +1,56 @@
+# BIC V2 field — Keycloak 26.3 (mirrors BIC-infra's keycloak service).
+#
+# The realm `bic` is imported ONCE (--import-realm, IGNORE_EXISTING): editing
+# realm-bic.json or these env inputs does NOTHING to an already-imported realm.
+# A fresh import needs an empty keycloak DB (see README rollback/reset).
+#
+# Issuer is fully parameterised via KC_HOSTNAME — it sets the browser-facing
+# token `iss` and MUST equal the BE KEYCLOAK_ISSUER_URL and the portal's baked
+# VITE_OIDC_AUTHORITY. Field default = http://192.168.12.150:18080; the local
+# rehearsal overrides it (proving the parameterisation).
+#
+# The bic-portal client's redirectUris/webOrigins are env-substituted at import
+# from BIC_PORTAL_REDIRECT_URI / BIC_PORTAL_WEB_ORIGIN — set them to the portal's
+# reachable origin. loginTheme=bic is baked in the realm, so themes/bic is mounted
+# (a missing theme breaks the login page).
+#
+# bic-agent-service is the BE's machine identity (client-credentials) for
+# outbound lab-service calls (lab auth #112 / BE #97). Its secret is
+# env-substituted at import from BIC_AGENT_SERVICE_CLIENT_SECRET — the SAME
+# value the BE container gets as KEYCLOAK_CLIENT_SECRET. On an already-imported
+# realm (e.g. orin) the client must be added once via kcadm (see README).
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    container_name: ${KC_CONTAINER_NAME:-bic-keycloak}
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in the field .env}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://${PG_CONTAINER:-bic-postgres}:5432/${KEYCLOAK_DB:-keycloak_db}
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the field .env}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-http://192.168.12.150:18080}
+      BIC_PORTAL_REDIRECT_URI: ${BIC_PORTAL_REDIRECT_URI:-http://192.168.12.150:15173/*}
+      BIC_PORTAL_WEB_ORIGIN: ${BIC_PORTAL_WEB_ORIGIN:-http://192.168.12.150:15173}
+      BIC_AGENT_SERVICE_CLIENT_SECRET: ${BIC_AGENT_SERVICE_CLIENT_SECRET:?set BIC_AGENT_SERVICE_CLIENT_SECRET in the field .env (init-env generates it)}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${KEYCLOAK_PORT:-18080}:8080"
+    volumes:
+      - ./realm-bic.json:/opt/keycloak/data/import/realm-bic.json:ro
+      - ./themes/bic:/opt/keycloak/themes/bic:ro
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}

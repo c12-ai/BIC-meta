@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="64" viewBox="0 0 260 64" fill="none" role="img" aria-label="Talos 控制台">
+  <!-- Talos robot mark — mirrors BIC-agent-portal src/components/brand/TalosLogo.tsx
+       (colors hardcoded: no portal CSS vars inside Keycloak). Lockup matches the
+       portal sidebar BrandHeader: mark left, "Talos" + "Talos 控制台" right
+       (Wenlong 2026-07-14 — login page must brand like the portal, not "BIC"). -->
+  <g>
+    <!-- Robot head -->
+    <rect x="12" y="8" width="40" height="36" rx="10" fill="#164E7A"/>
+    <!-- Visor -->
+    <rect x="18" y="18" width="28" height="10" rx="5" fill="#EEF5F8"/>
+    <!-- Eyes -->
+    <circle cx="26" cy="23" r="3.5" fill="#164E7A"/>
+    <circle cx="38" cy="23" r="3.5" fill="#164E7A"/>
+    <!-- Eye highlights -->
+    <circle cx="25" cy="22" r="1.2" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="37" cy="22" r="1.2" fill="#FFFFFF" opacity="0.9"/>
+    <!-- Speaker grille -->
+    <rect x="24" y="32" width="16" height="2.5" rx="1.25" fill="#EEF5F8" opacity="0.7"/>
+    <!-- Antenna -->
+    <line x1="32" y1="8" x2="32" y2="3" stroke="#164E7A" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="32" cy="2.5" r="2.5" fill="#18A7B5"/>
+    <!-- Side ears -->
+    <rect x="8" y="16" width="6" height="12" rx="3" fill="#164E7A" opacity="0.6"/>
+    <rect x="50" y="16" width="6" height="12" rx="3" fill="#164E7A" opacity="0.6"/>
+    <!-- Body -->
+    <rect x="20" y="46" width="24" height="14" rx="5" fill="#164E7A" opacity="0.85"/>
+    <!-- Flask -->
+    <path d="M29 50 L29 54 L26 58 Q25.5 59 26.5 59 L37.5 59 Q38.5 59 38 58 L35 54 L35 50"
+          stroke="#EEF5F8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <line x1="28" y1="50" x2="36" y2="50" stroke="#EEF5F8" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M27.5 56.5 L36.5 56.5 L37.5 58.5 Q38 59 37 59 L27 59 Q26 59 26.5 58.5 Z" fill="#18A7B5" opacity="0.6"/>
+  </g>
+  <!-- Wordmark: same two-line lockup as the portal sidebar. -->
+  <text x="72" y="30" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif"
+        font-size="24" font-weight="700" fill="#111A20">Talos</text>
+  <text x="72" y="52" font-family="-apple-system, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif"
+        font-size="15" font-weight="500" fill="#5A6972">Talos 控制台</text>
+</svg>

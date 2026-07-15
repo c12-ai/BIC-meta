@@ -10,12 +10,14 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Project-owned PRD skill. Other synced personal/plugin skills are local noise.
+# Project-owned skills (prd, env-up, bic-quality-guan-ping-ce). Other synced personal/plugin skills are local noise.
 /.claude/skills/*
 !/.claude/skills/prd/
 !/.claude/skills/prd/SKILL.md
 !/.claude/skills/bic-quality-guan-ping-ce/
 !/.claude/skills/bic-quality-guan-ping-ce/**
+!/.claude/skills/env-up/
+!/.claude/skills/env-up/SKILL.md
 /.agents/skills/*
 !/.agents/skills/prd
 !/.agents/skills/bic-quality-guan-ping-ce/
@@ -31,8 +33,12 @@ CLAUDE.local.md
 # Trellis artifacts, scripts, and onboarding files.
 /BIC-agent-portal/
 /BIC-agent-service/
+/BIC-chem-service/
 /BIC-lab-service/
 /BIC-shared-types/
 /mars_interface_mock/
 /tech_design/
 /tlc-op-builder/
+
+/BIC-infra/
+.bic-env

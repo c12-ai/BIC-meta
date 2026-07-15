@@ -1,0 +1,79 @@
+# BIC V2 field — lab-service (Nexus / LIMS). Owns lab state; talks to the robot
+# over the shared RabbitMQ robot.exchange (consumer mutex: V1 lab and V2 lab
+# CANNOT both consume it — V1 lab must be stopped before V2 lab starts).
+#
+# The container self-migrates on boot (`alembic upgrade head && uvicorn`), so the
+# lab V2 database only needs to exist empty — deploy.sh init-data creates it.
+# It is a NEW database (default labrun_v2_db) that coexists with V1's labrun_db so
+# a rollback to V1 keeps its data intact.
+services:
+  lab-service:
+    image: ghcr.io/c12-ai/bic-lab-service:${IMAGE_TAG:?set IMAGE_TAG in the field .env}
+    container_name: ${LAB_CONTAINER_NAME:-bic-lab-service}
+    restart: unless-stopped
+    ports:
+      - "${LAB_PORT:-8192}:8192"
+    environment:
+      APP_NAME: Nexus
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+      PG_HOST: ${PG_CONTAINER:-bic-postgres}
+      PG_PORT: "5432"
+      PG_USER: ${POSTGRES_USER:-postgres}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the field .env}
+      PG_DATABASE: ${LAB_PG_DATABASE:-labrun_v2_db}
+
+      REDIS_HOST: ${REDIS_CONTAINER:-bic-redis}
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in the field .env}
+      REDIS_DB: ${LAB_REDIS_DB:-4}
+
+      # Default = shared MinIO by container name; cloud-Mind sites (a1)
+      # override endpoint+creds to real AWS S3 (same reachability story as the
+      # BE's presigned plate URLs).
+      S3_ENDPOINT_URL: ${LAB_S3_ENDPOINT_URL:-http://${MINIO_CONTAINER:-bic-minio}:9000}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${LAB_S3_BUCKET:-labrun}
+
+      # --- Auth (lab #112: Keycloak Bearer-JWT validation + CORS allowlist) ---
+      # Issuer must equal the browser-facing token `iss` (same string as BE
+      # KEYCLOAK_ISSUER_URL / portal VITE_OIDC_AUTHORITY) AND be reachable from
+      # inside this container (the LAN address routes out through the host).
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://192.168.12.150:18080/realms/bic}
+      # bic-portal = human user tokens; bic-agent-service = BE service tokens.
+      KEYCLOAK_ALLOWED_AUDIENCES: ${KEYCLOAK_ALLOWED_AUDIENCES:-bic-portal,bic-agent-service}
+      # enforce (field default) | off — off is a bench-debug/rollback lever only.
+      LAB_AUTH_MODE: ${LAB_AUTH_MODE:-enforce}
+      # The portal calls lab cross-origin with an absolute URL in field builds.
+      CORS_ALLOW_ORIGINS: ${LAB_CORS_ALLOW_ORIGINS:-http://${FIELD_HOST:-192.168.12.150}:15173}
+
+      MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}
+      MQ_PORT: "5672"
+      MQ_USER: ${MQ_USER:-rabbitmq}
+      MQ_PASSWORD: ${MQ_PASSWORD:?set MQ_PASSWORD in the field .env}
+      MQ_VHOST: ${MQ_VHOST:-/}
+      MQ_EXCHANGE: ${MQ_EXCHANGE:-robot.exchange}
+      # Field/demo default: fast-forward the RE end_evaporation wait to 10s
+      # (the real wait = sum of the RE program's air_pressure durations, which
+      # is realistic but painful for walkthroughs). Raise/remove for production
+      # pacing; the knob is native lab-service config (core/config.py).
+      RE_END_EVAPORATION_DELAY_SECONDS: ${RE_END_EVAPORATION_DELAY_SECONDS:-10}
+      # TLC develop wait before TLC_OBSERVATION may be dispatched (robot requirement
+      # 2026-07-12: 180s physical development). Mock-robot/demo sites may lower it in
+      # .env; restore 180 when the real robot connects. Native lab config (core/config.py).
+      TLC_DEVELOP_WAIT_SECONDS: ${TLC_DEVELOP_WAIT_SECONDS:-180}
+      MQ_RESULT_QUEUE: ${MQ_RESULT_QUEUE:-results}
+      MQ_LOG_QUEUE: ${MQ_LOG_QUEUE:-logs}
+      MQ_HEARTBEAT_QUEUE: ${MQ_HEARTBEAT_QUEUE:-hb}
+      MQ_AGENT_EXCHANGE: ${MQ_AGENT_EXCHANGE:-agent.exchange}
+      MQ_AGENT_STATUS_QUEUE: ${MQ_AGENT_STATUS_QUEUE:-agent.task.status}
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}

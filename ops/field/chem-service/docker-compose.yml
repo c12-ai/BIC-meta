@@ -1,0 +1,39 @@
+# BIC V2 field — chem-service (stateless RDKit molecular-weight calculator).
+# Optional for the main workflow: BE calls POST /molecular-weight for ELN
+# enrichment; if chem is down the ELN download still succeeds (fields omitted).
+# It inherits a PG/Redis/S3 config block from the template but does not own data;
+# it is pointed at the shared infra with the always-present `postgres` DB so it
+# boots without a dedicated database.
+services:
+  chem-service:
+    image: ghcr.io/c12-ai/bic-chem-service:${IMAGE_TAG:?set IMAGE_TAG in the field .env}
+    container_name: ${CHEM_CONTAINER_NAME:-bic-chem-service}
+    restart: unless-stopped
+    # Host 8010 is chem's canonical port (BIC port scheme 2026-07-10); the
+    # container still listens on 8000 internally.
+    ports:
+      - "${CHEM_PORT:-8010}:8000"
+    environment:
+      PG_HOST: ${PG_CONTAINER:-bic-postgres}
+      PG_PORT: "5432"
+      PG_USER: ${POSTGRES_USER:-postgres}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the field .env}
+      PG_DATABASE: ${CHEM_PG_DATABASE:-postgres}
+      REDIS_HOST: ${REDIS_CONTAINER:-bic-redis}
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in the field .env}
+      REDIS_DB: ${CHEM_REDIS_DB:-0}
+      S3_ENDPOINT_URL: ${CHEM_S3_ENDPOINT_URL:-http://${MINIO_CONTAINER:-bic-minio}:9000}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${CHEM_S3_BUCKET:-labassistant}
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}

@@ -98,21 +98,22 @@ Core scenarios:
 10. **ELN report export**
    - After every result of an experiment is confirmed, the chemist can export an ELN
      Word report of that experiment from the portal's result-confirmation surface.
-   - The export is gated on all-results-confirmed: the download control appears only
-     on the final experiment step's result surface — hidden on earlier steps' result
-     views (a visible-but-disabled button on every step is rejected UX, ruling
-     2026-07-09); within that final surface it stays un-clickable with a reason hint
-     until confirmation completes. The Agent Service re-checks the gate on every
+   - The export is gated on all-results-confirmed: the download control belongs only
+     to the final experiment step's result surface and must stay hidden until that
+     final result is confirmed. The Agent Service re-checks the gate on every
      request and refuses (conflict) when results are still open, regardless of what
      the portal shows.
    - The report is available in Chinese and English; the chemist picks the language at
      download time.
    - Any session member who can view the session can download the report (read-level
      action, no execute authority required).
-   - Report enrichment data the system cannot obtain is omitted from the report, never
-     fabricated. Reactant molecular weights come from BIC-chem-service (a stateless
+   - Report data the system cannot obtain is shown as an explicit placeholder
+     (e.g. "—" / "未提供" / "not reported"), never fabricated and never silently
+     dropped — a checklist field must either carry a real value or a visible
+     placeholder (Wenlong ruling 2026-07-11; refines the earlier "omitted" wording).
+     Reactant molecular weights come from BIC-chem-service (a stateless
      RDKit chemistry calculator); any enrichment failure — service not configured,
-     unreachable, or unable to parse a molecule — leaves the affected fields absent
+     unreachable, or unable to parse a molecule — placeholders the affected fields
      and never blocks the report download.
    - Chem-service enrichment is optional by design, so its failures degrade silently
      to absent fields. This is a deliberate exception to requirement 8's fail-loud
@@ -121,12 +122,33 @@ Core scenarios:
    - The report content is a deterministic aggregation of the experiment's confirmed
      data; no AI engine is involved in producing it.
 
-11. **Agent message feedback**
-   - The portal must allow the chemist to provide positive or negative feedback on persisted assistant replies within the active session.
+11. **User-facing language consistency**
+   - The portal must support Chinese and English for user-facing workflow surfaces,
+     including session chrome, forms, material preparation, execution progress,
+     result evidence, and lab spatial / maintenance views.
+   - Agent Service must carry the current UI language through user turns,
+     confirmation events, workflow narration, and specialist prompts so LLM-produced
+     chemist-facing prose follows the selected language.
+   - Deterministic backend text should preserve stable machine fields and expose
+     display metadata or localizable fields for the portal instead of requiring
+     downstream consumers to parse English labels.
+   - Lab Service must keep stable inventory/material keys as the business authority
+     while exposing localized display names for physical materials, rack areas, and
+     preparation surfaces.
+   - Chemistry identifiers, reagent names, abbreviations, units, SMILES, IDs,
+     structured payload keys, and tool/protocol names remain unchanged unless the
+     underlying business data explicitly provides a localized name.
+
+12. **Agent message feedback**
+   - The portal must allow the chemist to provide positive or negative feedback on
+     persisted assistant replies within the active session.
    - Positive feedback should be submittable without additional text.
    - Negative feedback must require an improvement suggestion from the chemist.
-   - Feedback must remain traceable to the current session, user, target assistant reply, turn, and persisted event.
-   - The system must preserve enough workflow context from the target assistant reply time to support later quality analysis by experiment stage, specialist, task, and issue pattern.
+   - Feedback must remain traceable to the current session, user, target assistant
+     reply, turn, and persisted event.
+   - The system must preserve enough workflow context from the target assistant reply
+     time to support later quality analysis by experiment stage, specialist, task, and
+     issue pattern.
 
 ## Core Concepts
 
@@ -271,17 +293,42 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
    - The product surface must explain that the robot fetches the box from the shelf itself, so
      the chemist never hand-stocks the robot bench.
 
-8. **Assignment semantics: maintain-then-select** (decided 2026-07-05, applies to CC and TLC uniformly)
+8. **Assignment semantics: maintain-then-select** (decided 2026-07-05, applies to CC and TLC uniformly;
+   supplemented 2026-07-11)
    - Assigning a manual/specific item to a task means SELECTING an already-maintained physical
      item; selection must never create inventory.
-   - Empty slots or cells are filled and cleared only in maintenance mode.
+   - Empty slots or cells are filled and cleared only in maintenance mode — refined by the
+     experiment-context staged-placement supplement below.
+   - **Supplement (experiment-context staged placement, Wenlong ruling 2026-07-11, BIC-meta#206;
+     closes #192)**: the TLC/CC material-preparation surface MAY allow placing tubes into empty
+     cells within the selection context, provided ALL invariants hold:
+     (a) placement is type-first — a 纯品/粗品 type must be armed before any cell can be placed;
+     (b) selecting/deselecting an EXISTING physical tube never creates or deletes inventory;
+     (c) every inventory write is deferred to and triggered only by Confirm — zero lab writes
+     before Confirm (client-side draft staging);
+     (d) Cancel restores both inventory and selection to the exact pre-modal state.
+     "Empty filled only in maintenance mode" is thereby refined to "empty filled only via
+     explicit, type-first, Confirm-gated staged placement".
    - This supersedes the external interaction document's description of assignment as clicking an
      empty slot; the Feishu document must be corrected at source.
 
-9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05)
-   - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row,
-     contiguous columns, starting at column 1 (the shape rule applies within the box the robot
-     carries).
+9. **TLC sample-tube dispatch quantity contract** (confirmed 2026-07-05; pairing added 2026-07-11)
+   - A TLC robot dispatch requires 2–4 sample tubes in ONE shelf sample-tube box, one row, any
+     distinct columns within the box (columns 1–5) — column gaps and non-column-1 starts are
+     allowed (the shape rule applies within the box the robot carries). The earlier "contiguous
+     columns, starting at column 1" constraint is RETIRED (BIC-meta#244, 2026-07-11): the robot
+     team's own v6 FINAL reference run spots tubes at A1+A4 (non-contiguous) and the 6-channel
+     whole-row aspirate is anchored at column 1, so no column-1 anchor tube is physically
+     required; lab `_validate_tlc_objects` + portal `tubeSelectionProblem` were relaxed to match
+     on 2026-07-09 (Drake ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
+     remain invalid.
+   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (Wenlong
+     ruling 2026-07-11, BIC-meta#239; revised same day to B2): the pairing is deliberate chemistry
+     design. The earlier pure-left / crude-right ordering constraint is RETIRED — it originated in
+     portal PR#21's implementation citing a root-PRD provision that never existed, and carries no
+     confirmed downstream dependency (verified against dispatch payload before removal). A
+     single-type selection is invalid, and the product must explain the unmet pairing requirement
+     explicitly rather than silently disabling confirmation.
    - The external interaction document's `1 or 2` quantity (and one-location demo note) is stale
      and must be corrected at source; no 1-tube dispatch support is planned.
 
@@ -324,10 +371,14 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
       requirement 8: ChemEngine has no FP endpoint; the robot reports no structured fraction
       result).
     - **Dispatch contract.** The dispatch payload is an ordered flask list plus a per-tube
-      disposition array covering the WHOLE collection rack (one element per rack tube, in rack
-      order): 0 = discard, N ≥ 1 = collect into the N-th flask. Flask volume defaults to 500 ml.
-      Multi-flask is supported by the model; operationally a single flask is configured until
-      the robot team confirms multi-flask capability (BIC-lab-service issue #81).
+      disposition array (`collect_config`) whose **index i addresses physical tube i+1**
+      (Mars-confirmed 2026-07-10, BIC-meta#177): the array is a prefix starting at tube 1 and
+      must cover tubes 1..max(involved tube); tubes not assigned to any container carry 0
+      (discard); N ≥ 1 = collect into the N-th flask. Variable length is legal but the prefix
+      always starts at tube 1 — an arbitrary starting offset cannot be expressed. Flask volume
+      defaults to 500 ml. Multi-flask is supported by the model; operationally a single flask
+      is configured until the robot team confirms multi-flask capability (BIC-lab-service
+      issue #81).
     - **Result rules.** The FP result is a container → tube mapping table with peak
       classification (主峰 / 边缘峰 / 杂质 / 混合). Volume math: 1 tube = 15 ml (5 tubes
       collected = 75 ml, 3 discarded = 45 ml); the result shows collected vs discarded totals
@@ -347,14 +398,19 @@ Right-panel consistency across jobs (2026-07-05):
   must follow the same pattern. A job must not show one surface for selection and a different
   surface set in maintenance mode.
 
-For the FP Parameter Design panel (2026-07-07):
+For the FP Parameter Design panel (2026-07-07; revised 2026-07-10):
 
 - Upper panel: read-only display of the upstream CC task analysis (peak/fraction table and rack
   map with per-well status).
-- Lower panel: container configuration — the user selects the active container, then clicks
-  well circles in the tube-rack grid (96-well or custom layout) to add/remove that tube from
-  the active container; idle wells are not clickable. The currently selected tube list and
-  total count update live.
+- Container configuration uses a side-by-side layout (ruling 2026-07-10): container selection
+  (flasks/waste) on the left, the full serpentine tube-rack grid on the right — the tall rack
+  must not stack above/below the container controls and waste horizontal space.
+- The user selects the active container, then clicks well circles in the tube-rack grid to
+  add/remove that tube from the active container. **Every physical well is selectable**
+  (ruling 2026-07-10, supersedes the earlier "idle wells are not clickable"): wells Mind
+  classified are pre-colored by status, but the chemist may assign any well — including ones
+  Mind marked idle — to any container. Mind's classification is advisory pre-fill, not an
+  assignment gate. The currently selected tube list and total count update live.
 - After execution, a dedicated FP result card appears under the task result, like other steps.
 
 For the TLC Lab Logistic panel:
@@ -383,8 +439,12 @@ For the TLC Lab Logistic panel:
 - TLC inventory state has no records with both `location_id` and `parent_object_id` missing.
 - The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
-- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row,
-  contiguous columns, starting at column 1.
+- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row, any
+  distinct columns within the box (columns 1–5); column gaps and non-column-1 starts are allowed,
+  matching the robot's v6 reference run (A1+A4) — no contiguity or start-at-column-1 constraint.
+- A TLC selection containing only one sample type (only pure or only crude) cannot be confirmed,
+  and the surface explains which type is missing instead of silently disabling the confirm
+  control; no ordering constraint applies between pure and crude columns.
 - A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
@@ -409,32 +469,45 @@ For the TLC Lab Logistic panel:
   can reach in the target deployment.
 - RE realtime result analysis comes from the Robot Team's Mars system, not ChemEngine.
 - A robot-typed FP step runs as a real stage: the FP Parameter Design panel shows the upstream
-  CC analysis (upper) and the container/rack-grid assignment (lower) pre-filled by well status;
-  the user confirms before dispatch; no ChemEngine call occurs anywhere in the FP loop.
-- The FP dispatch payload's per-tube disposition array covers the whole collection rack (one
-  element per rack tube; 0 = discard, N = flask ordinal) and matches the user-confirmed
-  container assignment.
+  CC analysis (upper) and the side-by-side container/rack-grid assignment (containers left,
+  full serpentine rack right) pre-filled by well status; every physical well is selectable for
+  assignment regardless of Mind's classification; the user confirms before dispatch; no
+  ChemEngine call occurs anywhere in the FP loop.
+- The FP dispatch payload's disposition array is prefix-indexed from tube 1 (index i =
+  physical tube i+1, BIC-meta#177), covers tubes 1..max(involved tube) with unassigned
+  positions 0, and matches the user-confirmed container assignment — including wells the
+  chemist assigned that Mind never referenced, with no positional misalignment when the
+  referenced set is non-contiguous.
 - The FP result card shows the container → tube mapping with peak classification and 15 ml/tube
   volume math (collected vs discarded totals) plus the solvent system; confirming it auto-fills
   the RE recommendation basis, and missing upstream data is shown as absent, never fabricated.
 - The RE parameter form no longer collects flask/collect configuration (moved to FP).
 - After all results of an experiment are confirmed, the chemist can download the ELN Word
-  report (zh or en) from the result-confirmation surface; the download control is visible
-  only on the final experiment step's result surface (absent on earlier steps' result
-  views), is not clickable there before all results confirm, and the Agent Service
-  refuses (conflict) regardless of portal state.
-- An ELN report never contains fabricated enrichment values: fields the system cannot
-  resolve (e.g. molecular weights without the chemistry calculator service) are absent.
+  report (zh or en) from the result-confirmation surface; the download entry is visible only
+  on the final experiment step after that result is confirmed, and the Agent Service refuses
+  (conflict) before then regardless of portal state.
+- An ELN report never contains fabricated values: fields the system cannot resolve
+  (e.g. molecular weights without the chemistry calculator service) carry an explicit
+  placeholder — every checklist field is either a real value or a visible placeholder,
+  never silently dropped (2026-07-11 ruling).
 - A BIC-chem-service failure (service not configured, unreachable, or unable to parse a
   molecule) does not block the ELN report download; only the affected enrichment fields
-  are absent, and no error surfaces to the chemist for the enrichment miss.
+  are placeholdered, and no error surfaces to the chemist for the enrichment miss.
 - Manual steps are represented as human-owned work and are not silently treated as robot-completed.
 - Result evidence remains visible in the portal after it is produced.
-- Users can provide positive feedback on a persisted assistant reply without entering text.
-- Users can provide negative feedback on a persisted assistant reply after entering an improvement suggestion.
-- Feedback can be traced back to the original assistant reply, session event, and workflow context.
-- Updating feedback on the same assistant reply updates the existing feedback record rather than creating duplicate ratings.
-- Stored feedback context reflects the workflow state at the time of the target assistant reply, not only the later state when the user submits feedback.
+- Chinese Portal mode covers deterministic UI text, Lab Service-provided display
+  names, and Agent Service LLM narration / final replies while preserving chemistry
+  identifiers and machine-readable payload fields.
+- Users can provide positive feedback on a persisted assistant reply without entering
+  text.
+- Users can provide negative feedback on a persisted assistant reply after entering an
+  improvement suggestion.
+- Feedback can be traced back to the original assistant reply, session event, and
+  workflow context.
+- Updating feedback on the same assistant reply updates the existing feedback record
+  rather than creating duplicate ratings.
+- Stored feedback context reflects the workflow state at the time of the target
+  assistant reply, not only the later state when the user submits feedback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -461,6 +534,12 @@ For the TLC Lab Logistic panel:
   (rule 11). The collect_config indexing definition follows the shared-types contract example
   (Drake ruling, 2026-07-06).
 
+- FP collect_config semantics RESOLVED (Mars via Wenlong, 2026-07-10, BIC-meta#177 closed):
+  index i = physical tube i+1, prefix from tube 1, gaps zero-filled. The shipped
+  build-parallel-to-referenced-list implementation was a latent misalignment bug for
+  non-contiguous reference sets; fix lands with the every-well-assignable work (BIC-meta#176
+  items 2/3).
+
 - BIC-chem-service (stateless RDKit molecular-weight calculator consumed by the ELN
   report) is not stood up yet. Until it exists and is configured, ELN reports render
   with FW/moles omitted (the designed degrade). Tracked in BIC-agent-service issue #54.
@@ -469,8 +548,62 @@ For the TLC Lab Logistic panel:
 
 - Agent Service Project PRD: `BIC-agent-service/docs/project-prd.md`
 - Agent Portal Lab Logistics Project PRD: `BIC-agent-portal/docs/project-prd.md`
+- Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+  investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
+  with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
+  starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
+  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, Drake 2026-07-09) spots tubes at
+  A1+A4 (non-contiguous), reproduced op-for-op by the lab planner golden test; the 6-channel
+  whole-row aspirate is anchored at column 1 (`planner.py`), so no column-1 anchor tube is
+  physically required. lab `_validate_tlc_objects` and portal `tubeSelectionProblem` were already
+  relaxed to match on 2026-07-09 (Drake ruling, robot-confirmed, BIC-lab-service PR#95) — the root
+  PRD was the stale layer. No code change (lab/portal already correct); only the doc is reconciled.
+  Matching acceptance criterion updated. Resolves the #244 three-way conflict on the shape
+  dimension. Residual flagged for @root: non-column-1 start has mechanism + landed-contract support
+  but no standalone robot reference file (v6 starts at A1).
+
+- 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (Wenlong ruling,
+  BIC-meta#239): a valid TLC selection must contain both pure and crude tubes — deliberate
+  chemistry design. The pure-left / crude-right ordering constraint is RETIRED (same-day B2
+  revision): provenance audit showed it came from portal PR#21 citing a root-PRD provision that
+  never existed; removal is gated on verifying no downstream positional dependency. Single-type
+  selections cannot be confirmed and the surface must explain the unmet requirement instead of
+  silently disabling the confirm control. Matching acceptance criterion added; portal fix lands
+  with BIC-meta#239. The shape-rule drift (root PRD contiguous-from-col-1 vs labrun v5 relaxed)
+  is tracked separately in BIC-meta#244.
+
+- 2026-07-10: Updated ELN report export UX gate: the portal hides the final-step
+  download entry until the final result is confirmed instead of showing an
+  unclickable hint or disabled button before the report is ready.
+
+- 2026-07-11 (late): Requirement 10 degrade rendering refined (Wenlong ruling): unobtainable
+  report fields switch from silent omission to explicit placeholders ("—"/"未提供"/
+  "not reported") — real value or visible placeholder, never fabricated, never silently
+  dropped. Matching acceptance criteria updated. Implementation with BIC-agent-service#63
+  checklist reconciliation.
+
+- 2026-07-11: Rule 8 supplement (Wenlong ruling, BIC-meta#206): experiment-context staged
+  placement — TLC/CC material-prep surface may place tubes into empty cells in the selection
+  context under four invariants (type-first, existing-tube select/deselect never touches
+  inventory, Confirm-gated writes with client-side draft staging = Option A, Cancel restores
+  pre-modal state). Closes the #192 tension. Implementation lands as one comprehensive update
+  on portal PR#46 (restoring #188 CC semantics in the same pass); main's destructive
+  deselect gets an interim hotfix.
+
+- 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
+  index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
+  contract and acceptance criteria reworded; the referenced-list-parallel construction is
+  recorded as a latent misalignment bug fixed under BIC-meta#176.
+
+- 2026-07-10: FP container-assignment UI revision (Wenlong ruling): side-by-side layout
+  (containers left, full serpentine rack right) and every physical well selectable —
+  supersedes the 2026-07-07 "idle wells are not clickable" clause; Mind classification is
+  advisory pre-fill, not an assignment gate. Matching acceptance criterion updated.
+  Portal change tracked in BIC-meta#176.
 
 - 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
   is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
@@ -485,6 +618,10 @@ For the TLC Lab Logistic panel:
   disabled everywhere; final-surface disable-until-confirmed and the Agent Service
   conflict gate are unchanged. Matching acceptance criterion updated. Portal change
   tracked in BIC-meta#77.
+
+- 2026-07-08: Added requirement 11 for user-facing language consistency across
+  Portal UI, Agent Service LLM/deterministic event text, and Lab Service localized
+  display names, with acceptance coverage for Chinese-mode workflow verification.
 
 - 2026-07-08: Refined requirement 10 per BIC-agent-service #55: named BIC-chem-service
   as the molecular-weight enrichment source, covered all its failure modes

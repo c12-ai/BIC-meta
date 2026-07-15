@@ -1,10 +1,14 @@
 # 如何起最新代码（2026-07-10 合并列车后）
 
+> **这份文档现在是 `make up` / `make doctor` 的 troubleshooting 附录，不是日常入口。**
+> 日常起环境：仓库根 `make up`（幂等自愈）+ `make doctor`（只读体检，红牌自带 fix 命令）。
+> 冷启知识已编码进 `scripts/bic-env/*`；只有 doctor 红牌不够用时才往下读本文对应小节。
+
 **结论先行。** 2026-07-10 合并列车把 TLC purity 双 PR、Keycloak 登录、Phoenix 点赞点踩、以及一批我方 bench 修复全部合入各仓 main。起最新代码有两个 profile：**最小本地档（无 Mind，同事默认）** 只需 docker 基建 + 本地 MinIO + `MIND_MOCK_MODE=true`；**全真档** 额外需要 Mind 可达的共享 MinIO（台架用 orin 上的 Mind + 192.168.12.150 MinIO）。冷启顺序 **lab→BE→portal→mock**，BE 启动命令**必须 unset 代理变量**。**Keycloak 是本次新增的硬依赖**：BE 只认 Bearer JWT（X-User-Id 回退已删），portal 走 OIDC 登录——本机 8080 被 DMPK 占用，故 keycloak 起在 **18080**，BE/portal 的 issuer 要对齐。所有 `curl` 打本地服务都要 `--noproxy '*'`（本机代理 127.0.0.1:7890 会拦截 localhost）。
 
 各仓 main（本文写作时）：shared-types `b85ee6c` / mars_interface_mock `389a784` / BIC-agent-service `19deb48` / BIC-agent-portal `c224b98` / BIC-lab-service `ef277d8` / BIC-infra `48c2cba`。
 
-> **端口说明**：本文端口按 2026-07-10 台架**当前实际**写（如 keycloak 起在 `18080`，因本机 8080 被 DMPK 占用）。**端口治理（固定端口方案 + examples 统一更新）是独立续班车任务**——届时会把 keycloak 等端口统一收敛，本文对应处会被续班车修订。在那之前，以本文实际端口为准。
+> **端口说明**：端口治理**已定档（2026-07-10）**——固定端口方案 + 各仓 example 已落地（infra `BIC-infra#4`、BE `#76`、portal `#24` 均合并）。权威表见 `ops/port-allocation-2026-07-10.md`（镜像于 `BIC-infra` README）。本文端口即定稿口径：keycloak `18080`（8080+10000，避 DMPK/通用撞车）、chem `8010`、portal `5173`、其余在位不迁。定稿=台架现状，零迁移。
 
 ---
 
@@ -30,11 +34,11 @@
 
 ## 2. Docker 基建
 
-用专用 `talos-postgres` 容器在 **:5433**（本机原生 Homebrew Postgres 占了 :5432，会和 docker `bic-postgres` 脑裂）。其余基建走 docker `bic-*` 默认端口。
+Postgres **单实例 `bic-postgres:5432`**（#153 收敛，2026-07-10：`talos-postgres:5433` 已退役、数据行数对账迁入 5432；全部库归 infra `postgres-databases.txt` 管，schema 迁移仍归各服务 alembic）。其余基建走 docker `bic-*` 默认端口。
 
 | 组件 | 端口 | 凭据 |
 |---|---|---|
-| Postgres（专用） | `talos-postgres` :5433→5432 | postgres / bic_local_dev；库 `labrun_db`(lab)、`talos_agent_db`(agent) |
+| Postgres（单实例） | `bic-postgres` :5432 | postgres / bic_local_dev；库 `labrun_db`(lab)、`talos_agent_db`(agent) |
 | Redis | :6379 | bic_local_dev |
 | RabbitMQ | :5672 / :15672 | rabbitmq / bic_local_dev，vhost `/` |
 | MinIO | :9000 / :9001 | minioadmin / bic_local_dev |
@@ -44,8 +48,8 @@
 
 初次建库：
 ```bash
-PGPASSWORD=bic_local_dev psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE labrun_db;"
-PGPASSWORD=bic_local_dev psql -h localhost -p 5433 -U postgres -c "CREATE DATABASE talos_agent_db;"
+PGPASSWORD=bic_local_dev psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE labrun_db;"
+PGPASSWORD=bic_local_dev psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE talos_agent_db;"
 ```
 
 ---
@@ -59,6 +63,7 @@ cd BIC-agent-service  && git checkout main && git pull && uv sync
 cd BIC-agent-portal   && git checkout main && git pull && pnpm install
 cd mars_interface_mock&& git checkout main && git pull
 ```
+> **依赖同步不可跳（刚踩的坑）**：切 main 后 portal 的 `pnpm install`（BE/lab 的 `uv sync`）是硬步骤——Keycloak 批给 portal 新增了 `react-oidc-context`，不装则页面**白屏**（import error），且 dev server 仍 `:5173` 200、health 假绿。
 
 各仓 `alembic upgrade head`（lab、BE 都要，含本批新迁移）：
 ```bash
@@ -87,7 +92,8 @@ cd mars_interface_mock && uv run mars-interface-mock
 ```bash
 curl -s --noproxy '*' http://localhost:8192/health        # lab {"status":"healthy","app":"Nexus"}
 curl -s --noproxy '*' http://localhost:8800/health        # BE  {"status":"healthy"}
-curl -s --noproxy '*' http://localhost:5173/ -o /dev/null -w '%{http_code}\n'   # portal 200
+curl -s --noproxy '*' http://localhost:5173/ -o /dev/null -w '%{http_code}\n'   # portal 200（不够，见下）
+curl -s --noproxy '*' http://localhost:5173/src/main.tsx -o /dev/null -w '%{http_code} %{content_type}\n'  # portal 真加载：应 200 text/javascript（拿到 JS=页面可编译；只看 / 的 200 会假绿，dev server 起≠页面能编译）
 curl -s --noproxy '*' http://localhost:18080/realms/bic/.well-known/openid-configuration | head -c 80  # keycloak issuer
 ```
 
@@ -98,7 +104,7 @@ curl -s --noproxy '*' http://localhost:18080/realms/bic/.well-known/openid-confi
 **BIC-agent-service/.env**（占位不写真 key）：
 ```ini
 PG_HOST=localhost
-PG_PORT=5433
+PG_PORT=5432
 PG_USER=postgres
 PG_PASSWORD=bic_local_dev
 PG_DATABASE=talos_agent_db
@@ -124,7 +130,7 @@ VITE_OIDC_AUTHORITY=http://localhost:18080/realms/bic
 VITE_OIDC_CLIENT_ID=bic-portal
 ```
 
-**BIC-lab-service/.env**：`PG_PORT=5433`，`PG_DATABASE=labrun_db`。
+**BIC-lab-service/.env**：`PG_PORT=5432`，`PG_DATABASE=labrun_db`。
 
 ### Profile A — 最小本地档（无 Mind，同事默认）
 - `MIND_MOCK_MODE=true`（BE main 与 .env.example 默认即 true）：所有 MindClient 调用返回 med005 fixture、打 WARN、不发任何 Mind/ChemEngine 网络请求。**无需 Mind/ChemEngine 可达**。
@@ -185,7 +191,7 @@ SID=$(curl -s --noproxy '*' -X POST -H "Authorization: Bearer $TOKEN" -H 'Conten
 ## 8. 常见坑
 
 - **代理变量**：本机 profile 每个新 shell 都会 set `http_proxy=127.0.0.1:7890`。BE 启动**必须** `unset all_proxy http_proxy https_proxy ALL_PROXY HTTP_PROXY HTTPS_PROXY` 前缀（否则打 localhost/lab/MQ 被拦）；所有 `curl` 打本地服务加 `--noproxy '*'`（`no_proxy` 里的 localhost/127.0.0.1 有时不生效——曾出现整片 000）。**反过来**：`uv lock`/git 拉 github 又**需要**代理（本机直连 github 超时、经 7890 通）——分场景处理。
-- **Postgres 脑裂**：用 `talos-postgres:5433`，别用 5432（被原生 pg 影子）。
+- **Postgres 单实例（#153）**：一律 `bic-postgres:5432`；`5433` 退役，任何 5433 监听（残留容器/ssh 隧道）都是错误状态，`make doctor` 会红卡。若本机原生 pg 抢 5432，doctor 的端口表检查（owner 必须是 docker）会暴露。
 - **Keycloak 端口/issuer**：8080 可能被占；keycloak 端口、`KC_HOSTNAME`、BE `KEYCLOAK_ISSUER_URL`、portal `VITE_OIDC_AUTHORITY` 四处必须同一字符串。BE 启动时 JWKS warm-up 若 keycloak 未就绪会 WARN（不抛，惰性重取）——先起 keycloak 再起 BE。
 - **S3=150 不可换本机**（全真档）：真 Mind 在 orin，拉不到你本机 localhost 的照片。
 - **realm 导入 first-boot-only**：改 realm-bic.json 后不会更新已导入的 realm；dev reset = 删 keycloak 库/容器重来。

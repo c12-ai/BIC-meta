@@ -1,0 +1,150 @@
+/*
+ * BIC login theme — visual overrides on top of keycloak.v2 (PatternFly v5).
+ *
+ * Aligns the Keycloak login page with the BIC Agent Portal design language
+ * (BIC-agent-portal/src/index.css): instrument blue #164E7A, signal cyan
+ * #18A7B5, the #EEF5F8 "instrument console" page tint with a faint blueprint
+ * grid, a white raised card, and the portal font stack. Styling only — every
+ * string is Keycloak's zh-CN message bundle.
+ */
+
+:root {
+  /* BIC brand tokens (mirror of BIC-agent-portal src/index.css @theme). */
+  --bic-primary: rgb(22 78 122);          /* #164E7A instrument blue */
+  --bic-primary-hover: rgb(17 62 99);     /* darker press state */
+  --bic-accent: rgb(24 167 181);          /* #18A7B5 signal cyan */
+  --bic-page: rgb(238 245 248);           /* #EEF5F8 surface-page */
+  --bic-card: rgb(252 254 255);           /* #FCFEFF card */
+  --bic-heading: rgb(17 26 32);           /* #111A20 text-heading */
+  --bic-text: rgb(23 34 41);              /* #172229 foreground */
+  --bic-text-secondary: rgb(90 105 114);  /* #5A6972 text-secondary */
+  --bic-border: rgb(201 216 224);         /* #C9D8E0 border */
+  --bic-input-border: rgb(183 202 212);   /* #B7CAD4 input */
+  --bic-ring: rgb(24 167 181 / 0.26);     /* focus ring */
+  --bic-error: rgb(193 70 61);            /* #C1463D error */
+  --bic-font:
+    "Aptos", "Segoe UI Variable", "IBM Plex Sans", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+
+  /* Recolor PatternFly primary (buttons + links) to BIC blue. */
+  --pf-v5-global--primary-color--100: var(--bic-primary);
+  --pf-v5-global--primary-color--200: var(--bic-primary-hover);
+  --pf-v5-global--link--Color: var(--bic-primary);
+  --pf-v5-global--link--Color--hover: var(--bic-primary-hover);
+
+  /* keycloak.v2 hook: the card's 4px top accent rule. */
+  --keycloak-card-top-color: var(--bic-primary);
+}
+
+/* Page background: portal instrument-console tint + faint blueprint grid,
+   replacing keycloak.v2's dark full-bleed logo image. */
+.login-pf body,
+body#keycloak-bg {
+  background: var(--bic-page);
+  background-image:
+    linear-gradient(rgb(22 78 122 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(22 78 122 / 0.05) 1px, transparent 1px),
+    linear-gradient(rgb(24 167 181 / 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(24 167 181 / 0.018) 1px, transparent 1px);
+  background-size: 28px 28px, 28px 28px, 112px 112px, 112px 112px;
+  background-attachment: fixed;
+  color: var(--bic-text);
+  font-family: var(--bic-font);
+}
+
+/* Apply the BIC font stack broadly. */
+#keycloak-bg,
+#keycloak-bg input,
+#keycloak-bg button,
+#keycloak-bg select,
+.pf-v5-c-login,
+#kc-page-title {
+  font-family: var(--bic-font);
+}
+
+/* Brand header → Talos lockup, matching the portal sidebar BrandHeader
+   ("Talos" + "Talos 控制台", Wenlong 2026-07-14 — the login brands like the
+   portal, not "BIC"). The realm displayName is intentionally empty
+   (see keycloak/realm-bic.json), so the wrapper carries only the logo. */
+#kc-header-wrapper {
+  height: 52px;
+  margin: 0 auto 6px;
+  padding: 0;
+  background-image: url("../img/talos-logo.svg");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  /* Collapse any residual realm-name text node; the SVG carries the wordmark. */
+  font-size: 0 !important;
+  letter-spacing: normal;
+  color: transparent !important;
+}
+
+/* Login card → white raised surface, portal radius + elevation. */
+.pf-v5-c-login__main {
+  background: var(--bic-card);
+  border: 1px solid var(--bic-border);
+  border-radius: 12px;
+  box-shadow:
+    0 18px 42px -30px rgb(22 78 122 / 0.42),
+    0 8px 18px -16px rgb(19 51 68 / 0.24),
+    inset 0 1px 0 rgb(255 255 255 / 0.86);
+  overflow: hidden;
+}
+
+/* Keep keycloak.v2's 4px top accent rule, in BIC blue. */
+.pf-v5-c-login__main-header {
+  border-top: 4px solid var(--bic-primary);
+}
+
+/* Page title ("登录你的账户"). */
+#kc-page-title {
+  color: var(--bic-heading);
+  font-weight: 600;
+}
+
+/* Field labels ("用户名"/"密码"). */
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text {
+  color: var(--bic-text-secondary);
+  font-weight: 500;
+}
+
+/* Inputs. */
+.pf-v5-c-form-control,
+input.pf-v5-c-form-control {
+  border-radius: 6px;
+  --pf-v5-c-form-control--BorderColor: var(--bic-input-border);
+  --pf-v5-c-form-control--focus--BorderColor: var(--bic-accent);
+  background-color: var(--bic-card);
+}
+.pf-v5-c-form-control:focus-within,
+.pf-v5-c-form-control:focus {
+  border-color: var(--bic-accent);
+  box-shadow: 0 0 0 3px var(--bic-ring);
+}
+
+/* Primary submit button ("登录"). */
+.pf-v5-c-button.pf-m-primary {
+  background-color: var(--bic-primary);
+  border-radius: 6px;
+  font-weight: 600;
+}
+.pf-v5-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:focus {
+  background-color: var(--bic-primary-hover);
+}
+
+/* Links (register / forgot password) + link buttons. */
+a,
+.pf-v5-c-button.pf-m-link {
+  color: var(--bic-primary);
+}
+
+/* Feedback/alert text keeps the portal warning red. */
+.kc-feedback-text,
+.pf-m-error {
+  color: var(--bic-error);
+}

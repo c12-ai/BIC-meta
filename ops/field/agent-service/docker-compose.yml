@@ -1,0 +1,103 @@
+# BIC V2 field — agent-service (Agent backend / copilot orchestration).
+#
+# Migrates then serves: BE's image CMD is uvicorn-only (no auto-migrate), so the
+# command is overridden to `alembic upgrade head && uvicorn` — a fresh
+# talos_agent_db gets its schema on first boot.
+#
+# LLM: field uses the host-local model at :8000 (same as V1), reached via
+# host.docker.internal (extra_hosts host-gateway). Mind/ChemEngine: real field
+# endpoint (MIND_MOCK_MODE=false, ruling 2026-07-11) — MCP_HOST/PORT are field
+# placeholders in .env. Keycloak issuer must equal the browser-facing iss AND be
+# reachable from this container (the 192.168.12.150:18080 LAN address routes out
+# through the host).
+services:
+  agent-service:
+    image: ghcr.io/c12-ai/bic-agent-service:${IMAGE_TAG:?set IMAGE_TAG in the field .env}
+    container_name: ${BE_CONTAINER_NAME:-bic-agent-service}
+    restart: unless-stopped
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    # Host 8800 is BE's canonical port; the container listens on 8000 internally.
+    ports:
+      - "${BE_PORT:-8800}:8000"
+    environment:
+      # --- LLM (host-local model, same posture as V1) ---
+      BASE_URL: ${BE_LLM_BASE_URL:-http://host.docker.internal:8000/v1}
+      API_KEY: ${BE_LLM_API_KEY:?set BE_LLM_API_KEY in the field .env}
+      DEFAULT_MODEL: ${BE_LLM_DEFAULT_MODEL:?set BE_LLM_DEFAULT_MODEL to what the :8000 server serves}
+
+      # --- Postgres (V2 db, coexists with V1) ---
+      PG_HOST: ${PG_CONTAINER:-bic-postgres}
+      PG_PORT: "5432"
+      PG_USER: ${POSTGRES_USER:-postgres}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the field .env}
+      PG_DATABASE: ${BE_PG_DATABASE:-talos_agent_db}
+
+      # --- Redis (index 3; V1 used 0/1/2) ---
+      REDIS_HOST: ${REDIS_CONTAINER:-bic-redis}
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in the field .env}
+      REDIS_DB: ${BE_REDIS_DB:-3}
+
+      # --- S3 / MinIO (TLC plate images) ---
+      # LAN address ON PURPOSE (not the container name): BE presigns plate URLs
+      # for Mind/browsers, and the signature binds the Host header — a URL signed
+      # against bic-minio:9000 is unreachable AND 403s if the host is rewritten
+      # (hit live 2026-07-11: field TLC recognition failed on exactly this).
+      # Cloud-Mind sites (a1) override endpoint+creds to real AWS S3 so presigned
+      # URLs are public-internet reachable (S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY
+      # in .env; default stays local MinIO).
+      S3_ENDPOINT_URL: ${BE_S3_ENDPOINT_URL:-http://${FIELD_HOST:-192.168.12.150}:9000}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in the field .env}}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${BE_S3_BUCKET:-tlc-images}
+
+      # --- Lab service (REST + MCP) ---
+      LAB_SERVICE_HOST: ${LAB_CONTAINER_NAME:-bic-lab-service}
+      LAB_SERVICE_PORT: "8192"
+
+      # --- Chem service (optional ELN enrichment; container port is 8000) ---
+      CHEM_SERVICE_HOST: ${CHEM_CONTAINER_NAME:-bic-chem-service}
+      CHEM_SERVICE_PORT: "8000"
+
+      # --- ChemEngine / Mind (real field endpoint, ruling 2026-07-11) ---
+      MCP_HOST: ${MIND_HOST:?set MIND_HOST to the field ChemEngine endpoint}
+      MCP_PORT: ${MIND_PORT:-8002}
+      MIND_MOCK_MODE: ${MIND_MOCK_MODE:-false}
+      MIND_TIMEOUT_SEC: ${MIND_TIMEOUT_SEC:-120}
+
+      # --- Keycloak (issuer must equal browser iss AND be reachable here) ---
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://192.168.12.150:18080/realms/bic}
+      KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-bic-portal}
+      # Machine identity for outbound lab-service calls (BE #97; lab enforces
+      # JWT since lab #112 — an empty secret means 401s against a current lab).
+      # Same value the Keycloak realm import bakes into the bic-agent-service
+      # client (keycloak/docker-compose.yml).
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-bic-agent-service}
+      KEYCLOAK_CLIENT_SECRET: ${BIC_AGENT_SERVICE_CLIENT_SECRET:?set BIC_AGENT_SERVICE_CLIENT_SECRET in the field .env (init-env generates it)}
+      # Browser-origin allowlist (BE #135 dropped wildcard CORS): the portal's
+      # real origin — field portals call the BE cross-origin with absolute URLs.
+      CORS_ALLOW_ORIGINS: ${BE_CORS_ALLOW_ORIGINS:-http://${FIELD_HOST:-192.168.12.150}:15173}
+
+      # --- RabbitMQ (agent side of the robot bus) ---
+      MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}
+      MQ_PORT: "5672"
+      MQ_USER: ${MQ_USER:-rabbitmq}
+      MQ_PASSWORD: ${MQ_PASSWORD:?set MQ_PASSWORD in the field .env}
+      MQ_VHOST: ${MQ_VHOST:-/}
+
+      # --- Observability (off by default) ---
+      PHOENIX_ENABLED: ${PHOENIX_ENABLED:-false}
+
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    extra_hosts:
+      # Resolve host.docker.internal on the Linux engine (LLM BASE_URL uses it).
+      - "host.docker.internal:host-gateway"
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: ${INFRA_NET:-infra-net}

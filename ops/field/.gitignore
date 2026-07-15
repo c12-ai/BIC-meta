@@ -1,0 +1,5 @@
+# Live field secrets — NEVER commit. Only .env.example is tracked.
+.env
+*/.env
+# GHCR token must never be copied into the package tree.
+ghcr.token
