@@ -110,7 +110,7 @@ Load only the SOP that matches the current work.
 | SOP / Skill | Use when | Link |
 |---|---|---|
 | `prd` | Updating, creating, relocating, splitting, merging, or reviewing Production PRD / Project PRD content; deciding whether requirements belong at root or child-repo level | `@.claude/skills/prd/SKILL.md` |
-| `bump-version` | Drake asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
+| `bump-version` | The product owner asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
 
 ## Agent skills
 

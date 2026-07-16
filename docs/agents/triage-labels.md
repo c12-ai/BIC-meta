@@ -28,8 +28,8 @@ separate axis, because the five roles have no way to express a post-triage state
 | **Flag**      | `needs-drake` (product ruling needed), `P0-链路断`…`P3-UIUX`, `repo:*`        | S1/S2/S3                                         |
 
 Typical flow: `needs-triage` (S1 files it) → `stage:已析根因` (S2 lands a root cause) →
-`ready-for-human` (awaiting Drake's ruling) or `ready-for-agent` (ready to dispatch S3) →
-`stage:已实现待复测` (S3 implemented) → `stage:已验证` (independently verified).
+`ready-for-human` (awaiting the product owner's ruling) or `ready-for-agent` (ready to dispatch S3)
+→ `stage:已实现待复测` (S3 implemented) → `stage:已验证` (independently verified).
 
 ### Retired
 

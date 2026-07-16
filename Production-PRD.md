@@ -2,7 +2,7 @@
 
 ## Status
 
-- Owner: Drake
+- Owner: BIC product owner
 - Review state: Draft
 - Last updated: 2026-07-15
 
@@ -110,7 +110,7 @@ Core scenarios:
    - Report data the system cannot obtain is shown as an explicit placeholder
      (e.g. "—" / "未提供" / "not reported"), never fabricated and never silently
      dropped — a checklist field must either carry a real value or a visible
-     placeholder (Wenlong ruling 2026-07-11; refines the earlier "omitted" wording).
+     placeholder (product-owner ruling 2026-07-11; refines the earlier "omitted" wording).
      Reactant molecular weights come from BIC-chem-service (a stateless
      RDKit chemistry calculator); any enrichment failure — service not configured,
      unreachable, or unable to parse a molecule — placeholders the affected fields
@@ -334,7 +334,7 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      item; selection must never create inventory.
    - Empty slots or cells are filled and cleared only in maintenance mode — refined by the
      experiment-context staged-placement supplement below.
-   - **Supplement (experiment-context staged placement, Wenlong ruling 2026-07-11, BIC-meta#206;
+   - **Supplement (experiment-context staged placement, product-owner ruling 2026-07-11, BIC-meta#206;
      closes #192)**: the TLC/CC material-preparation surface MAY allow placing tubes into empty
      cells within the selection context, provided ALL invariants hold:
      (a) placement is type-first — a 纯品/粗品 type must be armed before any cell can be placed;
@@ -355,9 +355,9 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      team's own v6 FINAL reference run spots tubes at A1+A4 (non-contiguous) and the 6-channel
      whole-row aspirate is anchored at column 1, so no column-1 anchor tube is physically
      required; lab `_validate_tlc_objects` + portal `tubeSelectionProblem` were relaxed to match
-     on 2026-07-09 (Drake ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
+     on 2026-07-09 (product-owner ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
      remain invalid.
-   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (Wenlong
+   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (product-owner
      ruling 2026-07-11, BIC-meta#239; revised same day to B2): the pairing is deliberate chemistry
      design. The earlier pure-left / crude-right ordering constraint is RETIRED — it originated in
      portal PR#21's implementation citing a root-PRD provision that never existed, and carries no
@@ -583,9 +583,9 @@ For the TLC Lab Logistic panel:
   flasks, but the robot team has not yet confirmed the physical flask cap or the dispatch-time
   validation. Non-blocking — the operating convention is a single flask until answered
   (rule 11). The collect_config indexing definition follows the shared-types contract example
-  (Drake ruling, 2026-07-06).
+  (product-owner ruling, 2026-07-06).
 
-- FP collect_config semantics RESOLVED (Mars via Wenlong, 2026-07-10, BIC-meta#177 closed):
+- FP collect_config semantics RESOLVED (Mars via the product owner, 2026-07-10, BIC-meta#177 closed):
   index i = physical tube i+1, prefix from tube 1, gaps zero-filled. The shipped
   build-parallel-to-referenced-list implementation was a latent misalignment bug for
   non-contiguous reference sets; fix lands with the every-well-assignable work (BIC-meta#176
@@ -603,7 +603,16 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-15 (latest): Added requirement 13 (shelf edit mutual exclusion): material-type
+- 2026-07-16 (latest): Editorial only — no requirement, rule, or ruling changed. Person names
+  were replaced with the role that made the call: `Owner: Drake` → `Owner: BIC product owner`;
+  16 attributions (`Drake ruling` ×4, `Wenlong ruling` ×10, `Mars via Wenlong` ×2) →
+  `product-owner ruling` / `Mars via the product owner`. Every ruling date, PR reference, and
+  issue reference is unchanged (verified by diffing the extracted reference set before/after).
+  Rationale: the PRD is a product document and must not bind the project to a named individual;
+  "who ruled" remains recoverable from git history. `Mars` is retained — it names the external
+  robot team, not a BIC developer.
+
+- 2026-07-15: Added requirement 13 (shelf edit mutual exclusion): material-type
   claim model over the three shelf writer classes (maintenance = whole shelf,
   preparation = the task's rule-10 type set, robot = dispatch→terminal window incl.
   TLC awaiting-confirm), Lab Service as claim authority with atomic acquisition and
@@ -621,17 +630,17 @@ For the TLC Lab Logistic panel:
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
-  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, Drake 2026-07-09) spots tubes at
+  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, product owner 2026-07-09) spots tubes at
   A1+A4 (non-contiguous), reproduced op-for-op by the lab planner golden test; the 6-channel
   whole-row aspirate is anchored at column 1 (`planner.py`), so no column-1 anchor tube is
   physically required. lab `_validate_tlc_objects` and portal `tubeSelectionProblem` were already
-  relaxed to match on 2026-07-09 (Drake ruling, robot-confirmed, BIC-lab-service PR#95) — the root
+  relaxed to match on 2026-07-09 (product-owner ruling, robot-confirmed, BIC-lab-service PR#95) — the root
   PRD was the stale layer. No code change (lab/portal already correct); only the doc is reconciled.
   Matching acceptance criterion updated. Resolves the #244 three-way conflict on the shape
   dimension. Residual flagged for @root: non-column-1 start has mechanism + landed-contract support
   but no standalone robot reference file (v6 starts at A1).
 
-- 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (Wenlong ruling,
+- 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (product-owner ruling,
   BIC-meta#239): a valid TLC selection must contain both pure and crude tubes — deliberate
   chemistry design. The pure-left / crude-right ordering constraint is RETIRED (same-day B2
   revision): provenance audit showed it came from portal PR#21 citing a root-PRD provision that
@@ -645,13 +654,13 @@ For the TLC Lab Logistic panel:
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
 
-- 2026-07-11 (late): Requirement 10 degrade rendering refined (Wenlong ruling): unobtainable
+- 2026-07-11 (late): Requirement 10 degrade rendering refined (product-owner ruling): unobtainable
   report fields switch from silent omission to explicit placeholders ("—"/"未提供"/
   "not reported") — real value or visible placeholder, never fabricated, never silently
   dropped. Matching acceptance criteria updated. Implementation with BIC-agent-service#63
   checklist reconciliation.
 
-- 2026-07-11: Rule 8 supplement (Wenlong ruling, BIC-meta#206): experiment-context staged
+- 2026-07-11: Rule 8 supplement (product-owner ruling, BIC-meta#206): experiment-context staged
   placement — TLC/CC material-prep surface may place tubes into empty cells in the selection
   context under four invariants (type-first, existing-tube select/deselect never touches
   inventory, Confirm-gated writes with client-side draft staging = Option A, Cancel restores
@@ -659,18 +668,18 @@ For the TLC Lab Logistic panel:
   on portal PR#46 (restoring #188 CC semantics in the same pass); main's destructive
   deselect gets an interim hotfix.
 
-- 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
+- 2026-07-10 (late): FP collect_config semantics settled (Mars via the product owner, BIC-meta#177):
   index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
   contract and acceptance criteria reworded; the referenced-list-parallel construction is
   recorded as a latent misalignment bug fixed under BIC-meta#176.
 
-- 2026-07-10: FP container-assignment UI revision (Wenlong ruling): side-by-side layout
+- 2026-07-10: FP container-assignment UI revision (product-owner ruling): side-by-side layout
   (containers left, full serpentine rack right) and every physical well selectable —
   supersedes the 2026-07-07 "idle wells are not clickable" clause; Mind classification is
   advisory pre-fill, not an assignment gate. Matching acceptance criterion updated.
   Portal change tracked in BIC-meta#176.
 
-- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
+- 2026-07-09: Terminology fix (product-owner ruling): the algorithm team's canonical name
   is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
   entries left as written.
 
@@ -678,7 +687,7 @@ For the TLC Lab Logistic panel:
   round-bottom flask row removed — it moved to FP's `flasks` task parameter with
   rule 11's flask/collect migration; RE has no readiness material card by design.
 
-- 2026-07-09: Requirement 10 UX refinement (Wenlong ruling): the ELN download control
+- 2026-07-09: Requirement 10 UX refinement (product-owner ruling): the ELN download control
   is shown only on the final experiment step's result surface instead of visible-but-
   disabled everywhere; final-surface disable-until-confirmed and the Agent Service
   conflict gate are unchanged. Matching acceptance criterion updated. Portal change

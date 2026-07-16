@@ -23,7 +23,7 @@ and root-cause classification.
 - If you are asked to "bring services up and run the suite", that is the skill's
   job — the skill brings up any MISSING service in a `bic-e2e-<svc>` tmux session
   and dispatches THIS agent to diagnose any red run.
-- If services are already running (Drake's own `bic-services` tmux session — see
+- If services are already running (the bench owner's `bic-services` tmux session — see
   Topology) you operate directly against them; never start a duplicate.
 - Service start commands, port-wait, and cleanup live in the skill's
   `scripts/`. Do not re-derive them here — keep this file diagnostic-only.
@@ -76,7 +76,7 @@ Two facts that change how you diagnose a "stuck chain":
   `plans.current_job_id`), then debug that one step — not "the chain".
 - **Spec gap (know this):** cross-step failure handling is undefined in the spec
   — if CC fails there is no documented retry/skip behavior. If a step fails
-  mid-chain, that's an open question for Drake, not an expected recovery path.
+  mid-chain, that's an open question for the product owner, not an expected recovery path.
 
 ## Running the suites
 
@@ -112,13 +112,13 @@ All live-bench configs now set `expect: { timeout: 30_000 }` so a stuck gate
 fails in 30 s instead of riding the outer cap (a wedged click loop once ate the
 old 35-min cc-re-chained cap).
 
-NONE spawn a webServer — bring the stack up first (skill's job, or Drake's
+NONE spawn a webServer — bring the stack up first (skill's job, or the bench owner's
 `bic-services`). All take `--workers=1`.
 - Before any live run, reset both sides:
   `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001"}'`
   then `curl --noproxy '*' -s -X POST http://localhost:8800/reset` (also purges MQ).
 
-## Bench preconditions (Drake's hard rules — encoded in tests/helpers.ts:resetLabState)
+## Bench preconditions (the product owner's hard rules — encoded in tests/helpers.ts:resetLabState)
 
 Every spec that dispatches a REAL lab task must, per test:
 1. `POST /admin/reset-to-test-data` (kicks a robot routine that keeps talos
@@ -149,7 +149,7 @@ docker exec bic-postgres psql -U postgres -d labrun_db -c "
   SELECT id, status, error_message FROM tasks
     WHERE status NOT IN ('completed','failed','cancelled');"
 
-# 2. Restore the CC sample cartridge (Drake's precondition)
+# 2. Restore the CC sample cartridge (the product owner's precondition)
 docker exec bic-postgres psql -U postgres -d labrun_db -c "
   UPDATE consume SET location_id='bic_09B_l4_001', state='unused'
     WHERE id='sample_40g_001';
@@ -192,10 +192,10 @@ Notes:
 3. **LLM abandon shapes** (7 known, all with deterministic backstops):
    zero-tool prose turn (shape 6 → prompt rule + test-side one-shot nudge
    `waitForParamsForm` in tests/helpers.ts — graph nudge was explicitly
-   REJECTED by Drake, don't reintroduce); hallucinated unbound-tool call
+   REJECTED by the product owner, don't reintroduce); hallucinated unbound-tool call
    (shape 7 → router phase gates: emit_form only in collecting_params,
    submit only in rts). If a new shape appears, propose graph/flow changes
-   to Drake BEFORE implementing — he reviews all graph changes.
+   to the product owner BEFORE implementing — they review all graph changes.
 4. **Lab-side dispatch failures**: `"No idle robots available"` = robot
    routine still running (gate skipped) · `"No sample cartridge found"` =
    seed precondition broken · duplicate lab tasks = something bypassed the
@@ -236,7 +236,7 @@ Simulates: chemist runs TLC, an early attempt's recognized product Rf is OUT of
 the target window, the backend auto-retries (same job, new attempt) until the Rf
 lands IN window, then opens ONE result_review (SUCCESS) to accept. The spec
 proves the retry WORKFLOW advances to success — it does NOT pin the failure /
-success count (Drake: the count doesn't matter, only that it proceeds).
+success count (product-owner ruling: the count doesn't matter, only that it proceeds).
 
 Hard facts that constrain this scenario (verified in the BE, do NOT re-derive):
 - The retry loop is **100% deterministic graph nodes, NO LLM**

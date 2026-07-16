@@ -9,7 +9,7 @@ portal) on orin. After transfer, the field action collapses to
 Everything provable off-machine has been proven (portal image smoke, full local
 5-service rehearsal, deploy.sh pre-flight self-test) before this package shipped.
 
-> **Do not run any of this until Wenlong approves the window runbook on
+> **Do not run any of this until the product owner approves the window runbook on
 > BIC-meta PR#231.** V1 must be retired first (consumer mutex on
 > `robot.exchange`), and the robot team must be told the bench is switching.
 
@@ -40,7 +40,7 @@ per-site build variants).
 
 1. Shared infra containers up & healthy (postgres/redis/minio/rabbitmq) — unchanged from V1.
 2. GHCR PAT (classic, **read:packages only**) at `~/.config/bic-v2/ghcr.token` (600),
-   created by hand by the token owner (Wenlong). `deploy.sh preflight` fails loudly
+   created by hand by the token owner (the product owner). `deploy.sh preflight` fails loudly
    if it's missing and prints the create URL.
 3. The V1 `~/bic/.env` present (init-env derives shared infra creds from it).
 
@@ -114,7 +114,7 @@ V2's new dbs/buckets are harmless to leave; V1 keeps its own `labrun_db` /
 
 ---
 
-## Wenlong pre-actions (before the window)
+## Product-owner pre-actions (before the window)
 
 1. Create the classic PAT (read:packages) and place it on orin at
    `~/.config/bic-v2/ghcr.token` (600). The token never enters git/chat/logs.
