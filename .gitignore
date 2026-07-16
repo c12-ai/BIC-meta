@@ -33,3 +33,5 @@ CLAUDE.local.md
 
 /BIC-infra/
 .bic-env
+
+.dispatch/runs/*

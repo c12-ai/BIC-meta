@@ -1,4 +1,4 @@
-Project-level Production PRD: @Production-PRD.md
+Project-level Production PRD: `Production-PRD.md` — read it before any product/business-rule work (cross-service behavior, workflow rules, acceptance criteria). The `prd` skill governs edits to it.
 
 This is BIC Project folder which contains multiple repo.
 
