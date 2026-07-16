@@ -120,7 +120,7 @@ GitHub issues in `c12-ai/BIC-meta`, via the `gh` CLI. See `docs/agents/issue-tra
 
 ### Triage labels
 
-The five canonical triage labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`) are authoritative; the legacy `stage:*` vocabulary is slated for retirement but still live — migration outstanding. See `docs/agents/triage-labels.md`.
+两根轴（定档 2026-07-16）：**分诊轴** `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`（engineering skills 读它）；**生命周期轴** `stage:已析根因` → `stage:已实现待复测` → `stage:已验证`（S1/S2/S3 用）。`stage:待调查` / `stage:待裁定` / `stage:待修复` 已退役删除。See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
