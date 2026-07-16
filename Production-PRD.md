@@ -185,6 +185,29 @@ Core scenarios:
      (intent assignment) phase; cross-task claims over the same specific physical item
      remain dispatch-validation territory (BIC-lab-service issue #136).
 
+14. **Multi-user identity attribution**
+   - In a multi-user session, every user-initiated action the system persists — chat
+     messages, objective/plan/parameter/result confirmations, HITL decision responses,
+     parameter draft saves, and TLC recognition requests — must record WHICH member
+     performed it (the authenticated user identity), not merely that the session did.
+     This makes requirement 2's human-controlled confirmations traceable to the
+     confirming human.
+   - System-initiated resolutions are never attributed to a human: a decision that
+     expires by timeout records no actor. Absent identity stays absent — never a
+     fabricated or defaulted actor.
+   - The Agent Service runtime executes each turn under the identity of the member who
+     initiated it, falling back to the session owner only for system-driven turns
+     (robot/lab callbacks, scheduler expiries).
+   - The portal shows who sent each chat message, resolving the stable user identity to
+     a display name at render time. Messages persisted before attribution existed, and
+     senders whose display name is unavailable, render unattributed — raw identifiers
+     are never shown and names are never fabricated.
+   - Attribution stores stable user identity, not display-name snapshots, so renames do
+     not corrupt history.
+   - The chat prose the LLM sees remains speaker-anonymous: attribution is a
+     product/audit surface, deliberately not a prompt input. A future product ruling on
+     multi-user instruction precedence would revisit LLM speaker visibility separately.
+
 ## Core Concepts
 
 1. **Experiment Objective**
@@ -559,6 +582,15 @@ For the TLC Lab Logistic panel:
   reclaimed session is rejected.
 - Shelf claim banners and disabled states appear on other users' portals within one
   poll cycle (~3 s), in Chinese and English.
+- Every persisted user-initiated event (chat message, objective/plan/parameter/result
+  confirmation, HITL decision response, parameter draft save, TLC recognition) carries
+  the acting member's identity; a scheduler-expired decision carries none.
+- In a two-member session, a message sent by one member renders with that member's
+  display name on the other member's portal both live and after a reload; events
+  persisted before attribution existed render unattributed with no raw identifier
+  shown.
+- A collaborator's turn runs (and is traced) under the collaborator's identity, not the
+  session owner's; system-driven turns keep the owner fallback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -611,6 +643,17 @@ For the TLC Lab Logistic panel:
   Rationale: the PRD is a product document and must not bind the project to a named individual;
   "who ruled" remains recoverable from git history. `Mars` is retained — it names the external
   robot team, not a BIC developer.
+
+- 2026-07-15: Added requirement 14 (multi-user identity attribution):
+  user-initiated persisted events carry the acting member's identity (never fabricated;
+  scheduler expiries stay actor-less), runtime turns execute under the initiating
+  member's identity with owner fallback for system turns, portal chat bubbles show the
+  sender's display name resolved from stable identity with graceful legacy fallback,
+  and LLM-visible chat prose stays speaker-anonymous. Matching acceptance criteria
+  added. Implemented as task `07-15-identity-attribution` (BIC-agent-service
+  `.trellis`); design record: 多用户会话身份归因设计结论（方案二）(Feishu
+  PDsadQLbio6WaQxam8VcttZjnTf), whose Enhancements section tracks the deferred
+  lab-side actor persistence / on-behalf-of increments.
 
 - 2026-07-15: Added requirement 13 (shelf edit mutual exclusion): material-type
   claim model over the three shelf writer classes (maintenance = whole shelf,
