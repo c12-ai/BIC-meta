@@ -4,7 +4,7 @@
 
 - Owner: BIC product owner
 - Review state: Draft
-- Last updated: 2026-07-15
+- Last updated: 2026-07-16
 
 ## Scope
 
@@ -179,6 +179,18 @@ Core scenarios:
    - A dispatch attempted while a conflicting human claim is live is rejected atomically
      (no task is created) and the failure surfaces to the chemist naming the holder; the
      same dispatch succeeds after the claim is released.
+   - **Preparation→robot claim handoff** (2026-07-16, closes BIC-lab-service #140): a
+     user-initiated dispatch carries the acting member's identity (requirement 14's
+     attribution, relayed service-to-service) to Lab Service, and the dispatching
+     member's OWN live preparation claim for the same experiment type hands over to the
+     robot claim atomically — consumed inside the dispatch transaction — instead of
+     rejecting the member with their own claim. The handoff never weakens the
+     protections above: another member's claim still rejects naming the holder, the
+     dispatcher's own Consumable Maintenance claim still rejects (maintenance has no
+     holder-is-self exception), and a system-initiated dispatch carries no identity
+     (never fabricated, per requirement 14) and keeps the conservative rejection. The
+     handed-off preparation session experiences the standard claim-lost behavior, same
+     as automatic reclaim.
    - The portal reflects claim state on both surfaces (holder-naming banners, disabled
      entries) within a few seconds, in Chinese and English per requirement 11.
    - This intent-level mutual exclusion deliberately does not lock the configuring
@@ -577,6 +589,14 @@ For the TLC Lab Logistic panel:
   confirmation — Consumable Maintenance entry is blocked with a robot-window notice.
 - A CC dispatch succeeds while a TLC task is parked awaiting confirmation and still
   holds its shelf claim (robot claims exclude human writers only, never each other).
+- A member who still holds their own same-type preparation claim and confirms the
+  dispatch (e.g. via chat) succeeds: the claim hands over to the robot claim atomically
+  within the dispatch, and the member's open preparation surface receives the standard
+  claim-lost signal rather than an error the portal must specially handle.
+- The handoff never weakens the protections: the same dispatch initiated by a DIFFERENT
+  member is rejected naming the claim holder; a dispatch during the dispatcher's own
+  Consumable Maintenance session is rejected; a system-initiated dispatch (no acting
+  member identity) keeps the conservative rejection.
 - An abandoned editing session's shelf claim is reclaimed automatically (~1 minute);
   other users' surfaces recover on their next poll, and a write replayed from the
   reclaimed session is rejected.
@@ -635,7 +655,20 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-16 (latest): Editorial only — no requirement, rule, or ruling changed. Person names
+- 2026-07-16 (latest): Requirement 13 handoff supplement (closes BIC-lab-service #140):
+  a user-initiated dispatch relays the acting member's identity to Lab Service
+  (X-On-Behalf-Of, trusted only from the agent-service service account — the first
+  shipped on-behalf-of increment from requirement 14's deferred list), and the
+  dispatching member's own same-type preparation claim hands over to the robot claim
+  atomically inside the dispatch transaction instead of 409ing the member with their
+  own claim. Another member's claim / the dispatcher's own maintenance claim / an
+  identity-less system dispatch keep rejecting; the consumed session gets the standard
+  claim-lost behavior (portal unchanged). This removes the release-timing assumption
+  the 07-15 design shipped with (portal dialog-close beating the LLM-turn dispatch).
+  Matching acceptance criteria added. Implemented as task `07-16-obo-dispatch-handoff`
+  (BIC-agent-service `.trellis`).
+
+- 2026-07-16: Editorial only — no requirement, rule, or ruling changed. Person names
   were replaced with the role that made the call: `Owner: Drake` → `Owner: BIC product owner`;
   16 attributions (`Drake ruling` ×4, `Wenlong ruling` ×10, `Mars via Wenlong` ×2) →
   `product-owner ruling` / `Mars via the product owner`. Every ruling date, PR reference, and
