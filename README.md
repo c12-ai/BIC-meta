@@ -138,6 +138,12 @@ GitHub Wiki is enabled for `BIC-meta`, but GitHub only creates the backing
 After that one-time initialization, these pages can be pushed to the GitHub Wiki
 remote directly.
 
+## Architecture
+
+Durable architecture proposals live under [`docs/architecture/`](docs/architecture/README.md).
+The current Agent Service redesign proposal is
+[`Agent Service L3 Architecture Redesign`](docs/architecture/agent-service-l3-redesign.md).
+
 ## Trellis Tracking
 
 Track shared Trellis artifacts:

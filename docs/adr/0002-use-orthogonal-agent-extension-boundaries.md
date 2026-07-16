@@ -1,0 +1,3 @@
+# Use orthogonal Agent extension boundaries within L1-L4
+
+BIC will keep L1-L4 as its only layer taxonomy. Agent Foundation is the domain-neutral execution kernel inside L3, Domain Packs are versioned domain implementations, and the Proposal Boundary is the sole effect-governance seam between L3 and L2. The deterministic side of that boundary remains L2-owned and converges on the canonical workflow transaction path; it is not a standalone layer or a parallel mutation pipeline. This avoids overlapping architecture vocabularies and prevents PR-specific policy or engine mechanisms from becoming competing authorities.

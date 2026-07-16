@@ -1,0 +1,3 @@
+# Keep Turn, Proposal, Command, and Task outcomes orthogonal
+
+A Turn terminal describes whether Agent execution and its response contract closed; it does not summarize the result of an accepted Proposal, Outbox Command, or Lab/Nexus Task. A Proposal may already be durably accepted while later post-commit narration makes the Turn fail or time out. That failure cannot reopen the Turn effect slot, roll back Workflow Facts, cancel the Outbox Command, or recast the business action as failed. Correlation is explicit through stable identities and provenance, while each lifecycle retains its own outcome and user-visible projection.

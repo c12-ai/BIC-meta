@@ -1,0 +1,3 @@
+# Use row-level claim-generation fencing without an Attempt subsystem
+
+Durable Turn recovery retains one stable `turn_id` and stores only `claim_generation`, `lease_owner`, and `lease_expires_at` on the Turn row. Every claim or reclaim atomically increments the generation. Proposal adjudication, effect-slot closure, durable Agent outputs, Turn terminal CAS, and live stream emission must prove the current `(turn_id, claim_generation)`; a stale claimant receives no effect or user-visible output authority. V1 does not add a `TurnAttempt` table, Attempt events, public attempt identity, or durable Agent checkpoint. Per-claim history remains in traces until a named audit, billing, or recovery consumer justifies a first-class Attempt model.

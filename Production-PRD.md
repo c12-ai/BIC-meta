@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-08
+- Last updated: 2026-07-16
 
 ## Scope
 
@@ -149,6 +149,23 @@ Core scenarios:
    - The system must preserve enough workflow context from the target assistant reply
      time to support later quality analysis by experiment stage, specialist, task, and
      issue pattern.
+
+13. **Explicit Agent Turn cancellation**
+   - While a user-triggered Agent reply is queued or running, the portal must provide an
+     explicit Stop control for that exact Turn, consistent with a normal chatbot interaction.
+   - A successful Stop must durably finalize the Turn as cancelled and converge live,
+     replayed, refreshed, and multi-tab views without presenting the cancellation as a
+     failure or a normal completion.
+   - The product retains only assistant output segments that were already durably completed.
+     The unfinished streaming fragment is discarded consistently rather than being preserved
+     as a replay-only draft.
+   - Stop applies only to the Agent Turn. It must not roll back a workflow change that already
+     committed, cancel an already-created Lab/Nexus Task, or imply that physical execution
+     stopped.
+   - System-triggered callback, scheduler, and reconciliation Turns are not cancellable
+     through the user Stop control.
+   - Detailed API identity, authorization, race ordering, and mixed-version rollout behavior
+     belong to the separately reviewed Agent Service and Portal cancellation design.
 
 ## Core Concepts
 
@@ -508,6 +525,17 @@ For the TLC Lab Logistic panel:
   rather than creating duplicate ratings.
 - Stored feedback context reflects the workflow state at the time of the target
   assistant reply, not only the later state when the user submits feedback.
+- While an eligible user-triggered Agent Turn is queued or running, the portal exposes a Stop
+  control correlated to that exact Turn; stopping it produces one durable cancelled outcome and
+  no failed or completed outcome for the same Turn.
+- Stop state converges across live streaming, refresh, history/replay, and multiple open tabs.
+  Completed persisted output segments remain visible, while the active unfinished fragment does
+  not reappear after refresh or replay.
+- If the targeted Turn already completed, failed, or timed out, a Stop retry reports that the
+  Turn was already terminal and does not claim that cancellation occurred.
+- Stopping an Agent Turn after a workflow action or Lab command committed leaves that action,
+  command, and any Lab/Nexus Task intact; user-facing text must not imply physical-task
+  cancellation.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -515,6 +543,7 @@ For the TLC Lab Logistic panel:
 - Backend-only implementation details that do not change product behavior.
 - Agent prompt/tool internals except where they define externally visible copilot behavior.
 - Cross-team shared protocol governance owned by `BIC-shared-types`.
+- Cancelling or rolling back an already-created Lab/Nexus Task through the Agent Turn Stop control.
 
 ## Dependencies / Open Questions
 
@@ -552,7 +581,13 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+- 2026-07-16: Added the cross-repo product contract for explicit chatbot-style cancellation of an
+  exact user-triggered Agent Turn, including durable non-error projection, output retention, and
+  the boundary that Stop never rolls back committed workflow actions or cancels Lab/Nexus Tasks.
+  Detailed protocol and rollout mechanics remain in the separately reviewed Agent Service/Portal
+  cancellation slice.
+
+- 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run

@@ -1,0 +1,3 @@
+# Authorize Turn cancellation by initiator or execute capability
+
+A Turn Initiator who still has Session `CHAT` may cancel their own user-triggered Turn, while any current owner or collaborator with `EXECUTE` may cancel another member's cancellable Turn. Observers may therefore stop their own Agent work but cannot interrupt another member's Turn; former and non-members have no cancellation authority. Durable user-input admission retains a trusted initiator Principal reference for this decision, derived from authentication rather than Portal payload or collaboration focus. This avoids both initiator-disconnect lockout and unrestricted observer interruption without inventing a new Session role.

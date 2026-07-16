@@ -1,0 +1,3 @@
+# Gate the Chemistry refactor on external compatibility
+
+Every Agent Service migration stage must deploy against a recorded Chemistry compatibility baseline without coordinated Portal, Lab Service, or BIC-shared-types changes. Compatibility covers semantic REST, snapshot, SSE, replay, error, MQ/HTTP, identity, evidence, locale, confirmation, and ELN behavior rather than byte-identical internals. Externally visible additions from candidate PRs require explicit adopt/adapt/drop review and cannot ride along with internal mechanisms. Production Biology contract expansion remains a separate roadmap, so the internal validation slice does not silently broaden this refactor.

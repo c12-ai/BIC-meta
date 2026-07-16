@@ -1,0 +1,3 @@
+# Expose two capability-limited faces from each Domain Pack
+
+Each trusted versioned Domain Pack exposes one Domain Agent Definition consumed by L3 and one pure Domain Proposal Policy consumed by L2, with both faces bound to the same domain/version by the Manifest. This keeps domain behavior cohesive without turning the Pack into an L3-only plugin or moving workflow authority into probabilistic execution: L2 still owns facts, authorization, CAS, transactions, events, and Outbox creation, while neither face receives repositories, transaction handles, raw clients, or a generic container. Adding a domain changes its Pack and Composition Root registration, not Agent Foundation or generic L2 code.

@@ -1,0 +1,3 @@
+# Keep one absolute execution deadline across Turn claims
+
+The first successful claim fixes one absolute `execution_deadline_at` for the logical Turn. Lease reclaim, model retry, tool retry, and a replacement worker consume the same remaining budget and never reset it. Foundation and governed calls receive bounded budgets derived from the lesser of their component cap and the remaining Turn time after reserving closure time for L2. Queue wait is measured separately. If a reclaim sees the deadline already elapsed, it does not invoke Foundation and instead attempts the unique timeout terminal. Outbox Command and Lab/Nexus Task deadlines remain independent.

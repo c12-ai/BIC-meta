@@ -1,0 +1,3 @@
+# Use versioned static Domain Packs with typed ports
+
+Domain Pack v1 will be a trusted, installed Python package described by a versioned manifest and composed through typed ports and factories. The manifest declares identity, compatibility, components, capabilities, permissions, and external dependencies; it is not a workflow DSL. The Composition Root validates and wires enabled packs without concrete-domain imports or conditionals in Agent Foundation. Runtime hot loading and untrusted third-party plugins are deferred because their isolation and supply-chain costs are unsupported by a current use case.

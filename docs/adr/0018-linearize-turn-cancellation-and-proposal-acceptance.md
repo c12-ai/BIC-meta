@@ -1,0 +1,3 @@
+# Linearize Turn cancellation and Proposal acceptance by first commit
+
+User cancellation and effectful Proposal acceptance serialize through the same L2-owned Turn/effect authority using transactional first-commit-wins semantics. Cancellation-first prevents any later Proposal from committing for that Turn; Proposal-first preserves the accepted Workflow Fact changes and Outbox Commands, while later cancellation stops only the remaining Agent execution and output. This avoids ambiguous partial authority and deliberately rejects compensation or implicit Lab Task cancellation as meanings of Agent Turn cancellation.

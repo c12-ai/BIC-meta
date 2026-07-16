@@ -1,0 +1,3 @@
+# Project user cancellation as a distinct turn_cancelled event
+
+An accepted user cancellation appends one persisted, replayable `turn_cancelled` Session Event in the same transaction as Turn terminal closure. Portal treats it as a non-error terminal that unlocks chat and finalizes interrupted output without invoking failure-only workflow behavior. Reusing `turn_failed` would currently create a failed bubble and can mark analysis as failed, while `turn_completed` would misrepresent interrupted execution. Because old Portal builds drop unregistered named SSE events, hidden Portal support must ship before backend emission and Stop enablement; extra payload fields remain subject to separate Field Necessity review.

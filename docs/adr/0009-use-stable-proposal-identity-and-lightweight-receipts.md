@@ -1,0 +1,3 @@
+# Use stable Proposal identity and lightweight receipts
+
+Each logical Proposal receives a trusted identity once and preserves it across execution attempts; downstream transition provenance and Outbox Command identities derive from it, with database uniqueness preventing duplicate application. V1 will use accepted transition/outbox provenance as the durable receipt rather than introduce a general Proposal Receipt aggregate, while non-accepted adjudications remain typed and audited without changing Workflow Facts. Exact Proposal Outcome types are deliberately deferred to the exhaustive action-state transition catalog rather than frozen by this ADR.
