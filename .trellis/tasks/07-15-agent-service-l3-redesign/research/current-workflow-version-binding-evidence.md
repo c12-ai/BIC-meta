@@ -31,4 +31,4 @@ Consequences:
 
 ## Target implication
 
-The redesign must persist one exact Workflow Behavior Binding under L2 authority, resolve it before each Turn, and require the same Domain Pack version for the Agent and Policy faces. Exact versions may coexist; compatibility ranges validate an exact installed binding rather than select “latest.” Missing versions fail closed, and legacy workflows require a reviewed explicit binding before cutover. The binding remains internal unless a separately demonstrated external consumer requires projection.
+This gap becomes a blocking production concern only when experiments must remain active across Agent Service releases. Current bench and field operations can finish or reset old-path workflows before the one-time cutover, so v1 does not add binding persistence, legacy backfill, cohort routing, or version retention. ADR-0035 must resolve immutable identity, retained versions, rollback, in-flight Proposal/Command behavior, migration, and history semantics before the first production deployment that requires cross-release workflow survival.

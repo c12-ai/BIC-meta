@@ -14,8 +14,8 @@ Evidence gathered on 2026-07-15 for the Agent Service L3 redesign. This file rec
 
 - [Agent Service PR #94](https://github.com/c12-ai/BIC-agent-service/pull/94): open, conflicting, review required, head `4d86c17`.
 - [Agent Service PR #136](https://github.com/c12-ai/BIC-agent-service/pull/136): open, conflicting, review required, head `4e77442`.
-- [Agent Service PR #150](https://github.com/c12-ai/BIC-agent-service/pull/150): open draft, docs-only, review required, head `8614569`.
-- PR #150's current head is newer than the `4a9a951` revision named by the Feishu guide.
+- [Agent Service PR #150](https://github.com/c12-ai/BIC-agent-service/pull/150): closed 2026-07-16 with a supersession pointer to BIC-meta #327; docs-only retained head `62ae747`.
+- PR #150's branch remains the historical record of three Claude × Codex review rounds. BIC-meta #327 inherits its [Framework Ruling](https://github.com/c12-ai/BIC-agent-service/blob/62ae7471d703bf85957c12e348b236f3f78cfc05/docs/agent-foundation-refactor-design.md#framework-ruling-2026-07-15) and rolling-summary commitment explicitly; other #150 ordering and scope statements are superseded.
 
 ## Issue scope
 

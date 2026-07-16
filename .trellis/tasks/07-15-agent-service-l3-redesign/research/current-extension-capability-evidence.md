@@ -91,6 +91,6 @@ The current extension mechanism is therefore “edit the shared runtime in sever
 1. Memory, Skills, and MCP should adapt into existing typed context, Pure Tool, Query, Proposal, and Outbox seams rather than share a generic invocation bus.
 2. Composition must default-deny and grant only declared operations; no consumer receives a raw Store, MCP client/session, credential, provider registry, repository, or general network client.
 3. MCP trust and effect classification must be per operation, not per server. Discovery or transport does not confer read-only authority.
-4. Agent Memory reads remain lower-authority context. The dormant conversation-summary code is useful migration evidence but is not a production general-memory implementation.
+4. Agent Memory reads remain lower-authority context. The dormant conversation-summary code now anchors a bounded producer/load continuity slice after Durable Turn primitives; completing that loop does not create a production general-Memory provider or write contract.
 5. A Domain Skill is a typed static behavioral contribution under existing authority; it is not a graph, middleware, authorization, or command-execution plugin.
 6. Foundation v1 validates the geometry through non-production Capability Conformance Fixtures while shipping only neutral seams that migrated Chemistry or the Biology validation slice exercises before contract freeze. The fixtures do not approve production Memory, Skill, or MCP runtimes or freeze feature-specific provider interfaces.

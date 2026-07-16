@@ -6,6 +6,18 @@ Status: required detailed-design artifact; outcome taxonomy not yet frozen.
 
 Derive the Proposal Outcome taxonomy and deterministic workflow transition model from an exhaustive inventory rather than fitting current actions into a premature enum.
 
+## Session Event scope
+
+This catalog covers workflow-transition events, not every live or durable Agent output.
+
+| Event class | Examples | Commit path |
+|---|---|---|
+| Transient stream delta | `reasoning_delta`, `tool_call_delta`, `text_delta` | Broadcast only; no persistence. |
+| Durable conversation or observation output | `text_done`, `tool_result`, `mind_notice`, node lifecycle | L2 Turn-output persistence; no Proposal. |
+| Workflow transition | `PlanConfirmed`, `TaskParamsSet`, `TaskDispatched`, and related compatible events | Ordered append in the accepted Proposal transaction. |
+
+`user_message_submitted` belongs to Input Admission and is excluded from the Proposal inventory. `FormRequested` creates a pending decision and commits with the accepted business action; it is not an independent Proposal.
+
 Each action must answer:
 
 1. Who or what may initiate it?
@@ -17,11 +29,12 @@ Each action must answer:
 7. Which Outbox Commands are created, if any?
 8. What identity, uniqueness, retry, duplicate, stale, and replay behavior applies?
 9. Which layer, Domain Pack, or external authority owns each decision?
+10. What partial workflow-action trajectory can the legacy path expose on failure, and what all-or-nothing trajectory must the target expose before and after Proposal commit?
 
 ## Required columns
 
-| Action | Initiator | Domain | Eligible current state | Preconditions and capabilities | Proposal kind/schema | Proposal Outcomes | Workflow Fact mutation | Session Event / wire projection | Outbox Command | External response | Idempotency and replay | Decision owner | Evidence |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Action | Initiator | Domain | Eligible current state | Preconditions and capabilities | Proposal kind/schema | Proposal Outcomes | Workflow Fact mutation | Session Event / wire projection | Outbox Command | External response | Idempotency and replay | Legacy failure trajectory / target atomic trajectory | Decision owner | Evidence |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 ## Candidate action inventory
 
@@ -52,6 +65,7 @@ The completed artifact must include:
 - one table covering all actions and state combinations;
 - one aggregate-level state diagram per distinct workflow aggregate whose transitions are not obvious from the table;
 - one end-to-end sequence for each action that creates an External Command;
+- one failure-cut view per action showing that pre-commit target failure exposes no workflow-transition prefix and post-commit failure exposes the complete ordered action;
 - an adopt/adapt/drop mapping from #94 and #136 action/effect/result concepts;
 - an explicit list of incompatible or redundant existing result types to remove;
 - compatibility mapping to existing REST, SSE, snapshot, replay, MQ, and error behavior.

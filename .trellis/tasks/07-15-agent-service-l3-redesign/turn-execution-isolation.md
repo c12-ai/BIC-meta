@@ -12,6 +12,16 @@ Status: architecture boundary confirmed. In-process capability isolation, Turn a
 - Callback and reconciliation stimuli create a new Turn rather than resume the originating Turn.
 - Turn, Proposal, Outbox Command, and external Task use separate identities and state models.
 
+Session output follows three commit classes:
+
+| Event class | Examples | Commit path |
+|---|---|---|
+| Transient stream delta | `reasoning_delta`, `tool_call_delta`, `text_delta` | Broadcast only; no persistence. |
+| Durable conversation or observation output | `text_done`, `tool_result`, `mind_notice`, node lifecycle | L2 Turn-output persistence; no Proposal. |
+| Workflow transition | `PlanConfirmed`, `TaskParamsSet`, `TaskDispatched`, and related events | Ordered append inside the accepted Proposal transaction. |
+
+`user_message_submitted` commits in Input Admission. `FormRequested` and its pending decision commit with the accepted business action. Terminal Session Events commit with the unique Turn Terminal Outcome and do not pass through the Proposal slot.
+
 ## Confirmed closure invariants
 
 The following are accepted as the initialization point for detailed design:
@@ -53,6 +63,7 @@ These three closures are distinct. A Foundation invocation can close while L2 te
 - One accepted Proposal may represent multiple entity changes, ordered Session Events, and correlated Outbox Commands belonging to one business action.
 - After acceptance, the active Foundation invocation is limited to pure/read-only work and grounded narration.
 - This is not current behavior: current L2 commits streamed events one by one, current L3 performs direct persistence and commands, and process-local submit locking compensates for observed parallel duplicate calls.
+- The target accepts the observable failure-path change: before Proposal commit no workflow-action prefix is visible; after commit the whole ordered action is visible even if the Turn later fails. Each migrated action records the legacy partial prefix and target atomic trajectory. Durable conversation or observation output remains independent.
 
 ## Confirmed durable admission split
 
@@ -150,7 +161,7 @@ This list feeds child-slice design without reopening the confirmed architecture 
 4. Exact Query Result, context-contribution, and protected-context field shapes.
 5. Exact Outbox Command attempt, lease, ambiguous-delivery, ordering, recovery, and receiver-idempotency mechanics.
 6. Exact admission storage, input-specific dedupe fields, claim-generation storage, and legacy backfill mechanics.
-7. Exact Workflow Behavior Binding storage, Behavior Target identifiers, legacy binding backfill, and supported-version retention operations.
+7. ADR-0035's workflow-lifetime behavior identity, retention, rollback, in-flight work, migration, and history contract before any production deployment must preserve experiments across releases; no v1 storage design is required now.
 8. Concrete execution deadline, component cap, lease, heartbeat, and terminal-closure reserve values.
 9. Cooperative shutdown and provider/tool cleanup behavior that cannot alter an already committed Proposal, command, or Turn Terminal Outcome.
 10. Exact cancellation response JSON spellings, provider interruption behavior, and mixed-version rollout mechanics.
@@ -160,6 +171,7 @@ This list feeds child-slice design without reopening the confirmed architecture 
 - a state machine for each lifecycle in the table;
 - a deadline and cancellation ownership matrix;
 - failure-injection sequences at every commit/call/receipt boundary;
+- per-action legacy partial-prefix and target atomic failure trajectories around Proposal commit;
 - compatibility mapping for existing `turn_started`, `turn_completed`, `turn_failed`, SSE behavior, and optimistic partial text;
 - tests proving no Agent cancellation silently cancels or duplicates an already committed External Command.
 - an additive API/Portal contract for exact-`turn_id` cancellation, including multi-tab projection and rollback behavior;

@@ -9,6 +9,7 @@ Status: schema-discovery artifact. Architecture semantics and the explicitly acc
 - The terminal representation stays small and compositional; it does not create one enum variant for every effect/response/failure combination.
 - L2 owns the durable Turn Terminal Outcome and persistence closure. Foundation supplies a Foundation Execution Outcome but cannot declare durable closure.
 - A schema field is added only when a named runtime, Portal, operations, audit, or compatibility consumer needs to distinguish cases and cannot derive the distinction safely.
+- ADR-0012 and `action-state-transition-catalog.md` own the workflow-action failure trajectory: the target exposes no partial workflow-transition prefix. This terminal catalog does not reinterpret separately committed conversation or observation output as part of that Proposal transaction.
 
 ## Starting hypothesis, not contract
 

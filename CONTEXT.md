@@ -56,13 +56,13 @@ _Avoid_: Agent Foundation, Base Domain Pack, workflow DSL
 The v1 cross-domain lifecycle from an Experiment Objective through an ordered serial Experiment Plan to Plan completion and a Summary Document.
 _Avoid_: Domain graph, arbitrary workflow topology
 
-**Workflow Behavior Binding**:
-The immutable authoritative association between one Experiment Workflow and its exact domain, Domain Pack, Experiment Workflow Template, and Behavior Target versions, used by every Turn in that workflow.
-_Avoid_: Latest compatible version, deployment cohort, runtime default
+**Workflow Behavior Binding (deferred)**:
+A future immutable association between one Experiment Workflow and its exact behavior identity and component versions. ADR-0035 must define it before the first production deployment where experiments survive Agent Service releases; it is not part of the v1 bench/field cutover.
+_Avoid_: Current migration requirement, disabled internal route, deployment cohort, mutable runtime default
 
-**Behavior Target**:
-The exact registered internal runtime implementation selected for one Workflow Behavior Binding, including a reviewed legacy compatibility target or a new Foundation/Kit/Pack target during coexistence.
-_Avoid_: Mutable deployment mapping, per-Turn route, branch fallback
+**Behavior Target (deferred)**:
+The future exact runtime-implementation identity referenced by a Workflow Behavior Binding after ADR-0035 approves its lifecycle and retention semantics.
+_Avoid_: V1 route flag, per-Turn selection, branch fallback, online-coexistence mechanism
 
 **Model Capability Level**:
 Either `light` or `complex`, the two centrally governed, provider-neutral v1 model tiers that a hosted Agent graph may declare and Foundation maps to an approved concrete model.
@@ -245,7 +245,7 @@ The versioned declaration that binds a Domain Pack's identity, compatible Domain
 _Avoid_: Workflow DSL, executable plugin script
 
 **Composition Root**:
-The application boundary that validates the static catalog of trusted installed Domain Pack and Workflow Template versions and resolves an exact Workflow Behavior Binding into capability-limited L2 and L3 components without placing concrete-domain knowledge in either neutral core.
+The application boundary that validates each configured trusted Domain Pack, Workflow Template, Domain Agent Definition, Domain Proposal Policy, and Foundation adapter composition without placing concrete-domain knowledge in either neutral core.
 _Avoid_: Domain registry inside Foundation, runtime plugin loader
 
 **Intent Payload**:

@@ -1,6 +1,6 @@
 # Agent Service PR #94, #136, and #150 evidence
 
-Checked against live GitHub and `origin/main @ 12a84f3` on 2026-07-15.
+Checked against live GitHub and `origin/main @ 12a84f3`; PR #150 status refreshed on 2026-07-16.
 
 ## Current status
 
@@ -8,9 +8,9 @@ Checked against live GitHub and `origin/main @ 12a84f3` on 2026-07-15.
 |---|---|---|
 | [#94](https://github.com/c12-ai/BIC-agent-service/pull/94) | Open, conflicting, review required; head `4d86c17`; 78 files | Input admission plus action-specific, state-aware authorization. |
 | [#136](https://github.com/c12-ai/BIC-agent-service/pull/136) | Open, conflicting, review required; head `4e77442`; 95 files | Derived WorkflowBaton, WorkflowEngine, CAS, outbox, narration guard, specialist registry. |
-| [#150](https://github.com/c12-ai/BIC-agent-service/pull/150) | Open draft, docs-only; head `8614569`; one Markdown file | Agent Foundation / Proposal Layer / Domain Pack proposal. |
+| [#150](https://github.com/c12-ai/BIC-agent-service/pull/150) | Closed 2026-07-16, docs-only; head `62ae747`; superseded by BIC-meta #327 | Historical Agent Foundation / Proposal Layer / Domain Pack proposal and three-round Claude × Codex review record. |
 
-#94 and #136 are not stacked. They share 26 modified files and evolved from different baselines. #150 treats #136 as a candidate implementation and does not define how #94 converges into the proposal.
+#94 and #136 are not stacked. They share 26 modified files and evolved from different baselines. The historical #150 design treated #136 as a candidate implementation and did not define how #94 converged into the proposal; BIC-meta #327 now owns that cross-repo disposition.
 
 ## PR #94
 
@@ -51,7 +51,7 @@ Conclusion: a serious Chemistry workflow-authority consolidation, not yet a cros
 
 Evidence: [Baton](https://github.com/c12-ai/BIC-agent-service/blob/4e7744268a2069f998b4c73e0b7f67bf7e787422/app/workflow/baton.py#L21-L199), [Engine](https://github.com/c12-ai/BIC-agent-service/blob/4e7744268a2069f998b4c73e0b7f67bf7e787422/app/workflow/engine.py#L327-L402), [dispatch path](https://github.com/c12-ai/BIC-agent-service/blob/4e7744268a2069f998b4c73e0b7f67bf7e787422/app/runtime/graphs/specialists/tools.py#L960-L1051), and [registry](https://github.com/c12-ai/BIC-agent-service/blob/4e7744268a2069f998b4c73e0b7f67bf7e787422/app/workflow/specialist_registry.py#L13-L124).
 
-## PR #150 / Feishu proposal
+## PR #150 historical proposal
 
 The proposal separates:
 
@@ -59,8 +59,8 @@ The proposal separates:
 - Proposal Layer: the deterministic boundary from probabilistic output to authorized/CAS/idempotent/transactional change.
 - Domain Pack: versioned domain schemas, workflows, specialists, prompts, forms, policies, adapters, evidence, and reports.
 
-Its strongest decisions are the authority hierarchy, no business snapshots in checkpoints, effectful outputs becoming typed proposals, and evidence-driven Domain Pack discovery through a minimal Biology slice.
+Its strongest retained decisions are the authority hierarchy, no business snapshots in checkpoints, effectful outputs becoming typed proposals, the Framework Ruling at `62ae747`, and the rolling-summary produce/load commitment.
 
-Items still requiring owner decisions include whether these are the correct top-level boundaries, how they coexist with L1-L4, whether Foundation must promise unused durable/memory/tool abstractions now, how #94 and #136 are selectively adopted, and exactly which Chemistry contracts are frozen during migration.
+Wenlong closed #150 on 2026-07-16 with a pointer to BIC-meta #327. The canonical cross-repo design supersedes #150; its branch remains historical evidence of the three-round Claude × Codex convergence. #327 inherits only the ruled Framework Ruling and rolling-summary commitment explicitly, not #150's earlier Biology-first order or broader Foundation scope.
 
-Evidence: [current proposal](https://github.com/c12-ai/BIC-agent-service/blob/86145692054ad06a74c00ffa81fcbfbaf9f835c4/docs/agent-foundation-refactor-design.md#L1-L66) and the Feishu documents listed in `source-inventory.md`.
+Evidence: [closed PR and supersession comment](https://github.com/c12-ai/BIC-agent-service/pull/150#issuecomment-4989438269), [retained branch head](https://github.com/c12-ai/BIC-agent-service/blob/62ae7471d703bf85957c12e348b236f3f78cfc05/docs/agent-foundation-refactor-design.md), and the Feishu documents listed in `source-inventory.md`.

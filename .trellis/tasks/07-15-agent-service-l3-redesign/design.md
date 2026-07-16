@@ -69,7 +69,7 @@ Portal / Lab callbacks / Scheduler / Reconciliation
                                            Lab/Nexus commands
 ```
 
-The Composition Root validates a static catalog of trusted installed Domain Pack, Workflow Template, and Behavior Target versions, then resolves each authoritative Workflow Behavior Binding to one exact internal runtime implementation identity/version, one exact Domain Proposal Policy in L2, and one exact Domain Agent Definition in L3. The Experiment Workflow Kit contributes shared, layer-aligned L2 and L3 components but owns neither runtime nor persistence authority. Workflow Facts remain L2-authoritative; Physical Execution Facts remain Lab/Nexus-authoritative; Session Events are compatible audit/UI projections. Future memory, Skill, and MCP capabilities must enter through explicit governed seams rather than a second workflow authority or a generic service container.
+The Composition Root validates each trusted installed deployment composition: one compatible Domain Pack Manifest, Workflow Template, Domain Proposal Policy in L2, and Domain Agent Definition in L3. During migration, the ordinary route keeps the reviewed legacy composition while named internal validation uses the new composition behind disabled routing. V1 adds no persisted workflow-lifetime Behavior Binding. The Experiment Workflow Kit contributes shared, layer-aligned L2 and L3 components but owns neither runtime nor persistence authority. Workflow Facts remain L2-authoritative; Physical Execution Facts remain Lab/Nexus-authoritative; Session Events are compatible audit/UI projections. Future memory, Skill, and MCP capabilities must enter through explicit governed seams rather than a second workflow authority or a generic service container.
 
 ### In-process hard isolation
 
@@ -106,7 +106,7 @@ The current baseline does not yet provide this system. Ruff, mypy, and Pyright a
 | Gate | Responsibility | Examples of violations it must reject |
 |---|---|---|
 | Static lint | Universally banned imports/APIs and unsupported framework-private usage | `langgraph._internal`, protected-package use of explicitly banned infrastructure entry points |
-| Import Linter | Authoritative direct/transitive package dependency direction, forbidden edges, and domain independence | Foundation importing L2/session, persistence, concrete infrastructure, Chemistry, or Biology; a Domain Pack importing concrete workflow repositories or command clients |
+| Import Linter | Authoritative direct/transitive package direction, domain independence, and framework-neutral outward seams | Foundation importing L2/session, persistence, concrete infrastructure, Chemistry, or Biology; a Domain Pack or outward contract importing `langchain*`, `langgraph*`, `pydantic_ai*`, repositories, or command clients |
 | Strict boundary typing | Narrow capability-shaped ports and no type erasure at protected constructors/factories | `Any`, `object`, unchecked casts, mixed read/write client protocols, or generic service containers crossing into Foundation/Domain Packs |
 | Architecture tests | Actual composition and semantic escape hatches that an import graph cannot see | constructor or closure receives raw `Persistence`, Lab command client, transaction, outbox repository, or a malicious pack requests undeclared capability |
 | Composition Root tests | The actual object graph contains only declared ports | undeclared dependency injected into Foundation/Domain Pack; concrete domain imported by Foundation composition |
@@ -120,7 +120,8 @@ Import Linter is the dependency-graph authority and runs in a dedicated required
 The target Import Linter contracts are semantic until the package-layout plan names their concrete modules:
 
 - Foundation has no persistence/repository/ORM, concrete L2/session, command-client, raw MCP transport, or concrete-domain dependency.
-- A Domain Agent Definition may depend only on the reviewed Foundation SPI and neutral query/Proposal contracts, not concrete L2, persistence, or external adapters.
+- Foundation outward contracts are BIC-owned and framework-neutral. Supported public framework interfaces remain inside adapters, and provider-contract tests prove those adapters satisfy the BIC contracts.
+- A Domain Agent Definition may depend only on the reviewed Foundation SPI and neutral query/Proposal contracts, not `langchain*`, `langgraph*`, `pydantic_ai*`, concrete L2, persistence, or external adapters.
 - A Domain Proposal Policy may depend only on neutral domain/Proposal/current-fact/transition-plan contracts, not Foundation, L3 execution, repositories, transactions, outbox implementations, or external adapters.
 - Neutral types shared by the two faces cannot reverse-import either layer implementation.
 - Only the outbox executor adapter resolves state-changing external clients.
@@ -166,7 +167,7 @@ The original architecture already defined `runtime.invoke(ctx, turn)` as the uni
 
 ### Domain-neutral Agent Runtime Port
 
-The L2 Turn Host sees one conceptual operation: execute one admitted Turn using an immutable invocation request. It cannot address a specialist, Agent, graph, node, prompt, or tool. The Composition Root prevalidates the workflow's immutable Behavior Target and resolves it to one internal runtime implementation plus its exact Foundation, Experiment Workflow Kit, and Domain Agent Definition composition; neither Portal input nor model output selects the target or Pack.
+The L2 Turn Host sees one conceptual operation: execute one admitted Turn using an immutable invocation request. It cannot address a specialist, Agent, graph, node, prompt, or tool. The Composition Root prevalidates the active route's Foundation, Experiment Workflow Kit, Domain Agent Definition, and Domain Proposal Policy composition; neither Portal input nor model output selects the route or Pack.
 
 The Port returns typed runtime output and one machine-readable **Foundation Execution Outcome**. That outcome states how the Foundation invocation closed and is available before durable L2 closure; it is not the authoritative lifecycle result of the logical Turn. L2 combines it with authoritative workflow, cancellation, deadline, and fencing facts to persist exactly one **Turn Terminal Outcome**. Their exact Python containers, streaming protocol, fields, and mapping table remain detailed contract decisions, but the boundary cannot expose Persistence, a transaction, raw Lab/Nexus clients, concrete graph state, or an iterator whose exhaustion is the only success signal.
 
@@ -305,10 +306,20 @@ Scientific variation inside the three-phase cycle is added through a new Step De
 |---|---|---|
 | Product workflow facts | Agent Service workflow model | Workflow Views, Agent runtime context, Session Events |
 | Physical execution facts | Nexus/Lab | Agent Service correlated projection |
-| UI history and audit | Append-only Session Events | Live SSE, cold snapshot, replay projection |
-| Agent working state | LangGraph execution state/checkpoint | Agent nodes and middleware within a bounded execution |
+| Durable UI history and audit | Append-only Session Events | Live SSE, cold snapshot, replay projection |
+| Agent working state | Foundation Agent state; LangGraph state in the current adapter | Agent nodes and middleware within a bounded execution |
 
 The canonical model is **entity-authoritative, event-projected progress**, not an event-sourced workflow. Live, snapshot, and replay paths must remain semantically equivalent.
+
+Session Events and live output use three distinct commit classes:
+
+| Event class | Examples | Target commit path |
+|---|---|---|
+| Transient stream delta | `reasoning_delta`, `tool_call_delta`, `text_delta` | Broadcast only; no persistence. |
+| Durable conversation or observation output | `text_done`, `tool_result`, `mind_notice`, node lifecycle | L2 Turn-output persistence path; no Proposal. |
+| Workflow transition | `PlanConfirmed`, `TaskParamsSet`, `TaskDispatched`, and compatible projections | Ordered append inside the accepted Proposal transaction. |
+
+`user_message_submitted` commits with Input Admission. `FormRequested` and pending-decision creation commit with the accepted business action. The deterministic effect flow below describes the third class only; it does not force ordinary durable Turn output through Proposal adjudication.
 
 ## Deterministic effect flow
 
@@ -374,6 +385,8 @@ Rejected redelivery of the same logical candidate preserves `proposal_id` and re
 #### Current-code difference
 
 Live main has no Proposal slot or equivalent invariant. L2 consumes a stream of events and commits every non-ephemeral event in a separate transaction, so one Turn may leave several durable mutations before later failure. Some reducers already implement a legitimate multi-entity business action—for example plan confirmation updates the plan, materializes jobs, and advances the experiment—which should become one Proposal transaction rather than several row-level Proposals.
+
+The target deliberately changes that observable failure trajectory. For every cataloged action, failure before Proposal commit leaves no workflow-transition fact, workflow-transition event, or command intent from that action; failure after commit exposes the complete ordered action even if the Turn later fails. A partial workflow-transition prefix is forbidden. The compatibility baseline must record the current partial-prefix case and the selected atomic target case before that action passes migration acceptance. Durable conversation or observation output can still exist through its separate Turn-output commit path.
 
 Current L3 also persists `lab_task_id` directly after Lab submission, and the source records an incident where four parallel submit tool calls created four Lab tasks before a process-local lock/cache was added. Deterministic TLC nodes directly issue cleanup, observation, and round-append commands. The target rule is therefore a deliberate strengthening: every such path must be mapped in the action-state catalog, not grandfathered as already compliant.
 
@@ -585,49 +598,25 @@ The manifest is metadata for validation and composition, not a workflow executio
 
 Foundation and generic L2 orchestration/adjudication do not import concrete packs or maintain a closed domain/specialist enum. Enabling a domain changes trusted composition registration, not either neutral core. Runtime hot loading, arbitrary third-party code, and a general YAML/JSON workflow DSL are outside v1.
 
-### Workflow-lifetime behavior version binding
+### Deployment composition now; workflow binding before production
 
-An experimental workflow spans many stateless Turns and may outlive several Agent Service deployments. L2 therefore persists one immutable Workflow Behavior Binding when it creates the Experiment Workflow, before the first domain Agent invocation:
+Current bench and field operations do not require unfinished experiments to span an Agent Service deployment. V1 therefore does not add Workflow Behavior Binding, Behavior Target persistence, legacy backfill, cohort admission, or version-retention machinery for this migration.
 
-```text
-authoritative Experiment Workflow
-          |
-          `-- immutable Workflow Behavior Binding
-                 |-- exact domain identity
-                 |-- exact Domain Pack Manifest/behavior version
-                 |-- exact Experiment Workflow Template identity/version
-                 `-- exact Behavior Target identity/version
-                        `-- exact internal runtime implementation identity/version
-                            (reviewed legacy compatibility target, or
-                             Foundation + Experiment Workflow Kit + Pack target)
-                                  |
-                                  v
-                         Composition Root exact lookup
-                         |                       |
-                         v                       v
-               Domain Agent Definition   Domain Proposal Policy
-                         \                       /
-                          `-- same Pack version -'
-```
+The Composition Root still validates one exact compatible Pack, Template, Domain Agent Definition, and Domain Proposal Policy for each configured route. New implementation code merges to `main` behind disabled internal routing while ordinary workflows keep the legacy default. A named validation workflow stays on the selected internal path for its run and cannot fall back by Turn, Step, Plan shape, model output, or failure. Effectful shadow execution, dual workflow/event writes, duplicate Proposal acceptance, and a second command pipeline remain prohibited.
 
-Every Turn loads this binding from authoritative Workflow Facts. A Behavior Target is a reviewed, registered identity/version that immutably selects one exact internal runtime implementation. During coexistence, the catalog contains an explicit legacy Chemistry compatibility target as well as new Foundation + Experiment Workflow Kit + Domain Pack targets; legacy is not an absent value or deployment default. The Composition Root performs exact-version lookup and verifies that the target, Pack Agent and Policy faces, selected Workflow Template, Foundation contracts, and Proposal contracts are compatible. Manifest version ranges are admission checks for an installed exact version; they are not selectors that permit an existing workflow to drift to the newest compatible implementation.
+After the combined Chemistry, Biology, contract-freeze, and rerun gates pass, every unfinished old-path workflow on the bench and at field sites completes or is explicitly reset. The release then switches the default once and deletes legacy routing and code. The migration does not maintain two online behavior populations or drain persisted legacy bindings.
 
-New and old trusted targets and versions may coexist in one deployment. Configuration chooses the approved target only for a newly created workflow, and L2 persists that exact choice immediately. The binding never resolves through a mutable deployment mapping, per-Turn or per-Step branch rule, or fallback. A target or version still referenced by a workflow capable of receiving another Turn cannot be retired. If the exact target or dependency version is unavailable, execution fails closed before Foundation invocation or any behavior-dependent Proposal/transition; it never falls forward to another target or version. Any deterministic facts already committed by Input Admission remain valid, and the Turn reaches the applicable Turn Terminal Outcome rather than erasing its input.
+[ADR-0035](../../../docs/adr/0035-pin-behavior-versions-for-the-workflow-lifetime.md) is a mandatory pre-production decision. Before the first real deployment where experiments must survive releases, it must define immutable behavior identity, version retention, rollback, in-flight Proposal and Command handling, migration, and history semantics. No storage field or API is reserved before that review.
 
-V1 has no implicit or in-place behavior migration. Restart, canary routing, deployment, rollback, and default changes leave the binding byte-for-byte stable. Existing workflows complete or are explicitly abandoned under the original behavior. A future migration mechanism requires its own compatibility, history, in-flight Proposal/Command, and user-expectation design; no migration field or API is reserved here.
-
-The binding is internal workflow-routing and audit data. It is not model-selectable and adds no Portal snapshot/SSE, Lab Service, or shared-types field in v1. Release/build metadata can be correlated in telemetry, but deployment routing is not a substitute for the persisted binding. Pre-existing workflows must receive a reviewed exact Chemistry Pack/Template plus legacy Behavior Target compatibility binding before exact-version dispatch is enabled; absence never means “legacy,” “new,” or “latest.” Exact storage columns and identifier syntax remain provisional.
-
-Current main has no equivalent binding. `Experiment`, `Plan`, `Job`, and `Trial` persistence and their snapshots contain no domain, Pack, or Workflow Template behavior version. Application lifespan constructs one global `Runtime`, whose constructor compiles one concrete Chemistry graph once; the L2 orchestrator invokes that same instance for every Turn. A restart or deployment therefore silently replaces behavior for all unfinished workflows, and current Session Events do not make that selection authoritative or replayable. This is migration debt, not behavior to preserve.
+Current main confirms why the deferred gate matters. `Experiment`, `Plan`, `Job`, and `Trial` contain no domain, Pack, or Template behavior version, and application lifespan constructs one global Chemistry Runtime for every Turn. A restart replaces behavior for unfinished workflows. That risk does not justify online-coexistence machinery before operations require cross-deployment workflow survival.
 
 ### Graph-level model capability and Turn-correlated provenance
 
-Workflow Behavior Binding fixes domain and workflow semantics, not a concrete LLM deployment. Foundation exposes exactly two provider-neutral Model Capability Levels in v1: `light` and `complex`. Every Foundation/Experiment Workflow Kit-hosted Agent graph declaration selects exactly one of them. This single level is the model requirement visible to the graph; there is no model-role taxonomy and no arbitrary bag of structured-output, tool-calling, streaming, vision, or context-limit requirements in graph declarations. Domain Packs cannot register additional levels.
+Foundation exposes exactly two provider-neutral Model Capability Levels in v1: `light` and `complex`. Every Foundation/Experiment Workflow Kit-hosted Agent graph declaration selects exactly one of them. This single level is the model requirement visible to the graph; there is no model-role taxonomy and no arbitrary bag of structured-output, tool-calling, streaming, vision, or context-limit requirements in graph declarations. Domain Packs cannot register additional levels.
 
 ```text
-Workflow Behavior Binding
-  -> exact Pack + Template + Behavior Target versions
-       -> hosted Agent graph declaration
+Validated deployment composition
+  -> hosted Agent graph declaration
               -> one Model Capability Level
                            |
                            v
@@ -640,13 +629,13 @@ Workflow Behavior Binding
           Model Invocation Provenance -> Turn correlation
 ```
 
-Foundation is the only model selector. When a hosted graph is invoked, Foundation resolves the graph's declared level through a trusted configuration mapping to one approved concrete model. A missing, unknown, or unmapped level fails closed. Portal/client data, prompts, model output, graph nodes, a Domain Pack, and a Skill cannot choose or change the level, provider, or model at runtime. A concrete model may change behind the same level without mutating Workflow Behavior Binding, but only after the tests and rollout gates required for that level pass. “Latest model” is not a mapping policy.
+Foundation is the only model selector. When a hosted graph is invoked, Foundation resolves the graph's declared level through a trusted configuration mapping to one approved concrete model. A missing, unknown, or unmapped level fails closed. Portal/client data, prompts, model output, graph nodes, a Domain Pack, and a Skill cannot choose or change the level, provider, or model at runtime. A concrete model may change behind the same level only after the tests and rollout gates required for that level pass. The mapping gate reuses the DashScope/Qwen live probe from the inherited [Framework Ruling](https://github.com/c12-ai/BIC-agent-service/blob/62ae7471d703bf85957c12e348b236f3f78cfc05/docs/agent-foundation-refactor-design.md#framework-ruling-2026-07-15), including structured output, tool calling, streaming, usage, timeout, cancellation, and error behavior. “Latest model” is not a mapping policy.
 
 A Turn may invoke more than one hosted graph and may make more than one model call, so Foundation emits Model Invocation Provenance per actual call rather than writing one lossy `model` field on the Turn. Each entry is correlated to the Turn and identifies the hosted graph, declared Model Capability Level, concrete provider/model, and, as available, provider-reported revision, mapping-policy version, a safe fingerprint of behavior-affecting settings, timing, usage, and outcome. Missing provider revision remains explicitly unknown.
 
 L2 retains a compact internal Turn-correlated audit record, while high-cardinality call detail can remain in telemetry. Exact durable fields and retention pass the same consumer-driven necessity discipline as terminal fields. Credentials, secret endpoint details, and raw prompts/responses are excluded unless separately approved; provenance is audit evidence, not Workflow Fact authority and not an input to Domain Proposal Policy. No Portal, SSE, snapshot, Lab, or shared-types field is added in v1.
 
-Exact model lifecycle pinning is a separate Demand-Gated Capability for a domain with a concrete regulatory or reproducibility need. Such a policy must define availability, provider deprecation, artifact retention, failure, and rollback; Foundation does not infer it from a pinned Domain Pack or a Model Capability Level.
+Exact model lifecycle pinning is a separate Demand-Gated Capability for a domain with a concrete regulatory or reproducibility need. Such a policy must define availability, provider deprecation, artifact retention, failure, and rollback; Foundation does not infer it from a Domain Pack or a Model Capability Level.
 
 Current main implements neither capability-based selection nor durable model provenance. Lifespan may construct DashScope and vLLM clients, but application composition chooses `llm_commercial or llm_local` once and injects that single client into the global Runtime. Both the streaming and structured handles use the same configured model with hard-coded thinking/max-token behavior; all current graph builders receive that client. Failure retries the same model rather than failing over to the other configured provider. Optional token accounting writes usage to logs, and the persisted Turn root-span mapping stores feedback context rather than the selected model. This current provider-precedence rule is configuration behavior, not a target contract.
 
@@ -712,6 +701,12 @@ The write side distinguishes two authorities:
 
 Memory is neither a Workflow Fact store nor a durable LangGraph thread/checkpoint. Exact tenant, user, domain, Agent, Session, retention, and deletion fields remain unfrozen until a concrete use case passes the demand gate.
 
+### Rolling conversation-summary continuity
+
+Rolling conversation summary is a bounded v1 continuity fix, separate from General Agent Memory. After the Durable Turn primitives land, the trusted session projection path produces and stores a rolling summary before source Turns leave the latest-50-event reconstruction window. Foundation context loading reads that projection before recent verbatim events and applies the normal context budget.
+
+The slice freezes no generic Memory provider, Store, or model-selected write contract. Its binary acceptance checks prove that a long synthetic session remains within budget, replay reads the stored projection instead of recomputing it, disabling summary consumption falls back to the recent-event path, and the append-only source Session Events remain complete and unchanged.
+
 ### V1 delivery depth
 
 V1 ships only neutral governed seams that migrated Chemistry or the Biology validation slice must exercise before contract freeze:
@@ -747,16 +742,18 @@ Useful existing pieces migrate behind the new seams: recent-history/budget mecha
 
 Foundation v1 is a narrow Agent execution kernel with a finite responsibility set:
 
+The detailed design inherits the [Framework Ruling in Agent Service `62ae747`](https://github.com/c12-ai/BIC-agent-service/blob/62ae7471d703bf85957c12e348b236f3f78cfc05/docs/agent-foundation-refactor-design.md#framework-ruling-2026-07-15). BIC-owned framework-neutral contracts govern every outward Foundation seam. LangGraph remains the non-authoritative current adapter through Phase 1; a Pydantic AI bake-off is revocable and must pass the ruling's ten-point gate before it can trigger a wider review.
+
 | Capability | Foundation responsibility |
 |---|---|
 | Model integration | Expose exactly the graph-facing `light` and `complex` levels, map each level to an approved concrete model, verify internally that the mapped adapter supports Foundation-required mechanics, and record per-invocation provenance. No arbitrary model-capability bag crosses into graph or Pack declarations. |
 | Invocation Context | Carry immutable principal, identity, locale, domain/version, workflow reference/version, execution policy, runtime dependency, and telemetry data for one invocation. It does not carry the L2 Domain Proposal Policy implementation. |
 | Agent State | Store only lean serializable execution data; never embed an authoritative business aggregate or process-bound dependency. |
-| Graph execution | Compile and invoke graphs through public LangGraph APIs with an injected transient checkpointer policy. |
-| Context assembly | Rank typed context blocks, enforce budgets, preserve protected blocks, and fail closed rather than silently truncate protected facts. |
-| Stream adaptation | Map supported public LangGraph message/update/custom streams to stable internal Agent outputs. |
+| Graph execution | Expose a framework-neutral execution contract; the current LangGraph adapter compiles and invokes graphs through supported public APIs with an injected transient checkpointer policy. |
+| Context assembly | Rank typed context blocks, load the stored rolling-summary projection before recent events, enforce budgets, preserve protected blocks, and fail closed rather than silently truncate protected facts. |
+| Stream adaptation | Map framework-adapter streams to stable BIC-owned Agent outputs without exporting framework event types. |
 | Execution lifecycle | Provide telemetry, deadline/cancellation propagation, Execution Closure, and one machine-readable Foundation Execution Outcome per invocation. The exact outcome fields and L2 mapping to a Turn Terminal Outcome remain detailed contract decisions. |
-| Standard tools | Wrap `BaseTool` / `StructuredTool` only as needed to propagate Principal Context, classify side effects, normalize telemetry, and route effectful intent to Proposals. |
+| Standard tools | Expose BIC-owned tool contracts; adapters may wrap public framework tool types internally to propagate Principal Context, classify side effects, normalize telemetry, and route effectful intent to Proposals. |
 
 Foundation v1 explicitly excludes:
 
@@ -781,10 +778,16 @@ Domain Packs provide domain-specific query and Proposal tools. Foundation provid
 
 ## Vertical-slice migration and legacy retirement
 
-The L3 redesign uses a strangler-style vertical migration around stable external contracts. It does not freeze a horizontally complete Foundation before product behavior exercises it, and it does not replace the current L3 in one big-bang release.
+The L3 redesign uses seven vertical delivery groups around stable external contracts. DL-01 requires every implementation child to fit one to three engineer-days with a pre-committed binary acceptance check and rollback boundary. Code merges incrementally to `main` behind disabled internal routing rather than living on a long-running migration branch.
 
 ```text
 recorded Chemistry compatibility baseline
+                    |
+                    v
+durable Turn, Proposal, and Outbox primitives
+                    |
+                    v
+rolling-summary produce + load closure
                     |
                     v
 production-shaped internal Chemistry happy-path slice
@@ -800,25 +803,29 @@ freeze Foundation SPI + Experiment Workflow Kit/Template + Pack contracts;
 rerun all migrated Chemistry gates
                     |
                     v
-eligible new workflows bind new L3; old bindings stay legacy
+finish or reset bench and field old-path workflows
                     |
                     v
-drain legacy bindings -> remove legacy routing and code
+switch default once -> delete legacy routing and code
 ```
 
 The first new path is vertically complete: Objective, confirmed Plan, ordered Chemistry Steps, applicable parameter design and confirmation, Lab dispatch and callback correlation, result analysis, Plan Completion, the existing deterministic ELN Summary Document, and the existing projections used by Portal and ELN. It is initially exercised through production-shaped internal contract, golden, and live-bench harnesses rather than arbitrary production workflow routing. The slice creates only the Foundation, Experiment Workflow Kit, Domain Pack, L2, L4, and compatibility-adapter surface needed to deliver that lifecycle. A partially built general platform with no end-to-end product path is not a migration milestone, but happy-path success alone is not a production cutover gate.
 
-Old and new L3 may coexist across workflows, never within one workflow. Trusted L2 release policy chooses the exact registered Behavior Target when Workflow Behavior Binding commits before the first domain invocation; all later Turns and Steps stay on that exact target/version. The legacy path is a reviewed compatibility target, not an implicit fallback. Callback-, scheduler-, and reconciliation-created Turns reload the originating workflow's binding instead of using a deployment default. Routing cannot depend on model output, the later Plan shape, current Step, or a failure branch, and a new-bound workflow cannot fall back to legacy when it encounters unsupported behavior. Both paths remain subordinate to the same Workflow Fact authority; effectful shadow execution, dual Session Event or Workflow Fact writes, duplicate Proposal acceptance, and a second external-command pipeline are forbidden. Rollback restores availability of a bound target/version rather than silently rebinding an active workflow.
+The new implementation remains disabled for ordinary workflows until cutover. Named internal runs select it at admission and never switch by Turn, Step, Plan shape, model output, or failure branch. Both routes remain subordinate to the same Workflow Fact authority; effectful shadow execution, dual Session Event or Workflow Fact writes, duplicate Proposal acceptance, and a second external-command pipeline are forbidden.
 
-After the complete happy path passes, remaining baseline Chemistry branches and recovery behavior migrate as independently testable slices. Each slice records its compatibility baseline, gates, rollback target, and legacy removal condition, and may be deployed behind internal or disabled routing. No production cohort becomes eligible for a new-L3 Behavior Target until all four gates hold: every baseline behavior reachable by that cohort is supported and gated; the non-production Biology portability slice passes; the Agent Foundation public SPI, Experiment Workflow Kit/Template contracts, and Domain Pack contract are frozen; and **all** migrated Chemistry slices pass again against that frozen set. Eligibility uses trusted facts available when the binding commits, never a predicted future Plan or branch. Other new workflows and every existing legacy-bound workflow continue entirely on the legacy target. An unowned permanent compatibility flag is not an acceptable end state.
+After the complete happy path passes, remaining baseline Chemistry branches and recovery behavior migrate as independently testable slices behind the disabled route. Each slice records its compatibility baseline, gates, rollback target, and legacy-removal condition. The cutover gate requires every baseline Chemistry behavior to pass, the non-production Biology slice to pass, the Agent Foundation public SPI, Experiment Workflow Kit/Template contracts, and Domain Pack contract to freeze, and **all** migrated Chemistry slices to pass again against that frozen set.
 
-Coexistence-era persistence changes follow expand/migrate/contract. Every intermediate schema and durable-record representation must remain readable and writable by all old/new component versions that can run together. Destructive contraction waits until no legacy-bound workflow is queued, running, recoverable, or otherwise eligible for another Turn and legacy execution has been disabled. A deployable slice may remain behind internal or disabled routing; deployment alone never implies that arbitrary production workflows can bind to it.
+After those gates pass, no default switch occurs until every unfinished old-path workflow on the bench and at field sites has completed or been explicitly reset. The release switches the default once, runs its smoke and rollback checks, and deletes legacy routing and code. It does not maintain cohort admission, legacy-binding drain, or a permanent compatibility flag.
 
-The Biology slice follows the production-shaped Chemistry path rather than preceding all Chemistry implementation. Its purpose is still to detect Chemistry-shaped abstractions before contract freeze. If it changes a provisional seam, every migrated Chemistry slice reruns against that change. Legacy L3 retires only after Biology passes; the Agent Foundation public SPI, Experiment Workflow Kit/Template contracts, and Domain Pack contract freeze; every migrated Chemistry slice passes again; no eligible workflow remains bound to the legacy target; and external compatibility and rollback gates pass. The final migration act deletes legacy routing and code.
+Database migration discipline depends on the retention ruling for `a1` field data and `orin-tail` data. Retained data uses expand, migrate, contract until the new schema is verified. If both environments may reset, the migration uses reset-and-seed and carries no unconditional dual-version schema requirement.
+
+Chemistry precedes Biology because Biology exploration has not started and provides no real examples; designing the shared skeleton from imagined Biology behavior would create more rework than challenging provisional contracts after real Chemistry migration. The Biology slice still runs before contract freeze. If it changes a provisional seam, every migrated Chemistry slice reruns against that change.
 
 ## External compatibility
 
 Each core migration stage targets zero coordinated changes to existing Portal, Lab Service, and BIC-shared-types versions. Compatibility covers semantic REST, snapshot, SSE, replay, error, MQ/HTTP, identity, evidence, locale, confirmation, and ELN behavior. Byte-identical internals and unobservable timing are not frozen.
+
+ADR-0012 defines one approved observable failure-path change. The current path may expose a partially committed workflow-action prefix; the target exposes either no workflow transition or the complete ordered Proposal action. Each migrated action records both expected trajectories in its compatibility baseline. Durable conversation or observation output remains independent of that Proposal transaction.
 
 The explicitly approved user-cancellation feature is a separate additive Agent Service + Portal product slice. It does not weaken compatibility requirements for the core refactor and does not require Lab Service or BIC-shared-types changes under the current ownership model.
 
@@ -828,10 +835,11 @@ Production Biology cross-repo contracts require a separate roadmap.
 
 ## Candidate PR disposition
 
-Neither PR #94 nor PR #136 is a merge unit. The implementation plan must contain a full adopt/adapt/drop matrix.
+Neither PR #94 nor PR #136 is a merge unit. The implementation plan must contain a full adopt/adapt/drop matrix. [Agent Service PR #150](https://github.com/c12-ai/BIC-agent-service/pull/150) closed on 2026-07-16 with a pointer here; this cross-repo design supersedes it, while its branch remains the historical record of three Claude × Codex review rounds.
 
 | Candidate | Current target disposition |
 |---|---|
+| #150 converged architecture proposal | Superseded here; inherit only the ruled Framework Ruling and rolling-summary commitment |
 | #94 policy outcomes and stable reason codes | Adapt into the Chemistry Domain Proposal Policy and error translation |
 | #94 admission/middleware checks | Retain only as non-authoritative preflight where they improve UX or defense in depth |
 | #94 Chemistry action/stage taxonomy | Replace through the single versioned Proposal taxonomy |
@@ -872,6 +880,6 @@ Architecture review and detailed contract work must still resolve:
 - the exact typed Query Result and context-contribution contracts within the agreed governance boundary;
 - exact Outbox Command lease, recovery, ambiguous-delivery, ordering, and idempotency protocols within the closed exclusive-executor boundary;
 - exact durable admission, source-deduplication, claim-fencing, and terminal-storage fields within the closed lifecycle semantics;
-- exact Workflow Behavior Binding and Behavior Target storage fields, identifier syntax, legacy backfill mechanics, and supported-version retention operations;
+- the deferred ADR-0035 behavior-binding contract before any production deployment must preserve workflows across releases, including identity, version retention, rollback, in-flight work, migration, and history semantics;
 - concrete deadline, lease, heartbeat, and terminal-closure-reserve values, plus cooperative provider interruption and shutdown cleanup that cannot alter a committed closure;
 - exact cancellation JSON spellings and mixed-version release mechanics within the closed authorization and first-commit-wins semantics.
