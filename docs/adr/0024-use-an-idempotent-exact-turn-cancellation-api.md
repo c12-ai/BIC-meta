@@ -1,0 +1,3 @@
+# Use an idempotent exact-Turn cancellation API
+
+User cancellation uses an authenticated empty-body `POST /sessions/{session_id}/turns/{turn_id}/cancel`, while every eligible 202 Input Admission receipt exposes the server-assigned stable Turn identity. The endpoint returns HTTP 200 only after a Turn Terminal Outcome is committed or observed and distinguishes a cancellation terminal from an already-won completion, failure, or timeout terminal; it does not duplicate the full Turn Terminal Outcome, because SSE/history remain the projection authority. This avoids a racy Session `current` alias and makes retries truthful without adding a `requested` or `cancelling` lifecycle phase; exact JSON response field and enum spellings remain provisional until contract freeze.

@@ -1,0 +1,3 @@
+# Make the outbox executor the sole external-command authority
+
+State-changing external commands will be executed only by the outbox executor, never synchronously from L3, a Domain Pack, a tool, or a Proposal handler. The L2 transaction first commits the deterministic workflow transition, Session Event, and stable Outbox Command; a later receipt records the external identity and unlocks existing dispatched semantics. Automatic retry remains disabled per command type until the receiver's BIC idempotency-key behavior is verified. This replaces the candidate #136 pattern in which a durable record exists but L3 still performs the synchronous Lab call.

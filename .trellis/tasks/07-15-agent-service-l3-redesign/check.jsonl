@@ -1,0 +1,11 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify no implementation creates a reverse layer dependency, second workflow authority, or effect bypass."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Verify shared code reflects identical cross-domain semantics rather than superficial similarity."}
+{"file":".trellis/spec/tech_design/backend/database-guidelines.md","reason":"Verify atomic admission, terminal, Proposal, event, and outbox invariants plus migration safety."}
+{"file":".trellis/spec/tech_design/backend/error-handling.md","reason":"Verify failure, timeout, cancellation, and fail-closed version resolution remain typed and compatible."}
+{"file":".trellis/spec/tech_design/backend/quality-guidelines.md","reason":"Drive full-scope quality checks, negative tests, and failure-injection review."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/architecture-gate-evidence.md","reason":"Verify lint, Import Linter, typing, object-graph, startup, and transaction gates cover known boundary failures."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/pr-94-136-150-evidence.md","reason":"Verify the final adopt/adapt/drop mapping does not inherit either candidate PR as a merge unit."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/terminal-field-consumer-evidence.md","reason":"Verify every durable Turn Terminal Outcome field has a named consumer and survives topology changes."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/user-turn-cancellation-evidence.md","reason":"Verify the separately staged cancellation product behavior and mixed-version compatibility gates."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-experiment-workflow-evidence.md","reason":"Verify manual/robot Step compatibility, confirmation applicability, result progression, and deterministic ELN behavior."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-workflow-version-binding-evidence.md","reason":"Verify exact legacy/new Behavior Target binding and absence of mutable or branch fallback routing."}

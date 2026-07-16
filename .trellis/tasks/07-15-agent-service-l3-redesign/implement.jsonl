@@ -1,0 +1,14 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Preserve the approved L1-L4 dependency direction and authority boundaries during future implementation planning."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Apply semantic reuse tests when extracting Agent Foundation, Experiment Workflow Kit, and Domain Pack responsibilities."}
+{"file":".trellis/spec/tech_design/backend/directory-structure.md","reason":"Shape future backend package placement without treating the current graph topology as a compatibility constraint."}
+{"file":".trellis/spec/tech_design/backend/database-guidelines.md","reason":"Guide durable Input Admission, Turn fencing, Proposal transactions, outbox persistence, and expand-migrate-contract work."}
+{"file":".trellis/spec/tech_design/backend/error-handling.md","reason":"Guide typed execution outcomes, durable Turn terminals, compatibility errors, and fail-closed behavior."}
+{"file":".trellis/spec/tech_design/backend/quality-guidelines.md","reason":"Define implementation quality gates for strict boundaries, negative fixtures, and failure injection."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/state-authority-and-legacy.md","reason":"Ground migration in current workflow authority, event projection, and legacy coupling evidence."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-multi-effect-turn-behavior.md","reason":"Inventory existing multi-effect and direct-mutation paths that must converge on one Proposal boundary."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/input-admission-evidence.md","reason":"Ground durable admission and acknowledgement ordering in current ingress behavior."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/claim-fencing-evidence.md","reason":"Ground row-level claim generation and stale-claim revocation requirements."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-experiment-workflow-evidence.md","reason":"Preserve current Chemistry workflow behavior while extracting the shared serial Experiment Workflow Template."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-extension-capability-evidence.md","reason":"Ground Memory, Skill, MCP, Query, and context seams in current implementation evidence rather than speculative frameworks."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-workflow-version-binding-evidence.md","reason":"Ground immutable Workflow Behavior Binding and legacy/new Behavior Target migration."}
+{"file":".trellis/tasks/07-15-agent-service-l3-redesign/research/current-model-selection-provenance-evidence.md","reason":"Ground the light/complex model-level contract and invocation provenance requirements."}

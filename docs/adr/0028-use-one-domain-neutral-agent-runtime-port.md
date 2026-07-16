@@ -1,0 +1,3 @@
+# Use one domain-neutral Agent Runtime Port
+
+L2 executes a Turn through one domain-neutral Agent Runtime Port and cannot address a domain Agent, graph, node, prompt, or tool; the Composition Root binds the authoritative domain's Agent Definition behind that Port, and typed runtime output plus one execution-closure result return to L2. This does not conflict with a Domain Pack spanning the L2/L3 extension boundary: the Pack's Policy face is bound into L2, its Agent face is bound into L3, and effect requests travel back through the separate Proposal Port rather than a direct Agent-to-Policy call. The design deepens the original single `Runtime.invoke(ctx, turn)` shape while removing raw dependencies and iterator-exhaustion outcome inference.

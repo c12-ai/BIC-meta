@@ -1,0 +1,3 @@
+# Limit user cancellation to user-triggered Turns
+
+V1 Portal Stop and the user cancellation API accept only trusted `source=USER` Turns: user messages, form confirmations, and genuine user decision responses. MQ task-terminal, scheduler-expiry, and reconciliation Turns reject user cancellation because silently stopping them could discard callback, analysis, or recovery continuation; they use deadline/watchdog/recovery, with operational cancellation kept separate. L2 assigns source, kind, and Turn Initiator, and cancelling a user continuation never reverses deterministic facts already committed during Input Admission. Existing expiry paths misrepresented as `DECISION_RESPONSE/USER` must be corrected before this policy is enforced.

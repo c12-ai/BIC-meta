@@ -1,0 +1,3 @@
+# Retain only durable output on Turn cancellation
+
+When a Turn is cancelled, Portal and replay retain completed persisted `text_done`, `reasoning_done`, and tool-result segments but discard the currently unfinished emit-only text, reasoning, or tool-call fragment and mark open execution presentation interrupted. V1 deliberately does not persist a partial-response draft or place partial text on `turn_cancelled`; otherwise cross-process flush/fencing and write-volume policy become a new correctness subsystem. This sacrifices retention of the last unfinished fragment so live, refresh, replay, and multi-tab views converge deterministically.

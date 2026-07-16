@@ -1,0 +1,3 @@
+# Separate Turn, Outbox Command, and Lab Task lifecycles
+
+A Turn is one bounded L2 execution of a normalized input, from dequeue to a durable terminal lifecycle record. It may include Agent reasoning, governed queries, and synchronous Proposal adjudication, but it ends independently of later Outbox Command and Lab/Nexus Task execution. External callbacks and reconciliation create new Turns rather than extending the originating Turn. The lifecycles retain separate identities, state models, deadlines, cancellation rules, and terminal conditions so an Agent execution result cannot be confused with physical execution progress.

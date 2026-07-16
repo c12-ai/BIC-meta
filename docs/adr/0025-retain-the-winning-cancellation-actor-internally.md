@@ -1,0 +1,3 @@
+# Retain the winning Cancellation Actor internally
+
+The authenticated Principal whose request first commits a user-cancellation terminal is retained in the same transaction as an internal Cancellation Actor, distinct from the Turn Initiator and immutable under duplicate cancellation. This supports durable investigation of peer interruption after transient authorization context and traces disappear without exposing member identity through Portal events or HTTP; v1 adds no free-text reason, separate source, or `cancel_requested_at` because the endpoint, terminal kind, and commit timestamp already cover those semantics.

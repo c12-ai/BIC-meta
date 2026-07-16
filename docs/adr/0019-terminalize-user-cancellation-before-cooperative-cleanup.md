@@ -1,0 +1,3 @@
+# Terminalize user cancellation before cooperative cleanup
+
+Once L2 accepts a user-cancellation request, the same transaction immediately writes the Turn's unique cancellation terminal and terminal projection, closes any still-open effect authority, and revokes later Proposal, persistence, and broadcast authority. Cooperative interruption and resource cleanup happen afterwards and may outlive Persistence Closure; they cannot keep the user-visible Turn running. This deliberately favors deterministic chatbot cancellation and exactly-one closure over waiting indefinitely for a provider or tool to acknowledge cancellation, and it adds no `cancelling` Turn state.
