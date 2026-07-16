@@ -1,0 +1,8 @@
+{"file":"Production-PRD.md","reason":"Parent product contract for user-initiated retry and fresh material preparation."}
+{"file":"BIC-agent-service/.trellis/spec/backend/L1/http-routes.md","reason":"Thin authenticated session route and idempotency/error conventions."}
+{"file":"BIC-agent-service/.trellis/spec/backend/L2/facade.md","reason":"User-initiated action, persistence, broadcast, and capability boundaries."}
+{"file":"BIC-agent-service/.trellis/spec/backend/L3/graphs.md","reason":"TLC result-review reject routing and event-emission boundary."}
+{"file":"BIC-agent-service/.trellis/spec/backend/L3/events.md","reason":"TaskCreated event apply/wire discipline."}
+{"file":"BIC-agent-portal/.trellis/spec/ui/L3/sse-contract.md","reason":"Portal task_created event consumption contract."}
+{"file":"BIC-agent-portal/.trellis/spec/ui/L3/form.md","reason":"Per-trial params and Material Preparation gating."}
+{"file":"BIC-agent-portal/.trellis/spec/ui/L3/workspace.md","reason":"Result/Monitor actions, attempt routing, and append-only history."}

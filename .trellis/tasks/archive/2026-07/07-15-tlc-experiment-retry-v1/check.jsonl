@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/07-15-tlc-experiment-retry-v1/prd.md","reason":"Acceptance criteria to verify independently."}
+{"file":".trellis/tasks/07-15-tlc-experiment-retry-v1/design.md","reason":"Architecture, safety, and idempotency decisions."}
+{"file":"BIC-agent-service/.trellis/spec/backend/L3/events.md","reason":"Check event apply/wire discipline and compatibility."}
+{"file":"BIC-agent-portal/.trellis/spec/ui/L3/workspace.md","reason":"Check routing, history preservation, and retry UI behavior."}
