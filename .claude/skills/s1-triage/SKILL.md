@@ -1,28 +1,26 @@
 ---
 name: s1-triage
-description: Agent 改进工作流的 S1 整理角色 — 接收用户测试反馈，bench 复现取证，按模板在 c12-ai/BIC-meta 建 issue。触发：用户反馈 agent 问题、要求整理/建档/triage、说 /s1-triage。
+description: S1 triage role of the agent-improvement workflow — receive user test feedback, reproduce it on the bench with evidence, and file an issue in c12-ai/BIC-meta per the template. Triggers when the user reports an agent problem, asks to triage / file / organize a report, or says /s1-triage.
 ---
 
-# S1 — 反馈整理 / 复现 / 建档
+# S1 — Feedback triage / reproduce / file
 
-先读 `ops/agent-improvement-workflow.md`（角色边界、issue 模板、bench 手册、严重度标签）。
+First read `ops/agent-improvement-workflow.md` (role boundaries, issue template, bench playbook, severity labels).
 
-## 职责
+## Responsibilities
 
-用户丢来一条反馈（截图/描述/session 链接）后：
+After the user hands over a piece of feedback (screenshot / description / session link):
 
-1. **复现取证**（后端真相优先，不信页面）：
-   - 从 URL 取 session_id → `docker exec talos-postgres psql -U postgres -d talos_agent_db`
-     查 `session_events`（seq/kind/payload）、`plans.current_job_id`、`trials`。
-   - 需要时看 BE 日志 `talos/BIC-agent-service/app/logs/error.log`、tmux pane 输出。
-   - ⚠️ 只读操作。不 reset、不重启服务、不跑会写库的测试循环（用户正在测试）。
-2. **查重**：`gh issue list --repo c12-ai/BIC-meta --state open` 比对；已有则把新证据
-   comment 上去，不重复建。
-3. **建档**：按 SOP 的 issue 模板写 body（现象/证据/复现/根因假设/**二元验收必填**），
-   `gh issue create --repo c12-ai/BIC-meta`，打严重度 + repo + `needs-triage` 标签。
-4. 回复用户：issue 编号 + 一句话定性 + 建议的下一步（走 S2 还是攒批）。
+1. **Reproduce with evidence** (backend truth first, do not trust the page):
+   - Take the session_id from the URL → `docker exec talos-postgres psql -U postgres -d talos_agent_db`
+     and query `session_events` (seq/kind/payload), `plans.current_job_id`, `trials`.
+   - When needed, read the BE log `talos/BIC-agent-service/app/logs/error.log` and tmux pane output.
+   - ⚠️ Read-only. Do NOT reset, do NOT restart services, do NOT run test loops that write the DB (the user is testing).
+2. **De-dup**: compare against `gh issue list --repo c12-ai/BIC-meta --state open`; if it already exists, comment the new evidence onto that issue instead of filing a duplicate.
+3. **File**: write the body per the SOP issue template (symptom / evidence / repro / root-cause hypothesis / **binary acceptance is mandatory**), run `gh issue create --repo c12-ai/BIC-meta`, and apply the severity + repo + `needs-triage` labels.
+4. Reply to the user: issue number + one-line classification + suggested next step (go to S2, or batch it).
 
-## 禁止
+## Prohibited
 
-- 不改产品代码，不下根因结论（假设可以写，标注"假设"）。
-- 不擅自把问题降级/合并稀释 —— 拿不准严重度就问用户。
+- Do NOT change product code; do NOT draw root-cause conclusions (a hypothesis is fine — label it "hypothesis").
+- Do NOT silently downgrade or merge-dilute a problem — if unsure about severity, ask the user.
