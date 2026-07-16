@@ -111,3 +111,17 @@ Load only the SOP that matches the current work.
 |---|---|---|
 | `prd` | Updating, creating, relocating, splitting, merging, or reviewing Production PRD / Project PRD content; deciding whether requirements belong at root or child-repo level | `@.claude/skills/prd/SKILL.md` |
 | `bump-version` | Drake asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in `c12-ai/BIC-meta`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`) are authoritative; the legacy `stage:*` vocabulary is slated for retirement but still live — migration outstanding. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by `/domain-modeling`. See `docs/agents/domain.md`.
