@@ -64,6 +64,10 @@ If the user asks to execute tests, state that this skill only provides read-only
      conceptual assessment snapshot for this run; this name does not add a JSON
      field. Substeps 1A, 1B, and 1C only interpret that same result. Do not rerun
      the wrapper or repeat GitHub discovery between them.
+   - Before that single call, derive all arguments from the user request and
+     this workflow. Never execute the wrapper with `--help`, solely to discover
+     options, or as a preflight. If the user supplied a local Issue file, include
+     `--issue-file <path>` in the one assessment call.
    - Treat the other wrappers as standalone diagnostics; do not run all wrappers
      sequentially for one final brief because each diagnostic invocation may
      perform its own live metadata collection.

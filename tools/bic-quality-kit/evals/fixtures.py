@@ -44,12 +44,17 @@ def _commit_all(repo: Path, message: str) -> None:
 
 
 def _install_skill(workspace: Path, skill_source: Path) -> None:
+    source_manifest = skill_source / "SKILL.md"
+    if not source_manifest.is_file():
+        raise FileNotFoundError(f"Skill source is missing SKILL.md: {skill_source}")
     target = workspace / ".agents/skills/bic-quality-guan-ping-ce"
     shutil.copytree(
         skill_source,
         target,
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
     )
+    if not (target / "SKILL.md").is_file():
+        raise RuntimeError(f"Installed Skill is missing SKILL.md: {target}")
     route = """
 
 ## SOP Index

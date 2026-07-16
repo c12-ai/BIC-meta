@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -54,12 +55,13 @@ def run_one(
     model: str | None,
     timeout_seconds: int,
     dry_run: bool,
+    skill_source: Path = SKILL_SOURCE,
 ) -> None:
     run_dir = output_dir / case["id"] / mode / f"run-{repetition:02d}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f"bic-quality-eval-{case['id']}-") as temp:
         workspace = Path(temp) / "BIC-meta"
-        env_overrides = build_fixture(workspace, case["fixture"], mode, SKILL_SOURCE)
+        env_overrides = build_fixture(workspace, case["fixture"], mode, skill_source)
         manifest = fixture_manifest(workspace)
         command = [
             "codex", "exec",
@@ -144,20 +146,30 @@ def main() -> int:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     output_dir = (args.output_dir or EVAL_DIR / "results" / stamp).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    for case in cases:
-        for mode in selected_modes(case, args.mode):
-            for repetition in range(1, args.repetitions + 1):
-                print(f"[{case['id']}] {mode} run {repetition}/{args.repetitions}", flush=True)
-                run_one(
-                    case,
-                    mode,
-                    repetition,
-                    output_dir,
-                    config["forbidden_commands"],
-                    args.model,
-                    args.timeout_seconds,
-                    args.dry_run,
-                )
+    with tempfile.TemporaryDirectory(prefix="bic-quality-eval-skill-source-") as skill_temp:
+        skill_snapshot = Path(skill_temp) / "bic-quality-guan-ping-ce"
+        shutil.copytree(
+            SKILL_SOURCE,
+            skill_snapshot,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
+        if not (skill_snapshot / "SKILL.md").is_file():
+            raise FileNotFoundError(f"Skill source is missing SKILL.md: {SKILL_SOURCE}")
+        for case in cases:
+            for mode in selected_modes(case, args.mode):
+                for repetition in range(1, args.repetitions + 1):
+                    print(f"[{case['id']}] {mode} run {repetition}/{args.repetitions}", flush=True)
+                    run_one(
+                        case,
+                        mode,
+                        repetition,
+                        output_dir,
+                        config["forbidden_commands"],
+                        args.model,
+                        args.timeout_seconds,
+                        args.dry_run,
+                        skill_snapshot,
+                    )
 
     if args.dry_run:
         print(f"Dry-run artifacts: {output_dir}")

@@ -90,7 +90,13 @@
       "facts": [
         {"id": "agent-repository", "any": ["BIC-agent-service"]},
         {"id": "meta-repository", "any": ["BIC-meta"]},
-        {"id": "no-shared-chain", "any": ["不能证明", "无法证明", "未确认", "unresolved", "not establish", "does not establish"]},
+        {
+          "id": "no-shared-chain",
+          "all_of_any": [
+            ["不能证明", "无法证明", "不足以证明", "不足以说明", "未确认", "unresolved", "not establish", "does not establish"],
+            ["业务链", "业务流", "business chain", "business stream"]
+          ]
+        },
         {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
       ],
       "forbidden_output": ["已确认跨仓业务链", "confirmed cross-repository business chain"]

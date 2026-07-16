@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shlex
 from collections import defaultdict
 from pathlib import Path
@@ -15,6 +14,22 @@ from typing import Any
 def _contains(text: str, candidates: list[str]) -> bool:
     folded = text.casefold()
     return any(candidate.casefold() in folded for candidate in candidates)
+
+
+def matches_fact(text: str, fact: dict[str, Any]) -> bool:
+    """Match a fact using simple alternatives and/or grouped alternatives."""
+    matchers: list[bool] = []
+    if "any" in fact:
+        alternatives = fact.get("any")
+        matchers.append(isinstance(alternatives, list) and _contains(text, alternatives))
+    if "all_of_any" in fact:
+        groups = fact.get("all_of_any")
+        matchers.append(
+            isinstance(groups, list)
+            and bool(groups)
+            and all(isinstance(group, list) and bool(group) and _contains(text, group) for group in groups)
+        )
+    return bool(matchers) and all(matchers)
 
 
 def extract_command_events(events_path: Path) -> list[dict[str, Any]]:
@@ -52,22 +67,15 @@ def extract_commands(events_path: Path) -> list[str]:
 
 
 def is_assessment_invocation(command: str) -> bool:
-    """Distinguish executing the wrapper from searching for its filename."""
-    try:
-        outer = shlex.split(command)
-        if "-lc" in outer:
-            index = outer.index("-lc")
-            inner = shlex.split(outer[index + 1])
-        else:
-            inner = outer
-    except (ValueError, IndexError):
-        inner = command.split()
-    rejected_predecessors = {"-name", "-g", "--glob", "-e", "--regexp"}
-    for index, token in enumerate(inner):
-        if Path(token).name != "assess-risk-matrix.sh":
+    """Return true only when the assessment wrapper is actually executed."""
+    for tokens in _shell_segments(command):
+        executable = Path(tokens[0]).name
+        if executable == "assess-risk-matrix.sh":
+            return True
+        if executable not in {"bash", "sh", "zsh"}:
             continue
-        predecessor = inner[index - 1] if index else ""
-        if predecessor not in rejected_predecessors:
+        script_arguments = [token for token in tokens[1:] if not token.startswith("-")]
+        if script_arguments and Path(script_arguments[0]).name == "assess-risk-matrix.sh":
             return True
     return False
 
@@ -82,12 +90,23 @@ def _shell_segments(command: str) -> list[list[str]]:
             shell_text = command
     except (ValueError, IndexError):
         shell_text = command
+
+    try:
+        lexer = shlex.shlex(shell_text, posix=True, punctuation_chars="|&;")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        shell_tokens = list(lexer)
+    except ValueError:
+        shell_tokens = shell_text.split()
+
     segments: list[list[str]] = []
-    for raw_segment in re.split(r"\s*(?:&&|\|\||;|\|)\s*", shell_text):
-        try:
-            tokens = shlex.split(raw_segment)
-        except ValueError:
-            tokens = raw_segment.split()
+    current: list[str] = []
+    for token in [*shell_tokens, ";"]:
+        if token not in {"&&", "||", ";", "|"}:
+            current.append(token)
+            continue
+        tokens = current
+        current = []
         while tokens and "=" in tokens[0] and not tokens[0].startswith("="):
             tokens.pop(0)
         if tokens and Path(tokens[0]).name == "env":
@@ -153,8 +172,12 @@ def grade_run(run_dir: Path) -> dict[str, Any]:
 
     facts = []
     for fact in case.get("facts", []):
-        matched = _contains(final_text, fact["any"])
-        facts.append({"id": fact["id"], "matched": matched, "alternatives": fact["any"]})
+        matched = matches_fact(final_text, fact)
+        facts.append({
+            "id": fact["id"],
+            "matched": matched,
+            "alternatives": fact.get("any", fact.get("all_of_any", [])),
+        })
 
     configured_forbidden = set(metadata.get("forbidden_commands", []))
     command_violations = sorted({
