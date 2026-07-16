@@ -4,7 +4,7 @@
 
 - Owner: Drake
 - Review state: Draft
-- Last updated: 2026-07-08
+- Last updated: 2026-07-15
 
 ## Scope
 
@@ -149,6 +149,41 @@ Core scenarios:
    - The system must preserve enough workflow context from the target assistant reply
      time to support later quality analysis by experiment stage, specialist, task, and
      issue pattern.
+
+13. **Shelf edit mutual exclusion (multi-user concurrency control)**
+   - The physical shelf has three classes of writers: Consumable Maintenance (human bulk
+     upkeep), Material Preparation (human per-task assignment), and the robot (a
+     dispatched task's execution window). Conflicting writers must not edit
+     concurrently.
+   - Conflict is judged by material-type claims: Consumable Maintenance and an executing
+     robot task claim the whole shelf; a Material Preparation session claims only its
+     task's required material types (rule-10 sets). Overlapping claims are mutually
+     exclusive; disjoint claims proceed in parallel (e.g. a TLC preparation and a CC
+     preparation).
+   - Lab Service is the product authority for shelf edit claims. Acquisition is atomic;
+     the losing user receives an explicit conflict that names the current holder and
+     source. UI disabling is advisory only — every shelf write and every dispatch
+     re-validates the claim authoritatively at Lab Service.
+   - Entering maintenance or preparation acquires the claim; leaving releases it; an
+     abandoned editing session (closed tab, dead client) is reclaimed automatically
+     within about a minute, and stale writes from the reclaimed session are rejected —
+     the shelf never wedges.
+   - The robot's claim starts at dispatch and ends only when the task reaches a terminal
+     state. A TLC task parked awaiting confirmation still holds its claim, because its
+     selected boxes remain off-shelf until the run ends.
+   - A robot claim excludes HUMAN writers only. Robot-vs-robot serialization is owned by
+     robot availability, not by shelf claims: concurrent non-terminal tasks' claims
+     coexist (e.g. a CC dispatch proceeds while a TLC task parked awaiting confirmation
+     still holds its claim) — a robot-vs-robot exclusion would deadlock the established
+     "CC/RE run while TLC awaits confirmation" workflow.
+   - A dispatch attempted while a conflicting human claim is live is rejected atomically
+     (no task is created) and the failure surfaces to the chemist naming the holder; the
+     same dispatch succeeds after the claim is released.
+   - The portal reflects claim state on both surfaces (holder-naming banners, disabled
+     entries) within a few seconds, in Chinese and English per requirement 11.
+   - This intent-level mutual exclusion deliberately does not lock the configuring
+     (intent assignment) phase; cross-task claims over the same specific physical item
+     remain dispatch-validation territory (BIC-lab-service issue #136).
 
 ## Core Concepts
 
@@ -508,6 +543,22 @@ For the TLC Lab Logistic panel:
   rather than creating duplicate ratings.
 - Stored feedback context reflects the workflow state at the time of the target
   assistant reply, not only the later state when the user submits feedback.
+- Two users preparing the SAME experiment type are mutually exclusive: the second
+  entry attempt is rejected with a message naming the holder; preparations of
+  different experiment types proceed in parallel unaffected.
+- While Consumable Maintenance is active, every Material Preparation entry is blocked
+  with a holder-naming banner, and a dispatch attempt is rejected atomically (no task
+  created) with the holder named on the user-visible failure surface; the same
+  dispatch succeeds after the maintenance session ends.
+- While a dispatched task is non-terminal — including a TLC task parked awaiting
+  confirmation — Consumable Maintenance entry is blocked with a robot-window notice.
+- A CC dispatch succeeds while a TLC task is parked awaiting confirmation and still
+  holds its shelf claim (robot claims exclude human writers only, never each other).
+- An abandoned editing session's shelf claim is reclaimed automatically (~1 minute);
+  other users' surfaces recover on their next poll, and a write replayed from the
+  reclaimed session is rejected.
+- Shelf claim banners and disabled states appear on other users' portals within one
+  poll cycle (~3 s), in Chinese and English.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -552,7 +603,21 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+- 2026-07-15 (latest): Added requirement 13 (shelf edit mutual exclusion): material-type
+  claim model over the three shelf writer classes (maintenance = whole shelf,
+  preparation = the task's rule-10 type set, robot = dispatch→terminal window incl.
+  TLC awaiting-confirm), Lab Service as claim authority with atomic acquisition and
+  holder-naming conflicts, advisory-only UI with authoritative re-validation on every
+  write/dispatch, automatic reclaim of abandoned sessions, and matching acceptance
+  criteria. Review revision (same day): robot claims exclude HUMAN writers only —
+  robot-vs-robot claims coexist (serialization owned by robot availability), so CC
+  dispatches while a parked TLC still holds its claim. Implemented and live-verified as task `07-15-shelf-edit-locks`
+  (BIC-agent-service `.trellis`); design record: 货架编辑互斥锁设计结论
+  (Feishu B498dsIMhorCYLxEGNhc90DTn0f), which supersedes the earlier three-lock
+  slot-level interaction draft. Cross-task same-item dispatch validation is tracked
+  separately (BIC-lab-service #136).
+
+- 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
