@@ -110,4 +110,18 @@ Load only the SOP that matches the current work.
 | SOP / Skill | Use when | Link |
 |---|---|---|
 | `prd` | Updating, creating, relocating, splitting, merging, or reviewing Production PRD / Project PRD content; deciding whether requirements belong at root or child-repo level | `@.claude/skills/prd/SKILL.md` |
-| `bump-version` | Drake asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
+| `bump-version` | The product owner asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in `c12-ai/BIC-meta`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+两根轴（定档 2026-07-16）：**分诊轴** `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`（engineering skills 读它）；**生命周期轴** `stage:已析根因` → `stage:已实现待复测` → `stage:已验证`（S1/S2/S3 用）。`stage:待调查` / `stage:待裁定` / `stage:待修复` 已退役删除。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by `/domain-modeling`. See `docs/agents/domain.md`.
