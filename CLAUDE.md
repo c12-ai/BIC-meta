@@ -111,6 +111,7 @@ Load only the SOP that matches the current work.
 |---|---|---|
 | `prd` | Updating, creating, relocating, splitting, merging, or reviewing Production PRD / Project PRD content; deciding whether requirements belong at root or child-repo level | `@.claude/skills/prd/SKILL.md` |
 | `bump-version` | The product owner asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
+| `pr-stack` | One topic/issue produces ≥2 PRs — same repo: stacked PRs (`gh stack`) are the default; cross-repo: per-repo stacks + BIC-meta tracking issue | `@.claude/skills/pr-stack/SKILL.md` |
 
 ## Agent skills
 
