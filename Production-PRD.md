@@ -4,7 +4,7 @@
 
 - Owner: BIC product owner
 - Review state: Draft
-- Last updated: 2026-07-16
+- Last updated: 2026-07-17
 
 ## Scope
 
@@ -132,6 +132,11 @@ Core scenarios:
    - Deterministic backend text should preserve stable machine fields and expose
      display metadata or localizable fields for the portal instead of requiring
      downstream consumers to parse English labels.
+   - System-generated values that a chemist may later edit and that can persist
+     into forms or result evidence must keep a stable machine identity plus
+     localizable display metadata. A chemist-authored replacement is user data:
+     it must remain verbatim across locale changes, replay, dispatch, and result
+     review. Locale-specific default text must not be the value's only identity.
    - Lab Service must keep stable inventory/material keys as the business authority
      while exposing localized display names for physical materials, rack areas, and
      preparation surfaces.
@@ -427,8 +432,10 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
 
 11. **FP (fraction preparation) execution rules** (decided 2026-07-06, implemented 2026-07-07)
     - **Container parameter model.** FP execution params are a container list; each container is
-      a flask or the waste container, with a display name (≤5 characters) and its assigned tubes.
-      Defaults: one flask 烧瓶1 + one waste 废液瓶. The user may add flasks; the waste container
+      a flask or the waste container, with a display name (≤32 characters) and its assigned tubes.
+      Defaults: one generated flask 1 + one generated waste container. Their stable display
+      metadata renders Flask 1 / Waste bottle in English and 烧瓶1 / 废液瓶 in Chinese; the user may
+      add flasks or rename a flask, after which the authored name remains verbatim. The waste container
       is fixed. A tube belongs to at most one container; dispatch requires at least one flask
       holding at least one tube.
     - **Recommendation basis is upstream, verbatim.** The FP form's read-only context is the
@@ -654,6 +661,10 @@ For the TLC Lab Logistic panel:
 - Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-17: Clarified the i18n contract for system-generated, user-editable
+  persisted values. FP default containers now use stable display metadata and
+  locale-aware labels; chemist-authored names remain verbatim.
 
 - 2026-07-16 (latest): Requirement 13 handoff supplement (closes BIC-lab-service #140):
   a user-initiated dispatch relays the acting member's identity to Lab Service
