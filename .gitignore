@@ -10,10 +10,14 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Project-owned skills (prd, env-up, s1-triage, s2-investigate). Other synced personal/plugin skills are local noise.
+# Project-owned skills (prd, env-up, s1-triage, s2-investigate, pr-stack, gh-stack). Other synced personal/plugin skills are local noise.
 /.claude/skills/*
 !/.claude/skills/prd/
 !/.claude/skills/prd/SKILL.md
+!/.claude/skills/pr-stack/
+!/.claude/skills/pr-stack/SKILL.md
+!/.claude/skills/gh-stack/
+!/.claude/skills/gh-stack/SKILL.md
 !/.claude/skills/env-up/
 !/.claude/skills/env-up/SKILL.md
 !/.claude/skills/s1-triage/
