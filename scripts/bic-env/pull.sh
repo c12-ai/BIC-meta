@@ -15,7 +15,7 @@ print_context
 pull_one() { # <label> <dir>
   local label="$1" d="$2" branch before after
   if [ ! -d "${d}/.git" ]; then
-    note "${label}: not cloned (${d}) — make bootstrap"
+    note "${label}: not cloned (${d}) — clone it under BIC_ROOT"
     return 0
   fi
   branch="$(git -C "${d}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"

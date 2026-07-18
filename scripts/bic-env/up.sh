@@ -68,18 +68,9 @@ section "2. Infra containers"
 missing=""
 while IFS='|' read -r name _ _; do
   [ -n "${name}" ] || continue
-  # aws profile needs no local object store at all (S3 = real AWS) — a stopped
-  # bic-minio is fine even with no forwarder running (post-reboot state).
-  if [ "${name}" = "bic-minio" ] && [ "${BIC_PROFILE}" = "aws" ] && ! container_running "${name}"; then
-    ok "bic-minio not required (aws profile: object store = real AWS S3)"
-    continue
-  fi
-  # Real-Mind mode deliberately keeps bic-minio STOPPED: :9000 is the
-  # minio-forward.py bridge to orin's MinIO (see mind.sh). Don't fight it here.
-  if [ "${name}" = "bic-minio" ] && [ "$(be_mind_mock)" = "false" ] && [ -n "$(minio_fwd_pid)" ]; then
-    ok "bic-minio intentionally stopped (real-Mind mode: :9000 = forwarder -> orin)"
-    continue
-  fi
+  # Start every infra container that exists locally. Whether a service actually
+  # uses bic-minio (vs a remote/AWS store) is decided by its own .env.<stage> —
+  # the orchestrator no longer branches on that here.
   if container_running "${name}"; then
     ok "${name} running"
   elif container_exists "${name}"; then
@@ -237,98 +228,20 @@ else
 fi
 
 # ===========================================================================
-section "6. Dependency self-heal"
-# Seed .env from .env.example on fresh clones — without it BE boots on wrong
-# code defaults (template_db, empty Keycloak issuer). Never touches an existing .env.
-for _repo in "${be}" "${lab}" "${portal}"; do
-  if [ -d "${_repo}" ] && [ ! -f "${_repo}/.env" ] && [ -f "${_repo}/.env.example" ]; then
-    do_sh "cp '${_repo}/.env.example' '${_repo}/.env'"
-    ok "$(basename "${_repo}"): seeded .env from .env.example (review before real-Mind use)"
+section "6. Stage files + dependency self-heal"
+# Config is stage-file-owned: each service reads its own .env.<stage>. The
+# orchestrator NEVER writes config — it only checks the stage file exists and
+# fails LOUD (telling the operator to copy the .example) if it does not.
+for _repo in BIC-agent-service BIC-lab-service BIC-agent-portal mars_interface_mock; do
+  [ -d "$(repo_dir "${_repo}")" ] || continue
+  _sf="$(env_file "${_repo}")"
+  if [ -f "${_sf}" ]; then
+    ok "${_repo}: $(basename "${_sf}") present"
+  else
+    fail "${_repo}: missing $(basename "${_sf}") (stage=${BIC_STAGE}) — config is operator-owned now" \
+         "cp '${_sf}.example' '${_sf}'   # then fill in values"
   fi
 done
-
-# Auth env self-heal (lab JWT enforcement wave): these keys are REQUIRED for a
-# working bench. Append-only — an existing value is never overwritten, so LAN
-# benches with a non-localhost issuer keep their override.
-ensure_env_key() { # <env-file> <key> <value> <label>
-  _f="$1"; _k="$2"; _v="$3"; _label="$4"
-  [ -f "${_f}" ] || return 0
-  if grep -q "^${_k}=..*" "${_f}"; then
-    ok "${_label}: ${_k} present"
-  elif grep -q "^${_k}=$" "${_f}"; then
-    # present but EMPTY — the .env.example seed path leaves these blank, and an
-    # empty value is never a valid bench state for auth keys (BE: disabled ->
-    # 401 storm). Fill the line in place; a real value is still never touched.
-    do_sh "sed -i.bak 's|^${_k}=$|${_k}=${_v}|' '${_f}' && rm -f '${_f}.bak'"
-    ok "${_label}: ${_k} was empty — filled with dev default"
-  else
-    # heal a missing trailing newline first (append would glue onto the last line)
-    [ -n "$(tail -c1 "${_f}")" ] && do_sh "printf '\n' >> '${_f}'"
-    do_sh "printf '%s=%s\n' '${_k}' '${_v}' >> '${_f}'"
-    ok "${_label}: ${_k} appended (dev default — override for non-standard benches)"
-  fi
-}
-ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_ID     "${KC_SERVICE_CLIENT}"        "BE"
-ensure_env_key "${be}/.env"  KEYCLOAK_CLIENT_SECRET "${KC_SERVICE_CLIENT_SECRET}" "BE"
-ensure_env_key "${lab}/.env" KEYCLOAK_ISSUER_URL    "http://localhost:18080/realms/${KC_REALM}" "lab"
-
-# aws-profile .env convergence: point BE + lab at cloud Mind + real AWS S3.
-# Unlike the append-only auth self-heal above, this REWRITES a differing value
-# (the bench must point at the AWS store, not a stale local one). Credentials
-# come from AWS_S3_CREDS_FILE and are NEVER echoed — secret keys report by name
-# only, and DRY prints the key name, not the value. minimal/full-real skip this.
-_read_creds() { # <key> -> value from the S3 creds file (callers never echo it)
-  sed -n "s/^$1=//p" "${AWS_S3_CREDS_FILE}" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]'
-}
-converge_env_kv() { # <file> <key> <value> <label> <secret:0|1>
-  local f="$1" k="$2" v="$3" label="$4" secret="${5:-0}" cur
-  [ -f "${f}" ] || return 0
-  cur="$(sed -n "s/^${k}=//p" "${f}" | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
-  [ "${cur}" = "${v}" ] && return 0   # already at AWS 口径 — stay quiet
-  if [ "${DRY_RUN}" = "1" ]; then
-    if [ "${secret}" = "1" ]; then note "[dry] would converge ${label} ${k} (secret — value hidden)"
-    else note "[dry] would converge ${label} ${k}=${v}"; fi
-    return 0
-  fi
-  if grep -q "^${k}=" "${f}"; then
-    sed -i.bak "s|^${k}=.*|${k}=${v}|" "${f}" && rm -f "${f}.bak"
-  else
-    [ -n "$(tail -c1 "${f}")" ] && printf '\n' >> "${f}"
-    printf '%s=%s\n' "${k}" "${v}" >> "${f}"
-  fi
-  if [ "${secret}" = "1" ]; then ok "${label}: ${k} converged to AWS creds (value hidden)"
-  else ok "${label}: ${k} -> ${v}"; fi
-}
-if [ "${BIC_PROFILE}" = "aws" ]; then
-  if [ ! -s "${AWS_S3_CREDS_FILE}" ]; then
-    fail "aws profile: S3 creds file missing/empty (${AWS_S3_CREDS_FILE})" \
-         "create it with S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY (chmod 600); see ops/auth-bench-2026-07-13.md"
-  else
-    _aws_akid="$(_read_creds S3_ACCESS_KEY_ID)"
-    _aws_secret="$(_read_creds S3_SECRET_ACCESS_KEY)"
-    if [ -z "${_aws_akid}" ] || [ -z "${_aws_secret}" ]; then
-      fail "aws profile: S3 creds file lacks S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY" \
-           "check ${AWS_S3_CREDS_FILE} (keys present, non-empty)"
-    else
-      # BE .env: cloud Mind + AWS S3
-      converge_env_kv "${be}/.env"  MCP_HOST                   "${AWS_MIND_HOST}"       "BE"  0
-      converge_env_kv "${be}/.env"  MCP_PORT                   "${AWS_MIND_PORT}"       "BE"  0
-      converge_env_kv "${be}/.env"  MIND_MOCK_MODE             false                    "BE"  0
-      converge_env_kv "${be}/.env"  MIND_RECOGNITION_MOCK_MODE false                    "BE"  0
-      converge_env_kv "${be}/.env"  S3_ENDPOINT_URL            "${AWS_S3_ENDPOINT_URL}" "BE"  0
-      converge_env_kv "${be}/.env"  S3_REGION                  "${AWS_S3_REGION}"       "BE"  0
-      converge_env_kv "${be}/.env"  S3_BUCKET_NAME             "${AWS_S3_BUCKET}"       "BE"  0
-      converge_env_kv "${be}/.env"  S3_ACCESS_KEY_ID           "${_aws_akid}"           "BE"  1
-      converge_env_kv "${be}/.env"  S3_SECRET_ACCESS_KEY       "${_aws_secret}"         "BE"  1
-      # lab .env: AWS S3 (same five keys)
-      converge_env_kv "${lab}/.env" S3_ENDPOINT_URL            "${AWS_S3_ENDPOINT_URL}" "lab" 0
-      converge_env_kv "${lab}/.env" S3_REGION                  "${AWS_S3_REGION}"       "lab" 0
-      converge_env_kv "${lab}/.env" S3_BUCKET_NAME             "${AWS_S3_BUCKET}"       "lab" 0
-      converge_env_kv "${lab}/.env" S3_ACCESS_KEY_ID           "${_aws_akid}"           "lab" 1
-      converge_env_kv "${lab}/.env" S3_SECRET_ACCESS_KEY       "${_aws_secret}"         "lab" 1
-    fi
-  fi
-fi
 
 if [ -d "${portal}" ]; then
   if [ ! -d "${portal}/node_modules" ] || [ "${portal}/pnpm-lock.yaml" -nt "${portal}/node_modules" ]; then
@@ -359,40 +272,20 @@ migrate_repo() { # <dir> <label>
 migrate_repo "${lab}" BIC-lab-service
 migrate_repo "${be}" BIC-agent-service
 
-# ===========================================================================
-section "8. Mind mode (mock vs real Mind/MinIO — mind.sh converge)"
-# Default is MOCK. full-real profile auto-switches to REAL only when every leg
-# is already reachable without sudo (route present, orin-tail up); otherwise it
-# stays MOCK and prints what is missing. Runs BEFORE the app launch so the BE
-# starts with the right MIND_* flags (converge stops a stale BE; section 9
-# relaunches it). The final banner states the active mode explicitly.
-bash "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mind.sh" converge || \
-  warn "mind converge reported a problem — run: make mind-status"
-
 fi  # end full-bring-up sections (ONLY guard)
 
 # ===========================================================================
 section "9. App services (tmux ${BIC_TMUX}: lab -> BE -> portal -> mock -> chem)"
 
-# start command for a service (BE carries the unset-proxy prefix).
+# start command for a service. Each launch carries the stage INLINE — tmux
+# send-keys shells do NOT inherit the orchestrator's env. Config (S3, MQ, Mind,
+# ...) lives in each repo's .env.<stage>, so no per-service env soup here.
 start_cmd_for() {
   case "$1" in
-    lab)    printf 'cd %q && make dev' "${lab}" ;;
-    BE)     printf 'cd %q && %suv run uvicorn app.main:app --host 0.0.0.0 --port 8800' "${be}" "$(unset_proxy_prefix)" ;;
-    portal) printf 'cd %q && pnpm dev' "${portal}" ;;
-    # Mock uploads plate photos to S3; its coded defaults (localhost:9000 +
-    # minioadmin/minioadmin) match neither infra MinIO's secret (bic_local_dev)
-    # nor the full-real bench store (192.168.12.150, which real Mind must reach).
-    # minimal -> local infra MinIO; aws -> real AWS S3 (creds loaded from
-    # AWS_S3_CREDS_FILE inside the pane, so no secret hits up.sh output);
-    # full-real (else) -> the 150 store.
-    mock)   if [ "${BIC_PROFILE}" = "minimal" ]; then
-              printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=localhost:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-mock uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
-            elif [ "${BIC_PROFILE}" = "aws" ]; then
-              printf 'cd %q && set -a && . %q && set +a && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=%s S3_SECURE=true S3_ACCESS_KEY="$S3_ACCESS_KEY_ID" S3_SECRET_KEY="$S3_SECRET_ACCESS_KEY" S3_BUCKET=%s uv run mars-interface-mock' "$(repo_dir mars_interface_mock)" "${AWS_S3_CREDS_FILE}" "${AWS_S3_ENDPOINT_HOST}" "${AWS_S3_BUCKET}"
-            else
-              printf 'cd %q && TLC_FIXTURE_SEQUENCE="${TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}" S3_ENDPOINT=192.168.12.150:9000 S3_ACCESS_KEY=minioadmin S3_SECRET_KEY=bic_local_dev S3_BUCKET=tlc-images uv run mars-interface-mock' "$(repo_dir mars_interface_mock)"
-            fi ;;
+    lab)    printf 'cd %q && make dev ENV=%s' "${lab}" "${BIC_STAGE}" ;;
+    BE)     printf 'cd %q && %sAPP_ENV=%s uv run uvicorn app.main:app --host 0.0.0.0 --port 8800' "${be}" "$(unset_proxy_prefix)" "${BIC_STAGE}" ;;
+    portal) printf 'cd %q && pnpm dev:%s' "${portal}" "${BIC_STAGE}" ;;
+    mock)   printf 'cd %q && APP_ENV=%s uv run mars-interface-mock' "$(repo_dir mars_interface_mock)" "${BIC_STAGE}" ;;
     chem)   printf 'cd %q && uv run uvicorn app.main:app --host 127.0.0.1 --port 8010' "${CHEM_DIR}" ;;
   esac
 }
@@ -434,7 +327,7 @@ launch_window() { # <win> <cmd>
 }
 
 ensure_session
-# window names: lab, agent, portal, mock, chem (chem optional in minimal profile)
+# window names: lab, agent, portal, mock, chem (chem optional — skipped if absent)
 for svc in lab BE portal mock chem; do
   [ -n "${ONLY}" ] && [ "${svc}" != "${ONLY}" ] && continue
   win="${svc}"; [ "${svc}" = "BE" ] && win="agent"
@@ -459,15 +352,7 @@ done
 
 # ===========================================================================
 printf '\n%s%s== Done ==%s  ' "${C_BLD}" "${C_BLU}" "${C_RST}"
-case "$(be_mind_mock)" in
-  false)
-    if [ "${BIC_PROFILE}" = "aws" ]; then
-      printf '%sMIND: REAL%s (aws cloud %s:%s)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${AWS_MIND_HOST}" "${AWS_MIND_PORT}"
-    else
-      printf '%sMIND: REAL%s (%s:%s via orin-tail)  ' "${C_BLD}${C_GRN}" "${C_RST}" "${MIND_LAB_IP}" "${MIND_PORT}"
-    fi ;;
-  *)     printf '%sMIND: MOCK%s (fixtures; enable real: make mind-real)  ' "${C_BLD}${C_YEL}" "${C_RST}" ;;
-esac
-printf 'run %smake status%s or %smake doctor%s to verify.\n' "${C_BLD}" "${C_RST}" "${C_BLD}" "${C_RST}"
+printf '%sSTAGE: %s%s  ' "${C_BLD}${C_GRN}" "${BIC_STAGE}" "${C_RST}"
+printf 'run %smake doctor%s to verify.\n' "${C_BLD}" "${C_RST}"
 [ "${DRY_RUN}" = "1" ] && printf '  %s(this was a DRY run — nothing changed)%s\n' "${C_DIM}" "${C_RST}"
 exit 0
