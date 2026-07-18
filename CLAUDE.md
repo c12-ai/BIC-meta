@@ -77,9 +77,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 #### BIC-Agent-Service
 
-Reset API: `curl -X POST http://localhost:8800/reset | jq`
+Reset API: `curl -X POST http://localhost:8800/reset -H 'Content-Type: application/json' --data-raw '{"dataset":"test"}' | jq`
 
-This API will reset AgentService PostgresDB and purge MQ between LabService and AgentService
+This API will reset AgentService PostgresDB and purge MQ between LabService and AgentService. `dataset` is REQUIRED (`"test"` = schema-only empty; `"demo"` = re-insert the captured demo snapshot — see BIC-agent-service `scripts/capture_demo_snapshot.py`).
 
 #### BIC-Lab-Service
 
@@ -94,11 +94,12 @@ curl --location --request POST 'http://127.0.0.1:8192/admin/reset-to-test-data' 
 --header 'Host: 127.0.0.1:8192' \
 --header 'Connection: keep-alive' \
 --data-raw '{
-    "robot_id": "talos.001"
+    "robot_id": "talos.001",
+    "dataset": "test"
 }'
 ```
 
-This will reset LabService DB. Lab-service requires a Keycloak Bearer JWT on all
+This will reset LabService DB. `dataset` is REQUIRED (`"test"` = canonical seed; `"demo"` = captured post-run bench snapshot, frozen at the same moment as the agent-side snapshot — see BIC-lab-service `scripts/capture_demo_snapshot.py`). Lab-service requires a Keycloak Bearer JWT on all
 non-health routes; `scripts/bic-env/get-token.sh` prints a service-account token
 (valid 300 s) for manual calls like this.
 
