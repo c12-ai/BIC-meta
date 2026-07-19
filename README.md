@@ -139,8 +139,8 @@ network** — to deploy to a server, SSH into that server and run there.
 | Stop app services + shared infra | `make down INFRA=1` |
 | Switch a service to real Mind / AWS S3 | edit that repo's `.env.<stage>`, then `make restart-<svc> STAGE=local` |
 | Run a service by hand from its own repo | `make dev ENV=local` (agent/lab) · `pnpm dev:local` (portal) · `APP_ENV=local uv run mars-interface-mock` (mock) |
-| Reset agent DB + MQ | `curl -X POST http://localhost:8800/reset \| jq` |
-| Reset lab DB to seed | `curl -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H "Authorization: Bearer $(scripts/bic-env/get-token.sh)" -H 'Content-Type: application/json' -d '{"robot_id":"talos.001"}'` |
+| Reset agent DB + MQ | `curl -X POST http://localhost:8800/reset -H 'Content-Type: application/json' -d '{"dataset":"test"}' \| jq` — `dataset` REQUIRED (`"test"` \| `"demo"`) |
+| Reset lab DB to seed | `curl -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H "Authorization: Bearer $(scripts/bic-env/get-token.sh)" -H 'Content-Type: application/json' -d '{"robot_id":"talos.001","dataset":"test"}'` |
 | Get a token for manual authed calls | `scripts/bic-env/get-token.sh` |
 
 ## PRD Update Flow
