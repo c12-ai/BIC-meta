@@ -15,6 +15,16 @@ Everything provable off-machine has been proven (portal image smoke, full local
 
 ---
 
+## Stage gate (2026-07-19, BIC-meta#336 batch)
+
+Service images built after the env-staging batch REQUIRE `APP_ENV` and a
+`.env.<stage>` file in the container workdir — a bare container start hard-exits.
+The composes here already handle it: `APP_ENV: prod` plus a mounted, intentionally
+empty `lib/stage.env` as `/app/.env.prod`. Real config stays where it always was —
+the host-level field `.env` interpolated into each compose `environment:` block
+(launch env wins over the stage file). Nothing changes in the operator flow;
+just `git pull` this package alongside pulling the new images.
+
 ## What's in here
 
 ```

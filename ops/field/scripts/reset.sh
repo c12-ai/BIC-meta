@@ -33,7 +33,8 @@ SCOPE="${1:-all}"
 case "$SCOPE" in all|be|lab) ;; *) die "usage: reset.sh [all|be|lab]";; esac
 
 if [ "$SCOPE" != lab ]; then
-  body="$(curl -s --max-time 60 -X POST "http://localhost:${BE_PORT}/reset")" \
+  body="$(curl -s --max-time 60 -X POST "http://localhost:${BE_PORT}/reset" \
+        -H 'Content-Type: application/json' --data-raw '{"dataset": "test"}')" \
     || die "BE reset: request failed (is agent-service up on :${BE_PORT}?)"
   echo "$body" | grep -q '"status"' || die "BE reset: unexpected response: $(echo "$body" | head -c 200)"
   tables="$(echo "$body" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("truncated_tables",[])))' 2>/dev/null || echo '?')"
@@ -53,7 +54,7 @@ if [ "$SCOPE" != be ]; then
   code="$(curl -s -o /tmp/bic-lab-reset.json -w '%{http_code}' --max-time 60 \
         -X POST "http://127.0.0.1:${LAB_PORT}/admin/reset-to-test-data" \
         -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
-        --data-raw "{\"robot_id\": \"${ROBOT_ID}\"}")"
+        --data-raw "{\"robot_id\": \"${ROBOT_ID}\", \"dataset\": \"test\"}")"
   [ "$code" = 200 ] || die "lab reset: HTTP $code — $(head -c 200 /tmp/bic-lab-reset.json 2>/dev/null)"
   ok "lab reset: HTTP 200 $(head -c 120 /tmp/bic-lab-reset.json 2>/dev/null)"
   rm -f /tmp/bic-lab-reset.json

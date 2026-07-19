@@ -16,6 +16,10 @@ services:
     image: ghcr.io/c12-ai/mars_interface_mock:${MOCK_IMAGE_TAG:-latest}
     container_name: ${MOCK_CONTAINER_NAME:-bic-robot-mock}
     environment:
+      # --- Stage gate (BIC-meta#336): containers run the prod stage; the real
+      # config is THIS environment block (launch env wins over the stage file,
+      # which is the mounted empty ../lib/stage.env satisfying the gate).
+      APP_ENV: prod
       MQ_HOST: ${MQ_CONTAINER:-bic-rabbitmq}
       MQ_PORT: "5672"
       MQ_USER: ${MQ_USER:-rabbitmq}
@@ -33,6 +37,8 @@ services:
       #   MOCK_TLC_FIXTURE_SEQUENCE=tlc_plate_fixture.png,tlc_plate_med02.jpg
       TLC_FIXTURE_SEQUENCE: ${MOCK_TLC_FIXTURE_SEQUENCE:-tlc_plate_fixture.png,tlc_plate_med02.jpg}
       TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ../lib/stage.env:/app/.env.prod:ro
     networks:
       - infra-net
     restart: unless-stopped

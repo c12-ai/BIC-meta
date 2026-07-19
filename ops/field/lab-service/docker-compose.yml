@@ -14,6 +14,10 @@ services:
     ports:
       - "${LAB_PORT:-8192}:8192"
     environment:
+      # --- Stage gate (BIC-meta#336): containers run the prod stage; the real
+      # config is THIS environment block (launch env wins over the stage file,
+      # which is the mounted empty ../lib/stage.env satisfying the gate).
+      APP_ENV: prod
       APP_NAME: Nexus
       DEBUG: ${DEBUG:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -70,6 +74,8 @@ services:
       MQ_HEARTBEAT_QUEUE: ${MQ_HEARTBEAT_QUEUE:-hb}
       MQ_AGENT_EXCHANGE: ${MQ_AGENT_EXCHANGE:-agent.exchange}
       MQ_AGENT_STATUS_QUEUE: ${MQ_AGENT_STATUS_QUEUE:-agent.task.status}
+    volumes:
+      - ../lib/stage.env:/app/.env.prod:ro
     networks:
       - infra-net
 

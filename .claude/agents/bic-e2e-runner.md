@@ -115,8 +115,8 @@ old 35-min cc-re-chained cap).
 NONE spawn a webServer — bring the stack up first (skill's job, or the bench owner's
 `bic-services`). All take `--workers=1`.
 - Before any live run, reset both sides:
-  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001"}'`
-  then `curl --noproxy '*' -s -X POST http://localhost:8800/reset` (also purges MQ).
+  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001","dataset":"test"}'`
+  then `curl --noproxy '*' -s -X POST http://localhost:8800/reset -H 'Content-Type: application/json' --data-raw '{"dataset":"test"}'` (also purges MQ).
 
 ## Bench preconditions (the product owner's hard rules — encoded in tests/helpers.ts:resetLabState)
 

@@ -40,14 +40,16 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 2. RabbitMQ: Used by LabService to get update from Robot and then push to Agent Side. Container ID: 2431d43650888a896824cfdffa7d29df9e424b6ff3016031279c87e4a360fb0f
 3. MinIO: Docker Container ID: 2a801bee136c178407ee7d1e2b606fed7dcca941a681e91053e1779d32973aa2
 4. tmux session `bic-services` (window `0`, verified 2026-07-03; DRIFTS — never trust a cached roster): current mapping `0.0` lab (`:8192`), `0.1` agent BE (`:8800`, `make dev`), `0.2` portal (`:5173`, node), `0.3` robot mock (uv). Always map panes by listening port / `pane_current_command` before `send-keys`. Restarting agent BE: Ctrl-C+TERM won't free `:8800` — `kill -KILL` the port owner, then relaunch in its pane.
-5. **Cold start — use the make entry (from the meta repo root):**
+5. **Cold start — use the make entry (from the meta repo root). Every service now REQUIRES a stage:**
    ```bash
-   make up        # idempotent: docker+infra, wait-for-pg, DB create, keycloak seed, dep sync, tmux bic-services (lab→BE→portal→mock→chem), each health-gated
-   make doctor    # read-only checkup; GREEN = bench up. Every red card prints its own fix command.
+   make up STAGE=local        # idempotent: docker+infra, wait-for-pg, DB create, keycloak seed, dep sync, migrations, tmux bic-services (lab→BE→portal→mock→chem), each health-gated
+   make doctor STAGE=local    # read-only checkup; GREEN = bench up. Every red card prints its own fix command.
    ```
-   `make up` is safe to re-run (skips anything already healthy) and `make up DRY=1` previews the plan without touching a live bench. `BIC_ROOT` is autodetected for both known layouts — service repos nested inside this repo, or this repo cloned next to them — so no override is needed on a standard checkout. The scripts encode every trap below (retired-5433 listener check, proxy unset for BE, portal white-screen check, DB existence); `ops/run-latest-2026-07-10.md` is now the troubleshooting appendix that `doctor` points to — no need to read it end-to-end.
+   **Stage model (定档 2026-07-17):** each service reads its own `.env.<stage>` file (`STAGE=local|dev|prod`, default `local`) and hard-exits if the stage/file is missing — there is NO plain `.env` anymore. The orchestrator only launches; it NEVER writes config. Each repo's `.env.<stage>` is the single source of truth, owned by the developer (copy `.env.<stage>.example` → `.env.<stage>` once; portal's local file is `.env.localdev`, a Vite convention). To switch mock↔real Mind / local MinIO↔AWS S3, edit that repo's `.env.<stage>` (e.g. `MIND_MOCK_MODE=false`, `MCP_HOST=...`) and `make restart-<svc> STAGE=local` — `mind.sh` and `BIC_PROFILE` are RETIRED. The orchestrator is current-network-only; to deploy to a server, SSH in and run there. Surviving scripts: `common.sh` (lib), `up.sh`, `down.sh`, `restart.sh`, `doctor.sh`, `pull.sh`, `get-token.sh` (`mind.sh`/`status.sh`/`reset-demo.sh`/`bootstrap.sh` deleted). `make up STAGE=local DRY=1` previews without touching a live bench. `BIC_ROOT` is autodetected. `ops/run-latest-2026-07-10.md` is the troubleshooting appendix `doctor` points to.
 
-   > **Auth 口径(定档 2026-07-13)**:lab-service 对除 `GET /`、`/health*` 外的所有 HTTP 路由强制校验 Keycloak JWT;portal 带用户 token,agent BE 带 `bic-agent-service` 服务账号 token。`make up` 会自愈必需的 dev 键(BE `KEYCLOAK_CLIENT_ID/SECRET`、lab `KEYCLOAK_ISSUER_URL`,只增不改——LAN bench 的 issuer 覆盖值不会被动);`make doctor` 有三张 Auth 卡(BE secret / 401 探针 / 服务 token 往返)。**拉了 auth 相关合并后必须显式重启 lab+BE+mock**(`bash scripts/bic-env/restart.sh <svc>`)——`make up` 跳过健康服务,老进程继续跑老代码;lab 若杀不干净会有孤儿 worker 攥着 socket 诈尸,`pkill -KILL -f BIC-lab-service` 清场(doctor 红卡会指出)。手动 curl lab 一律带 `-H "Authorization: Bearer $(scripts/bic-env/get-token.sh)"`(300s 有效)。逃生阀:lab `.env` 加 `LAB_AUTH_MODE=off`+重启(启动 WARN,查完撤)。完整清单:`ops/auth-bench-2026-07-13.md`。
+   Per-repo manual start (from each repo, stage required — no default): `make dev ENV=local` (agent BE, lab) · `pnpm dev:local` (portal) · `APP_ENV=local uv run mars-interface-mock` (mock). A bare `make dev` / `pnpm dev` FAILS with a "pick a stage" message. Use `export`-style / make-arg so uvicorn `--reload` subprocesses inherit the stage.
+
+   > **Auth 口径(定档 2026-07-13,stage 化 2026-07-17)**:lab-service 对除 `GET /`、`/health*` 外的所有 HTTP 路由强制校验 Keycloak JWT;portal 带用户 token,agent BE 带 `bic-agent-service` 服务账号 token。auth 键(BE `KEYCLOAK_CLIENT_ID/SECRET`、lab `KEYCLOAK_ISSUER_URL`)现由各仓 `.env.<stage>` 提供——`make up` **不再**自愈/改写任何 `.env`(stage 文件归开发者所有,缺文件时 `up.sh` fail-loud 提示 `cp .env.<stage>.example`);`make doctor` 仍有 Auth 卡(读 `.env.<stage>`:BE secret / 401 探针 / 服务 token 往返)。**拉了 auth 相关合并后必须显式重启 lab+BE+mock**(`bash scripts/bic-env/restart.sh <svc>` 或 `make restart-<svc> STAGE=local`)——`make up` 跳过健康服务,老进程继续跑老代码;lab 若杀不干净会有孤儿 worker 攥着 socket 诈尸,`pkill -KILL -f BIC-lab-service` 清场(doctor 红卡会指出)。手动 curl lab 一律带 `-H "Authorization: Bearer $(scripts/bic-env/get-token.sh)"`(300s 有效)。逃生阀:lab `.env.local` 加 `LAB_AUTH_MODE=off`+重启(启动 WARN,查完撤)。完整清单:`ops/auth-bench-2026-07-13.md`。
 
    BIC-chem-service is **optional** and only affects ELN enrichment (FW / moles / compound-name fill-ins). The main workflow still runs without it; missing enrichment fields are omitted from the report. Current port authority is `:8010` (the old infra `:8810` was retired). Host-mode Agent Service config is `CHEM_SERVICE_HOST=127.0.0.1`, `CHEM_SERVICE_PORT=8010`; an infra/docker network deployment should point `CHEM_SERVICE_HOST` at the service DNS name but still keep port `8010`.
 
@@ -56,10 +58,11 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
    1. `open -a Docker`, wait for daemon, then `docker start bic-postgres bic-rabbitmq bic-minio bic-keycloak` (bic-redis auto-starts). Keycloak `:18080` is a hard dep now (BE only accepts Bearer JWT); its issuer must match BE `KEYCLOAK_ISSUER_URL` + portal `VITE_OIDC_AUTHORITY` — all three `http://localhost:18080/realms/bic` (see `ops/run-latest-2026-07-10.md` §5).
    2. each repo after `git checkout main`: sync deps first — portal `pnpm install`, BE/lab `uv sync` (the Keycloak batch added `react-oidc-context`; skipping `pnpm install` white-screens the portal with an import error).
    3. Optional for ELN enrichment only: start chem-service on `:8010`. `make up` / `make restart-chem` use the local `BIC-chem-service` checkout when present; the infra image path is `cd BIC-infra && make chem-up && make chem-smoke`, and `make chem-smoke` verifies `/health/readiness` plus `POST /molecular-weight`.
-   4. pane `0.0` lab: `cd BIC-lab-service && make dev` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
-   5. pane `0.1` agent BE: `cd BIC-agent-service && make dev`
-   6. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev`
-   7. pane `0.3` robot mock: `cd mars_interface_mock && uv run mars-interface-mock`
+   4. pane `0.0` lab: `cd BIC-lab-service && make dev ENV=local` — wait for `:8192/health` 200 (agent BE's dep-check needs it)
+   5. pane `0.1` agent BE: `cd BIC-agent-service && make dev ENV=local`
+   6. pane `0.2` portal: `cd BIC-agent-portal && pnpm dev:local`
+   7. pane `0.3` robot mock: `cd mars_interface_mock && APP_ENV=local uv run mars-interface-mock`
+   > Every service REQUIRES a stage (no default `.env`): `make dev ENV=local` / `pnpm dev:local` / `APP_ENV=local ...`. A bare `make dev` or `pnpm dev` fails with a "pick a stage" message.
    `curl` health checks need `--noproxy '*'` (local 127.0.0.1:7890 proxy masks localhost). Portal health ≠ `:5173` HTTP 200 alone (dev server up ≠ page compiles) — also confirm a real load: `curl --noproxy '*' http://localhost:5173/src/main.tsx` returns JS (not an error), or open the page.
    </details>
 
@@ -74,9 +77,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 #### BIC-Agent-Service
 
-Reset API: `curl -X POST http://localhost:8800/reset | jq`
+Reset API: `curl -X POST http://localhost:8800/reset -H 'Content-Type: application/json' --data-raw '{"dataset":"test"}' | jq`
 
-This API will reset AgentService PostgresDB and purge MQ between LabService and AgentService
+This API will reset AgentService PostgresDB and purge MQ between LabService and AgentService. `dataset` is REQUIRED (`"test"` = schema-only empty; `"demo"` = re-insert the captured demo snapshot — see BIC-agent-service `scripts/capture_demo_snapshot.py`).
 
 #### BIC-Lab-Service
 
@@ -91,11 +94,12 @@ curl --location --request POST 'http://127.0.0.1:8192/admin/reset-to-test-data' 
 --header 'Host: 127.0.0.1:8192' \
 --header 'Connection: keep-alive' \
 --data-raw '{
-    "robot_id": "talos.001"
+    "robot_id": "talos.001",
+    "dataset": "test"
 }'
 ```
 
-This will reset LabService DB. Lab-service requires a Keycloak Bearer JWT on all
+This will reset LabService DB. `dataset` is REQUIRED (`"test"` = canonical seed; `"demo"` = captured post-run bench snapshot, frozen at the same moment as the agent-side snapshot — see BIC-lab-service `scripts/capture_demo_snapshot.py`). Lab-service requires a Keycloak Bearer JWT on all
 non-health routes; `scripts/bic-env/get-token.sh` prints a service-account token
 (valid 300 s) for manual calls like this.
 
