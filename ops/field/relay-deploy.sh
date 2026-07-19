@@ -43,8 +43,21 @@
 #   --reset     after a green verify, run the box's scripts/reset.sh all
 #               (dataset=test both sides — destructive to bench state)
 #
-# Requires locally: docker (logged into ghcr or gh CLI authed), gh, aws CLI
-# (China-partition default profile), ssh access to ${FIELD_SSH}.
+# ── Colleague quickstart (nothing here is Wenlong's-Mac-specific) ────────────
+# Required locally:
+#   - docker (Docker Desktop; any store — --platform save is feature-detected)
+#   - gh CLI, authenticated with c12-ai access (`gh auth login`)
+#   - an ~/.ssh/config entry for the box + the team key, e.g.:
+#         Host aws-test
+#           HostName ec2-43-192-79-141.cn-northwest-1.compute.amazonaws.com.cn
+#           User ubuntu
+#           IdentityFile ~/.ssh/c12_northwest.pem   # team key — ask ops
+# Optional:
+#   - aws CLI with China-partition creds (default profile): enables the IP
+#     whitelist preflight + --fix-ip. WITHOUT it the script still runs — the
+#     ssh reachability probe is the authoritative gate (office IPs are already
+#     whitelisted); you only lose the "is it the whitelist?" diagnosis.
+# Runs on macOS stock bash 3.2 (no associative arrays / GNU-only tools used).
 set -euo pipefail
 
 FIELD_SSH="${FIELD_SSH:-aws-test}"
@@ -76,9 +89,21 @@ FAILED=0
 
 fssh() { ssh "${SSH_OPTS[@]}" "$FIELD_SSH" "$@"; }
 
-# svc -> image ref resolver | container | compose dir
-declare -A CONTAINER=( [lab]=bic-lab-service [be]=bic-agent-service [portal]=bic-agent-portal [mock]=bic-robot-mock )
-declare -A COMPOSE=( [lab]=lab-service [be]=agent-service [portal]=portal [mock]=robot-mock )
+# svc -> image ref / container / compose dir. Case functions, not `declare -A`:
+# macOS stock bash is 3.2 (no associative arrays) and colleagues may not have
+# a homebrew bash on PATH.
+container_of() {
+  case "$1" in
+    lab) echo bic-lab-service ;; be) echo bic-agent-service ;;
+    portal) echo bic-agent-portal ;; mock) echo bic-robot-mock ;;
+  esac
+}
+compose_of() {
+  case "$1" in
+    lab) echo lab-service ;; be) echo agent-service ;;
+    portal) echo portal ;; mock) echo robot-mock ;;
+  esac
+}
 image_ref() { # portal is pinned by main's full sha; others ride :main / :latest
   case "$1" in
     lab)    echo "ghcr.io/c12-ai/bic-lab-service:main" ;;
@@ -124,8 +149,11 @@ fi
 MYIP="$(curl -s --max-time 8 https://checkip.amazonaws.com.cn || curl -s --max-time 8 https://api.ipify.org || true)"
 [ -n "$MYIP" ] || die "cannot determine public IP" "check network"
 log "  · public IP: $MYIP"
-if ! aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1; then
-  fail "aws CLI has no China-partition credentials — cannot verify IP whitelist" "aws configure (default profile, ${AWS_REGION})"
+if ! command -v aws >/dev/null 2>&1 || ! aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1; then
+  # NOT fatal: the ssh probe below is the authoritative gate (office IPs are
+  # pre-whitelisted). Without aws creds you only lose the whitelist DIAGNOSIS
+  # — if ssh then fails/hangs, the whitelist is the first suspect.
+  log "  · aws CLI unavailable/no China-partition creds — skipping whitelist check (ssh probe decides)"
 else
   if aws ec2 get-managed-prefix-list-entries --region "$AWS_REGION" \
        --prefix-list-id "$OFFICE_PREFIX_LIST" --query 'Entries[].Cidr' --output text 2>/dev/null \
@@ -144,7 +172,12 @@ else
 fi
 
 # ssh reachability + remote docker permission + disk.
-if fssh 'echo ok' >/dev/null 2>&1; then ok "ssh ${FIELD_SSH} reachable"; else die "ssh ${FIELD_SSH} unreachable" "check ~/.ssh/config, key, and the whitelist above"; fi
+if fssh 'echo ok' >/dev/null 2>&1; then
+  ok "ssh ${FIELD_SSH} reachable"
+else
+  die "ssh ${FIELD_SSH} unreachable" \
+      "1) IP whitelist (see above / --fix-ip)  2) ~/.ssh/config needs:  Host ${FIELD_SSH} / HostName ec2-43-192-79-141.cn-northwest-1.compute.amazonaws.com.cn / User ubuntu / IdentityFile ~/.ssh/c12_northwest.pem (team key — ask ops)"
+fi
 fssh 'docker info >/dev/null 2>&1' || die "remote user cannot run docker" "usermod -aG docker on the box"
 ok "remote docker permission"
 REMOTE_FREE_GB="$(fssh "df -BG /var/lib/docker 2>/dev/null | awk 'NR==2 {print \$4}' | tr -d G")"
@@ -215,7 +248,15 @@ for s in "${PLAN[@]}"; do
   if [ "$local_id" = "$box_id" ] && [ "$FORCE" = 0 ]; then ok "$s already on the box (image ID match) — skip transfer"; continue; fi
   t0=$(date +%s)
   # P5: --platform is load-bearing on containerd stores (multi-arch tags).
-  out="$(docker save --platform linux/amd64 "$ref" | gzip -1 | fssh 'gunzip | docker load' 2>&1 | tail -1)" \
+  # P5: --platform is load-bearing on containerd stores (multi-arch tags), but
+  # the flag only exists on newer Docker — feature-detect and fall back (on
+  # graph-driver stores the pulled tag is single-platform, so bare save is safe).
+  if docker save --help 2>/dev/null | grep -q -- --platform; then
+    SAVE_CMD=(docker save --platform linux/amd64 "$ref")
+  else
+    SAVE_CMD=(docker save "$ref")
+  fi
+  out="$("${SAVE_CMD[@]}" | gzip -1 | fssh 'gunzip | docker load' 2>&1 | tail -1)" \
     || die "relay failed for $s: $out" "check ssh stability (whitelist!) and remote disk"
   case "$out" in *"Loaded image"*) ;; *) die "unexpected docker load output for $s: $out" ;; esac
   ok "$s relayed in $(( $(date +%s) - t0 ))s"
@@ -227,7 +268,7 @@ step "STEP 4: roll services on ${FIELD_SSH} (compose up -d --pull never)"
 fssh "cd ~/bic-v2 && sed -i \"s|^PORTAL_IMAGE_TAG=.*|PORTAL_IMAGE_TAG=sha-${PORTAL_SHA}|\" .env"
 ok "portal tag pinned: sha-${PORTAL_SHA:0:12}"
 for s in "${PLAN[@]}"; do
-  cdir="${COMPOSE[$s]}"
+  cdir="$(compose_of "$s")"
   out="$(fssh "cd ~/bic-v2 && set -a && . ./.env && set +a && docker compose -f ${cdir}/docker-compose.yml up -d --pull never 2>&1 | tail -1")" \
     || die "compose up failed for $s: $out"
   ok "$s: $out"
@@ -249,7 +290,7 @@ done
 if [ "$ALL_OK" = 1 ]; then ok "all rolled containers healthy"; else die "unhealthy after 90s: $unhealthy" "docker logs <container> on the box"; fi
 
 for s in "${PLAN[@]}"; do
-  ref="$(image_ref "$s")"; c="${CONTAINER[$s]}"
+  ref="$(image_ref "$s")"; c="$(container_of "$s")"
   run_img="$(fssh "docker inspect $c --format '{{.Image}}'")"
   want_img="$(fssh "docker image inspect '$ref' --format '{{.Id}}'")"
   [ "$run_img" = "$want_img" ] && ok "$s runs the relayed image" || fail "$s container is NOT on the relayed image" "docker compose up -d --force-recreate on the box"
