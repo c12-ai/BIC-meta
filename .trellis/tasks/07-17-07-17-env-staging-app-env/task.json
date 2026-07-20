@@ -1,0 +1,30 @@
+{
+  "id": "07-17-env-staging-app-env",
+  "name": "07-17-env-staging-app-env",
+  "title": "Per-repo env staging (local/dev/prod) with APP_ENV fail-if-unset startup gating",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Drake",
+  "assignee": "Drake",
+  "createdAt": "2026-07-17",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-17-env-staging-repos",
+    "07-17-env-staging-tests",
+    "07-17-env-staging-orchestrator"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
