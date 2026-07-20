@@ -114,8 +114,11 @@ old 35-min cc-re-chained cap).
 
 NONE spawn a webServer — bring the stack up first (skill's job, or the bench owner's
 `bic-services`). All take `--workers=1`.
-- Before any live run, reset both sides:
-  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001","dataset":"test"}'`
+- Before any live run, reset both sides. Lab (`:8192`) enforces Keycloak JWT on every
+  business route, so each manual lab call — the reset below AND the `GET /robots/idle`
+  poll — carries a service-account bearer (`scripts/bic-env/get-token.sh`, run from the
+  meta root, token valid 300 s); the agent-BE `:8800` reset needs none:
+  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H "Authorization: Bearer $(scripts/bic-env/get-token.sh)" -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001","dataset":"test"}'`
   then `curl --noproxy '*' -s -X POST http://localhost:8800/reset -H 'Content-Type: application/json' --data-raw '{"dataset":"test"}'` (also purges MQ).
 
 ## Bench preconditions (the product owner's hard rules — encoded in tests/helpers.ts:resetLabState)

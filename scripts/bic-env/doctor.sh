@@ -163,13 +163,17 @@ else
   warn "no container publishes 18080 (issuer check below is the source of truth)"
 fi
 issuer="$(http_body "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-configuration" | jq -r .issuer 2>/dev/null || true)"
-# The real invariant is tri-consistency (CLAUDE.md §infra): discovery issuer ==
-# BE KEYCLOAK_ISSUER_URL == portal VITE_OIDC_AUTHORITY. The issuer host may be
-# localhost or a LAN IP (realm frontendUrl, e.g. when sharing the bench) — what
-# must never drift is the three agreeing on ONE string.
+# The real invariant is quad-consistency (CLAUDE.md §infra): discovery issuer ==
+# BE KEYCLOAK_ISSUER_URL == portal VITE_OIDC_AUTHORITY == lab KEYCLOAK_ISSUER_URL.
+# The issuer host may be localhost or a LAN IP (realm frontendUrl, e.g. when
+# sharing the bench) — what must never drift is the four agreeing on ONE string.
+# Lab's issuer earns its own static point: it validates the agent service token,
+# and a drifted lab issuer 401s every agent->lab call (the 8b round-trip catches
+# it dynamically, but only once lab is up — this fires even pre-boot).
 be_issuer="$(sed -n 's/^KEYCLOAK_ISSUER_URL=//p' "$(env_file BIC-agent-service)" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
 be_issuer="${be_issuer:-http://localhost:18080/realms/${KC_REALM}}"
 portal_auth="$(sed -n 's/^VITE_OIDC_AUTHORITY=//p' "$(env_file BIC-agent-portal)" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
+lab_issuer="$(sed -n 's/^KEYCLOAK_ISSUER_URL=//p' "$(env_file BIC-lab-service)" 2>/dev/null | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
 case "${issuer}" in
   */realms/${KC_REALM})
     if [ "${issuer}" = "${be_issuer}" ]; then
@@ -181,6 +185,10 @@ case "${issuer}" in
     if [ -n "${portal_auth}" ] && [ "${portal_auth}" != "${issuer}" ]; then
       fail "portal VITE_OIDC_AUTHORITY '${portal_auth}' != issuer '${issuer}' — login will break" \
            "align BIC-agent-portal/.env VITE_OIDC_AUTHORITY, then make restart-portal"
+    fi
+    if [ -n "${lab_issuer}" ] && [ "${lab_issuer}" != "${issuer}" ]; then
+      fail "lab KEYCLOAK_ISSUER_URL '${lab_issuer}' != issuer '${issuer}' — lab will 401 every agent service token" \
+           "align BIC-lab-service .env KEYCLOAK_ISSUER_URL, then make restart-lab"
     fi
     ;;
   *)

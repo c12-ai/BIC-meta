@@ -68,8 +68,10 @@ step: <剧本第几步/什么操作>
 - портal 在 **:5174**；agent/lab DB 都在 **talos-postgres:5433**（bic-postgres:5432 同名库是假的）。
 - **绝不调用** `POST :8800/reset`（会清掉所有人的会话）；**绝不** TRUNCATE/写 DB。
 - **轮末 lab reset 是标准程序（用户指令 2026-07-08）**：T-main 每完成一整轮主链路后，
-  必须重置 lab 数据：
-  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001","dataset":"test"}'`
+  必须重置 lab 数据（lab `:8192` 强制 Keycloak JWT，reset 与下面的 `GET :8192/robots/idle`
+  轮询都要带 `-H "Authorization: Bearer $(scripts/bic-env/get-token.sh)"`，在 meta 根目录执行、
+  token 有效 300s）：
+  `curl --noproxy '*' -s -X POST http://127.0.0.1:8192/admin/reset-to-test-data -H "Authorization: Bearer $(scripts/bic-env/get-token.sh)" -H 'Content-Type: application/json' --data-raw '{"robot_id":"talos.001","dataset":"test"}'`
   注意：reset 会触发机器人例程（忙数分钟）——下一轮 dispatch 前必须轮询
   `GET :8192/robots/idle` 直到非空。reset 前后各 `dispatch send` 通知 root（用户可能在手测，
   root 需要知情转达）。**轮中不 reset；T-challenge 永远不 reset。**
