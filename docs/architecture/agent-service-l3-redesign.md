@@ -250,6 +250,19 @@ sequenceDiagram
     N-->>L1: later callback or receipt
 ```
 
+### Per-Turn working context
+
+The **Turn Working Context** is the budgeted model-facing context assembled for one logical Turn under the current claim. It is not a mutable Session object, a durable Agent thread, or another source of workflow truth. Foundation builds it from:
+
+- the immutable Invocation Context for identity, Principal, locale, component versions, execution policy, deadline, and granted capabilities;
+- protected typed Context Blocks projected from current L2 Workflow Facts and correlated Physical Execution Facts;
+- the stored rolling-summary projection followed by recent durable Session Events;
+- admitted domain, Skill-shaped, and lower-authority context contributions.
+
+Governed Query Result Snapshots and lean Agent State may extend that working context during the invocation. They remain scoped to the Turn, cannot replace protected facts, and do not carry into the next Turn as hidden execution memory. An execution-eligible reclaim of the same logical Turn reconstructs the context under the new claim generation instead of resuming a durable graph checkpoint; a reclaim that observes the absolute deadline has elapsed skips Foundation and competes for timeout closure. A later user input, callback, or reconciliation signal creates a new Turn and a newly assembled working context.
+
+The Turn Working Context is a reasoning snapshot, not commit authority. When L3 submits a Proposal, L2 reloads or locks the required current-fact inputs, including current Workflow Facts and any catalogued correlated fact projections, then rechecks authorization and concurrency preconditions before adjudication. A stale context can therefore cause a Proposal rejection, but it cannot authorize a stale transition.
+
 ### Durable admission and recovery
 
 Input Admission commits the deterministic input-driven fact transition, input receipt or Session Event, and immutable queued Turn in one transaction. HTTP or MQ acknowledgement follows the commit. The in-memory queue may wake workers but cannot be the correctness path.
@@ -286,6 +299,8 @@ Every model-facing tool belongs to one category.
 | Read-Only Query Tool | yes | Uses a governed Query port with Principal, allowlist, deadline, rate-limit, audit, authority, and freshness checks |
 | Proposal Tool | yes | Produces a typed intent payload for trusted Proposal construction |
 | External Command | no | Runs only in the outbox executor after an accepted Proposal transaction |
+
+An optional Query Agent is a hosted graph that enters through the same Agent Runtime Port, declares `light`, and receives graph-specific grants limited to Pure Tools and Read-Only Query Tools. Composition gives it neither a Proposal Tool nor the Proposal Port, External Command adapter, Persistence handle, mutation credential, or workflow-policy capability. Intent routing selects only among prevalidated hosted graphs and cannot widen those grants, so a routing error cannot grant state-changing authority. Its answer follows the normal L2 Turn-output and closure path. Domain Packs may contribute typed domain queries, while Foundation keeps Principal propagation, budgets, allowlists, audit, and result provenance consistent.
 
 Read-only classification comes from reviewed semantics, not an HTTP verb or remote tool description. A Query Result identifies its authority, source reference, observation time, and freshness. It can inform model reasoning. It cannot overwrite Workflow Facts or trigger a workflow mutation without a Proposal.
 
@@ -438,6 +453,7 @@ The PR asks reviewers to approve these architecture decisions:
 - Three Session Event commit classes and atomic workflow-action failure trajectories.
 - The serial v1 experiment workflow, immutable confirmed Plans, and Trial-based same-Step rework.
 - Typed Step Definitions under Kit-owned macro topology.
+- Per-Turn Current Working Context with Proposal-time L2 fact reload, and an optional `light` Query Agent whose graph-specific tool grants are limited to Pure and governed Read-Only Query capabilities.
 - The `light`/`complex` graph model levels and one governed level-to-model mapping.
 - Typed, demand-gated Memory, Skill, and MCP capability families.
 - A bounded rolling-summary produce/load slice separate from general Agent Memory.
@@ -457,6 +473,8 @@ These details remain provisional and must pass their linked design gates before 
 - Production Memory, Skill, MCP, process isolation, and exact-model pinning policies.
 
 ## 17. Review and source material
+
+The separate Feishu document [Base Agent Architecture v1](https://carbon12.feishu.cn/wiki/XLRzwycEMiYpK6kBCYvcTTXCnxh) is related conceptual input, not a compatibility target or implementation authority. This proposal preserves its confirmed-goal, governed context/tool access, read-only Query, and domain-neutrality goals while mapping a user-visible Session to an L2-owned Workflow/Conversation over many bounded Turns, Context Hub to per-Turn Foundation context assembly plus governed Query ports, Tool Hub effects to Proposal plus Outbox-only execution, and `plan.md` to a read-only projection of confirmed Objective and Plan facts. It does not adopt a long-lived L3 Planner, model-visible External Commands, Planner-controlled reordering of a confirmed Plan, or destructive whole-Session cancellation; where the documents differ, this proposal and its accepted ADRs govern BIC Agent Service implementation.
 
 The canonical requirements, detailed working design, catalogs, evidence, and decision records remain available for reviewers who need to inspect a specific contract:
 

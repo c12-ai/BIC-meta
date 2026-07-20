@@ -8,6 +8,7 @@ Status: architecture boundary confirmed. In-process capability isolation, Turn a
 - `turn_id` is allocated at enqueue; Turn execution begins at L2 dequeue.
 - The Turn ends when L2 durably records its terminal lifecycle result.
 - Context loading, Agent execution, governed read-only queries, Proposal construction, and synchronous Proposal adjudication may be inside the Turn.
+- The Turn Working Context is reconstructed under the current claim from immutable Invocation Context, protected current-fact projections, stored rolling summary, recent durable Session Events, and admitted typed contributions. In-Turn Query Result Snapshots and Agent State remain transient and do not carry into another Turn.
 - Outbox execution and Lab/Nexus Task execution are outside the Turn.
 - Callback and reconciliation stimuli create a new Turn rather than resume the originating Turn.
 - Turn, Proposal, Outbox Command, and external Task use separate identities and state models.
@@ -36,6 +37,7 @@ These three closures are distinct. A Foundation invocation can close while L2 te
 
 - V1 uses strong in-process contract isolation, not a separate Foundation service.
 - Foundation and trusted Domain Agent Definitions receive only Pure capabilities, governed Read-Only Query ports, and a typed Proposal port. Domain Proposal Policies receive only neutral immutable intent/current-fact views and pure decision contracts.
+- An optional Query Agent declares the `light` model level and receives graph-specific grants limited to Pure and Read-Only Query capabilities. It has neither a Proposal Tool nor the Proposal Port, External Command adapter, Persistence handle, workflow-policy capability, mutation credential, or mixed read/write client; routing cannot widen that composition.
 - They cannot import or receive workflow persistence, concrete L2 services, outbox implementations, state-changing external clients, or a generic service locator.
 - The Proposal port is implemented under L2 authority. Its adjudication transaction is short and closes before control returns to continuing Agent execution.
 - No transaction or entity lock crosses an LLM, narration, graph-continuation, or read-only-query await.
@@ -75,6 +77,7 @@ These three closures are distinct. A Foundation invocation can close while L2 te
 - A worker claim begins execution and must be recoverable after process loss.
 - Deterministic admission changes and the optional L3 Proposal have distinct provenance and identities; admission does not consume the Turn effect slot.
 - The durable work item supports recovery only. It does not persist authoritative Workflow Facts in Agent State or create a durable LangGraph thread.
+- An execution-eligible reclaim reconstructs the Turn Working Context under the new claim generation instead of resuming a mutable Session context or durable graph checkpoint. A reclaim that observes the absolute deadline has elapsed skips Foundation and competes for timeout closure.
 
 ## Confirmed minimal claim fencing
 

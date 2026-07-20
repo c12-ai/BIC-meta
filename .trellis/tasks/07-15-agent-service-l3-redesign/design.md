@@ -6,6 +6,8 @@ Status: proposed architecture for review. This document records the agreed archi
 
 Restructure Agent Service so that current Chemistry behavior remains externally compatible, experimental domains can be added without changing the domain-neutral Agent kernel, and future Agent capabilities can be introduced through evidence-backed seams without creating new workflow authorities or side-effect bypasses.
 
+The Feishu [Base Agent Architecture v1](https://carbon12.feishu.cn/wiki/XLRzwycEMiYpK6kBCYvcTTXCnxh) is related conceptual input, not a compatibility target or implementation authority. Where the documents differ, the canonical PR #327 architecture, this detailed design, and accepted ADRs govern BIC Agent Service implementation.
+
 ## Architecture coordinates
 
 L1-L4 remain the only layer taxonomy:
@@ -170,6 +172,19 @@ The original architecture already defined `runtime.invoke(ctx, turn)` as the uni
 The L2 Turn Host sees one conceptual operation: execute one admitted Turn using an immutable invocation request. It cannot address a specialist, Agent, graph, node, prompt, or tool. The Composition Root prevalidates the active route's Foundation, Experiment Workflow Kit, Domain Agent Definition, and Domain Proposal Policy composition; neither Portal input nor model output selects the route or Pack.
 
 The Port returns typed runtime output and one machine-readable **Foundation Execution Outcome**. That outcome states how the Foundation invocation closed and is available before durable L2 closure; it is not the authoritative lifecycle result of the logical Turn. L2 combines it with authoritative workflow, cancellation, deadline, and fencing facts to persist exactly one **Turn Terminal Outcome**. Their exact Python containers, streaming protocol, fields, and mapping table remain detailed contract decisions, but the boundary cannot expose Persistence, a transaction, raw Lab/Nexus clients, concrete graph state, or an iterator whose exhaustion is the only success signal.
+
+### Turn Working Context
+
+**Current Working Context**, called the **Turn Working Context** in this design, means the model-facing context for one logical Turn under its current claim. Foundation assembles it at execution time from four inputs:
+
+1. immutable Invocation Context containing the normalized input references, Principal, locale, domain/component versions, execution policy, deadline, claim generation, and effective capability grants;
+2. protected typed Context Blocks projected from current L2 Workflow Facts and correlated Physical Execution Facts;
+3. the stored rolling-summary projection followed by recent durable Session Events;
+4. admitted domain, Skill-shaped, and lower-authority context contributions that survive scope, freshness, provenance, ranking, and budget checks.
+
+Governed Query Result Snapshots and lean Agent State may extend the working context during the invocation. They remain observations and transient execution data. They cannot overwrite protected blocks, become Workflow Facts, or flow into the next Turn as hidden Agent memory. Foundation discards the working context at invocation closure. An execution-eligible reclaim of the same `turn_id` reconstructs it under the new `claim_generation`; a reclaim that observes the absolute deadline has elapsed skips Foundation and competes for timeout closure. A later user input, callback, or reconciliation signal creates a new Turn and a new context.
+
+Context reconstruction does not authorize a transition. A Query result can become stale after the model reads it, and a protected projection can lag a concurrent L2 change. The Proposal Host therefore reloads or locks current facts, rechecks authorization and CAS preconditions, and applies the Domain Proposal Policy before commit. Stale reasoning can produce a rejected Proposal, but cannot commit stale workflow state.
 
 ### Three reuse zones and one sealed composition boundary
 
@@ -775,6 +790,12 @@ Production code may not import `langgraph._internal` or depend on undocumented c
 Read-only is an explicit reviewed capability, not a property inferred from HTTP verbs or an adapter method name. A Query Result Snapshot carries source authority, source reference, observation time, and freshness. It can inform reasoning but cannot become a Workflow Fact or trigger mutation without a new Proposal.
 
 Domain Packs provide domain-specific query and Proposal tools. Foundation provides only the standard execution wrapper and governance hooks. A future demand-gated read-only MCP integration must enter through the same category rather than a separate graph path.
+
+### Optional Query Agent profile
+
+Query Agent is an optional hosted Agent graph for read-only user requests. When enabled, it enters through the same Agent Runtime Port, declares the `light` Model Capability Level, and receives graph-specific tool grants limited to Pure Tools and reviewed Read-Only Query Tools. Composition gives it neither a Proposal Tool nor the Proposal Port, External Command adapter, Persistence handle, mixed read/write client, mutation credential, or workflow-policy capability. Intent routing selects only among prevalidated hosted graphs and cannot widen those grants, so an effectful-looking request routed to Query Agent still cannot produce a workflow transition.
+
+The Query Agent uses the same Turn Working Context, Principal propagation, execution deadline, query provenance, and Foundation Execution Outcome contract as other hosted graphs. Its user-facing answer persists through the ordinary L2 durable conversation/output path and closes with a normal Turn Terminal Outcome. Domain Packs may contribute typed domain Query definitions without receiving concrete Lab/Nexus clients.
 
 ## Vertical-slice migration and legacy retirement
 

@@ -220,6 +220,10 @@ _Avoid_: Persisted baton, workflow source of truth
 The immutable identities, capabilities, references, policies, and runtime dependencies supplied for one Agent invocation and recreated for a later invocation or recovery.
 _Avoid_: Agent State, checkpoint payload
 
+**Turn Working Context**:
+The budgeted model-facing context assembled for one logical Turn under the current claim from Invocation Context, protected current-fact projections, stored rolling summary, recent durable Session Events, and admitted typed context contributions. Governed Query Result Snapshots and lean Agent State may extend it for that invocation, but it is rebuilt only on an execution-eligible reclaim, discarded at closure, and never authorizes a workflow transition; an elapsed-deadline reclaim skips Foundation and creates no new working context.
+_Avoid_: Mutable Session context, workflow source of truth, durable Agent thread
+
 **Agent State**:
 The lean, serializable working data needed to execute or resume an Agent task without carrying authoritative Workflow Facts or Physical Execution Facts.
 _Avoid_: Session Context, workflow snapshot

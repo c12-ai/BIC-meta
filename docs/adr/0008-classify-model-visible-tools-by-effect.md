@@ -1,3 +1,5 @@
 # Classify model-visible tools by effect
 
 Every tool is classified as pure computation, read-only external query, Proposal production, or External Command before it can be exposed. Models may execute the first two and may use Proposal Tools to express intent; External Commands are hidden and remain exclusive to the outbox executor. Read-only queries run with trusted Principal Context, explicit capabilities, bounded execution, audit, and sourced freshness metadata, and their results remain non-authoritative snapshots. This enables Query Agent and future read-only MCP use without reopening a mutation bypass.
+
+An optional Query Agent is a hosted `light` graph whose graph-specific effective grant contains only Pure and Read-Only Query Tools. It receives neither a Proposal Tool nor the Proposal Port, External Command adapter, Persistence handle, mixed read/write or concrete state-changing client, mutation credential, or workflow-policy capability. Its answer uses the normal L2 durable output and Turn-closure path, while intent routing cannot widen its grant.
