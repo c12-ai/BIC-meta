@@ -293,6 +293,18 @@ REC
 # shellcheck disable=SC2034  # consumed by up.sh via `for u in ${KC_DEV_USERS}`
 KC_DEV_USERS="wenlong valen"
 KC_DEV_PASSWORD="${KC_DEV_PASSWORD:-bic_local_dev}"
+# Demo user with a FIXED Keycloak id: the captured demo snapshot
+# (BIC-agent-service app/data/demo_snapshot.json) binds its sessions to this
+# exact sub — a bench whose `dev` user carries any other id restores demo
+# sessions nobody can see. Mirrors the "users" entry in BIC-infra
+# keycloak/realm-bic.json (fresh-bench import path); up.sh heals benches
+# whose realm was imported before the user existed.
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER="dev"
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER_ID="ef8866ec-6803-4ef6-9961-f4fa273fca29"
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER_PASSWORD="${KC_DEMO_USER_PASSWORD:-dev}"
 KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
 KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-bic_local_dev}"
 KC_REALM="${KC_REALM:-bic}"
