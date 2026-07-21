@@ -106,6 +106,12 @@ session_id: xxx；关键 seq/事件；DB 查询结果；报错原文
   方案再动手。
 - 测试必须编码意图（改行为必须同步改断言旧行为的测试，写明 WHY）。
 - 报告一律数据先行：PASS/FAIL 在前，解释在后；跳过 = 失败。
+- **PR 必须声明其关闭的台账 issue**（2026-07-21 追加）：凡修复台账 issue 的 PR，body 里逐行写
+  `Closes c12-ai/BIC-meta#<N>`（跨仓必须带全名），merge 进默认分支即自动关票。三个细则：
+  ① 跨仓成对修复（BE+portal 各半）每张票只挂**主责仓**的 PR，防错峰合并提前关票；
+  ② 集成分支模式下，批 PR（base=batch 分支）合入**不触发** auto-close（GitHub 只认合入默认分支）——
+  closes 行统一写在最终 batch→main 汇总 PR 上；
+  ③ Development 侧栏可能不渲染跨仓链接，属显示限制，不影响 merge 关票。
 
 ## 补充（2026-07-08 事故追加）
 
