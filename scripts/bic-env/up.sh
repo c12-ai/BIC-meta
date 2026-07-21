@@ -150,6 +150,30 @@ if wait_http "http://localhost:18080/realms/${KC_REALM}/.well-known/openid-confi
         --username "${u}" --new-password "${KC_DEV_PASSWORD}"
     fi
   done
+  # demo user `dev` with a FIXED id (common.sh KC_DEMO_USER_ID): the captured
+  # demo snapshot binds its sessions to this exact sub, so every bench must
+  # mint the SAME sub or `POST /reset {"dataset":"demo"}` restores sessions
+  # nobody can see. The realm file seeds it on first-boot import; this heals
+  # benches imported before the user existed. partialImport is the only admin
+  # path that honors a caller-supplied user id — plain `kcadm create users
+  # -s id=...` silently mints a random one (verified on Keycloak 26.3).
+  if [ "${DRY_RUN}" != "1" ]; then
+    demo_id="$(docker exec "${kc}" "${KCADM}" get users -r "${KC_REALM}" -q username="${KC_DEMO_USER}" -q exact=true --fields id --format csv --noquotes 2>/dev/null | tr -d '\r' || true)"
+    if [ "${demo_id}" = "${KC_DEMO_USER_ID}" ]; then
+      ok "user ${KC_DEMO_USER} exists with the demo-snapshot sub"
+    else
+      [ -n "${demo_id}" ] && warn "user ${KC_DEMO_USER} has sub ${demo_id}, not the demo-snapshot sub — overwriting"
+      docker exec -i "${kc}" sh -c 'cat > /tmp/bic-demo-user.json' <<JSON
+{"users":[{"id":"${KC_DEMO_USER_ID}","username":"${KC_DEMO_USER}","firstName":"dev","lastName":"dev","enabled":true,"credentials":[{"type":"password","value":"${KC_DEMO_USER_PASSWORD}","temporary":false}]}]}
+JSON
+      do_run docker exec "${kc}" "${KCADM}" create partialImport -r "${KC_REALM}" \
+        -s ifResourceExists=OVERWRITE -o -f /tmp/bic-demo-user.json
+      docker exec "${kc}" rm -f /tmp/bic-demo-user.json
+      ok "user ${KC_DEMO_USER} (re)created with the demo-snapshot sub"
+    fi
+  else
+    note "[dry] would ensure user ${KC_DEMO_USER} has fixed id ${KC_DEMO_USER_ID} (partialImport OVERWRITE)"
+  fi
   # portal redirectUris / webOrigins (ensure both localhost + 127.0.0.1:5173)
   if [ "${DRY_RUN}" != "1" ]; then
     cid="$(docker exec "${kc}" "${KCADM}" get clients -r "${KC_REALM}" -q clientId="${KC_CLIENT}" --fields id --format csv --noquotes 2>/dev/null | tr -d '\r' || true)"
