@@ -1,31 +1,28 @@
 # GitHub Bot 身份：c12-apex-dev
 
 AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 GitHub App
-**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥只存 1Password，
-铸 token 时 `op read` 运行时读取、**不落盘**；agent 用 `scripts/gh-app/gh-app-token.sh`
-铸 1 小时短期 token，全程无感。bot 不能 approve 自己的 PR，"人工 admin merge" 这道闸
-不受影响。
+**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥**只存在铸造机
+aws-test 上**，笔记本零秘密：本地无钥匙时 `scripts/gh-app/gh-app-token.sh` 把自身
+通过 ssh 管道到铸造机执行，只回传 1 小时 token（本地缓存 55 分钟复用）。bot 不能
+approve 自己的 PR，"人工 admin merge" 这道闸不受影响。
 
 - App: https://github.com/organizations/c12-ai/settings/apps/c12-apex-dev
   （app id `4362356`，bot uid `307868801`）
 - 铸 token 脚本：`scripts/gh-app/gh-app-token.sh`（免配置：installation 自动发现，
   token 缓存 55 分钟复用）
 
-## 同事一次性接入（2 分钟）
+## 同事一次性接入
 
-1. 装 1Password CLI 并登录团队账号：
-   ```bash
-   brew install 1password-cli && op signin
-   ```
-2. 验证：
-   ```bash
-   scripts/gh-app/gh-app-token.sh --check
-   # OK  identity: c12-apex-dev[bot] ...
-   ```
+前提只有一个：`ssh aws-test` 可用（就是部署用的那套 ssh config + 团队 key + IP 白名单，
+多数人已具备）。验证：
 
-完成。pem 不下载、不落盘；个人的 `gh auth` / ssh key / git 配置一概不动。
-（密钥条目路径默认 `op://BIC/c12-apex-dev/private-key.pem`，可用
-`BIC_GH_APP_OP_URI` 覆盖。）
+```bash
+scripts/gh-app/gh-app-token.sh --check
+# OK  identity: c12-apex-dev[bot] ...
+```
+
+完成。本机不落任何秘密；个人的 `gh auth` / ssh key / git 配置一概不动。
+（铸造机可用 `BIC_GH_APP_SSH` 覆盖；管理员/测试可用 `BIC_GH_APP_KEY=<pem>` 走本地钥匙。）
 
 ## Agent 怎么用（无感的关键）
 
