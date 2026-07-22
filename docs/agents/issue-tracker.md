@@ -51,10 +51,10 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
 
-## PR ↔ issue 自动关闭纪律（2026-07-21 定档）
+## PR ↔ issue auto-close discipline
 
-凡修复台账 issue 的 PR，body 逐行写 `Closes c12-ai/BIC-meta#<N>`（跨仓必须全名），merge 进默认分支即自动关票。细则：
+Every PR that fixes a ledger issue writes `Closes c12-ai/BIC-meta#<N>` in its body, one line per issue (cross-repo references must use the full `owner/repo#N` form). Merging into the default branch then auto-closes the ticket. Rules:
 
-1. **跨仓成对修复**（BE + portal 各半）：每张票只挂**主责仓**的 PR，防错峰合并提前关票。
-2. **集成分支模式**：批 PR（base = batch 分支）合入**不触发** auto-close——closes 行统一写在最终 batch→main 汇总 PR 上。
-3. Development 侧栏可能不渲染跨仓链接，属 GitHub 显示限制，不影响 merge 关票。
+1. **Cross-repo paired fixes** (e.g. a BE half + a portal half): attach each ticket to the **primary repo's** PR only, so a staggered merge can't close the ticket early.
+2. **Integration-branch mode**: batch PRs (base = the batch branch) do **not** trigger auto-close — put all closes lines on the final batch→main summary PR.
+3. The Development sidebar may not render cross-repo links — a GitHub display limitation; merge-time closing still works.
