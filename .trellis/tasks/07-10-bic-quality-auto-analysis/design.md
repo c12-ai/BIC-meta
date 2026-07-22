@@ -30,7 +30,8 @@ file-size, file-count, and cumulative-read budgets unchanged.
 
 ## Analysis Pipeline
 
-The pipeline has two one-way evidence lanes. The technical lane performs
+The pipeline has two one-way evidence lanes followed by a lightweight reporting
+pass. The technical lane performs
 workspace discovery, change collection, module inference, changed-object and
 journey extraction, test-asset inspection, and technical test correspondence
 without consuming Issue context. The requirement lane consumes that immutable
@@ -38,10 +39,11 @@ technical context only to locate Issues and extract requirement
 evidence. It cannot return exclusion filters to the technical lane.
 
 A final scope-fusion stage takes the union of technical test candidates and
-requirement-driven additions, records Issue-to-Diff divergence, aligns eligible
-acceptance items with objects/routes/journeys/tests, and derives the pre-test
-risk assessment. Every stage emits structured JSON with evidence so later
-stages do not need to re-scan or invent facts.
+requirement-driven additions. The reporting pass then compares eligible
+acceptance items with existing objects/routes/journeys/tests, records supported
+Issue-to-Diff divergence, and presents grouped test guidance. It consumes the
+frozen snapshot and performs no second Issue lookup, semantic search, or code
+scan.
 
 ## Repository Discovery
 
@@ -75,12 +77,10 @@ one authoritative current-PR reference activates a fast path only when exactly
 one affected GitHub repository exists. With multiple affected repositories,
 every repository is scanned and the current-PR Issue remains repository-local;
 it cannot resolve workspace Issue alignment. The snapshot otherwise lists at
-most 100 open-Issue metadata records per corresponding GitHub repository and
-may include bounded closed-Issue metadata around current-PR or local commit
-activity. Closed candidates receive no authority from time or semantic
-proximity alone. Only the final shortlist may receive bounded timeline and
-comment hydration. Historical PR URLs supplied in conversation are background
-context and are not analyzer inputs.
+most 100 open-Issue metadata records per corresponding GitHub repository.
+Ordinary discovery does not scan closed Issues or hydrate timelines/comments.
+Historical PR URLs supplied in conversation are background context and are not
+analyzer inputs.
 
 Module mapping and changed-object extraction run before candidate reduction.
 `shortlist_issue_candidates` merges duplicate references, protects explicit and
@@ -251,13 +251,21 @@ items, and additional test candidates. `effective_scope` is their union. A
 machine-checkable invariant records technical candidate identities before and
 after fusion and fails validation if any disappear.
 
-Each eligible acceptance item is classified as `in-scope-direct`,
-`in-scope-indirect`, `claimed-but-unmatched`, `explicitly-out-of-scope`, or
-`unresolved`. Matching is evidence-bearing and conservative: exact changed
-objects/routes/paths are direct, bounded static relationships are indirect,
-explicit source text may establish out-of-scope, and absence of evidence alone
-does not. Claimed-but-unmatched items raise completeness risk rather than being
-misreported as test-only gaps.
+Each eligible acceptance item is reported on three independent axes: scope
+(`in-scope`, `adjacent`, `out-of-scope`, `cannot-determine`), implementation
+(`static-evidence-found`, `static-evidence-missing`, `cannot-verify`), and test
+status (`asserted`, `weak-or-disabled`, `missing`, `not-applicable`,
+`cannot-verify`). Matching is evidence-bearing and conservative: positive
+implementation claims cite an exact changed object/route/path/journey, and every
+in-scope item cites an exact test/assertion or an explicit missing-test fact.
+Explicit source text may establish out-of-scope; absence of evidence alone does
+not. Thematic candidates receive no acceptance-item comparison.
+
+The report groups additional guidance as `requirement-traced`,
+`technical-regression`, and `exploratory`. Their union is the effective set,
+and technical-regression guidance is immutable under every Issue outcome. Since
+this phase runs no tests, it never calls an item satisfied, passed, complete, or
+verified.
 
 ## Rollback
 

@@ -22,6 +22,7 @@ ANALYZER = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/quality_context.py"
 SKILL_FILE = KIT_DIR / "skill/bic-quality-guan-ping-ce/SKILL.md"
 OPENAI_YAML = KIT_DIR / "skill/bic-quality-guan-ping-ce/agents/openai.yaml"
 DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables.md"
+RISK_MODEL = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/risk-model.md"
 ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
 TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
 TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
@@ -667,6 +668,39 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("Never perform a second Issue body lookup", skill)
         self.assertNotIn("candidate, read it fully", skill)
 
+    def test_requirement_review_contract_is_evidence_traced_and_additive(self) -> None:
+        skill = SKILL_FILE.read_text(encoding="utf-8")
+        risk_model = RISK_MODEL.read_text(encoding="utf-8")
+        deliverables = DELIVERABLES.read_text(encoding="utf-8")
+        contract = " ".join("\n".join((skill, risk_model, deliverables)).split())
+
+        self.assertLess(
+            skill.index("**1B. Freeze the technical scope.**"),
+            skill.index("7. Treat `risk_assessment.technical_risk`"),
+        )
+        for value in (
+            "`scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`",
+            "`implementation`: `static-evidence-found`, `static-evidence-missing`, or",
+            "`test_status`: `asserted`, `weak-or-disabled`, `missing`, `not-applicable`",
+        ):
+            self.assertIn(value, contract)
+
+        self.assertIn("exact changed file/object/route/journey", contract)
+        self.assertIn("exact test/assertion or explicit missing-test", contract)
+        self.assertIn("receives no acceptance-item comparison", contract)
+        self.assertIn("narrow-issue-broad-diff", contract)
+        self.assertIn("broad-issue-narrow-diff", contract)
+        self.assertIn("bidirectional-divergence", contract)
+        self.assertIn("`requirement-traced`", contract)
+        self.assertIn("`technical-regression`", contract)
+        self.assertIn("`exploratory`", contract)
+        self.assertIn("effective guidance is the union", contract)
+        self.assertIn("no test was executed", " ".join(deliverables.split()))
+        self.assertIn(
+            "| 验收项 | 范围 | 实现证据 | 测试状态 | Diff/对象证据 | 测试证据 | 判断 |",
+            deliverables,
+        )
+
     def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
         without_issue = self.analyze("assess")
         self.assertFalse(without_issue["context"]["issue_context"]["resolved"])
@@ -712,6 +746,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(
             assessed["scope_fusion"]["technical_test_candidate_ids"],
             without_issue["scope_fusion"]["technical_test_candidate_ids"],
+        )
+        self.assertTrue(
+            set(assessed["scope_fusion"]["technical_test_candidate_ids"])
+            <= set(assessed["scope_fusion"]["effective_test_candidate_ids"])
         )
         dimensions = {item["dimension"] for item in risk["risk_matrix"]}
         self.assertEqual(

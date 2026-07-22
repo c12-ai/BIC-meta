@@ -33,7 +33,12 @@ BIC 质量简报
 - 关联 Issue：
 - 目标：
 - 验收项：
-- 本次 Diff 范围：<in-scope, adjacent, and unchanged/out-of-scope items>
+- 正式对齐资格：<eligible/not-eligible and the provenance reason>
+- 验收项静态证据：
+| 验收项 | 范围 | 实现证据 | 测试状态 | Diff/对象证据 | 测试证据 | 判断 |
+|---|---|---|---|---|---|---|
+| <one eligible item> | in-scope/adjacent/out-of-scope/cannot-determine | static-evidence-found/static-evidence-missing/cannot-verify | asserted/weak-or-disabled/missing/not-applicable/cannot-verify | <exact changed file/object/route/journey> | <exact test/assertion or explicit missing-test statement> | <static pre-test interpretation> |
+- 范围分歧：<narrow-issue-broad-diff, broad-issue-narrow-diff, bidirectional-divergence, none-observed, or cannot-determine>
 - 获取 warning：
 
 模块映射
@@ -58,8 +63,9 @@ BIC 质量简报
 - 评估阶段：真正测试前（pre-test）
 
 测试缺口
-- 建议新增测试：
-- 建议完善测试：
+- 需求验收测试（requirement-traced）：
+- 技术回归测试（technical-regression）：
+- 探索性风险测试（exploratory）：
 - 暂未发现明显缺口：
 
 第二阶段测试执行交接（本阶段不执行）
@@ -118,9 +124,15 @@ brief concise:
   test. Sensitive paths and credential values must remain redacted.
 - Start `测试前风险矩阵` with the deterministic rows from
   `assess-risk-matrix.sh`. Add one Issue-alignment row per eligible, in-scope
-  acceptance item using semantic reading of Issue, Diff, and tests. Keep
-  adjacent and unchanged/out-of-scope items outside the matrix. Missing Diff or
-  test evidence may raise the risk; never lower the deterministic risk floor.
+  acceptance item using semantic reading of Issue, Diff, and tests. Requirement
+  review is a separate pass after technical review. For each item, report
+  independent `scope`, `implementation`, and `test_status` values exactly as
+  defined in `references/risk-model.md`; never replace them with one blanket
+  verdict for several items. A positive implementation statement cites one
+  exact changed file/object/route/journey. Every in-scope item cites one exact
+  test/assertion or explicitly states that no test was found. Keep adjacent and
+  out-of-scope items outside the matrix. Missing Diff or test evidence may raise
+  the risk; never lower the deterministic risk floor.
 - Use `unassessed` for requirement alignment when Issue context is
   missing/unresolved or an acceptance item cannot be compared with concrete
   evidence. Preserve the technical risk derived from Diff/test facts. This is a
@@ -152,7 +164,8 @@ brief concise:
   `partial-scan` when only some repositories succeed, and `no-candidates` only
   after successful empty scans. Show why candidates do or do not correspond.
   Label ordinary search matches `thematic-candidate`; even one unique semantic
-  match remains background context and cannot supply acceptance rows. Label
+  match remains background context, receives no acceptance-item comparison or
+  requirement-traced guidance, and cannot supply acceptance rows. Label
   commit/branch references `reference-hint`; promote one to `strong-related`
   only when its preserved provenance and hydrated body both agree with concrete
   changed objects. Follow at most ten repository-contained Issue references
@@ -161,6 +174,14 @@ brief concise:
   authoritative or explicitly justified strong-related provenance; do not
   infer identity from repository membership, a general keyword, or filename
   similarity alone, and do not erase technical risk.
+- Report Issue-to-Diff divergence only when the eligible item evidence supports
+  it. Preserve technical objects and recommendations that an Issue does not
+  mention. If attribution is incomplete, use `cannot-determine` instead of
+  treating absence as proof of out-of-scope work.
+- Group test guidance as `requirement-traced`, `technical-regression`, and
+  `exploratory`. The effective guidance is their union. A single asset may carry
+  multiple labels but is described once; Issue alignment never removes or
+  downgrades technical-regression guidance.
 - Do not include the raw `test_inventory` in the final `assess` payload or
   brief. Use derived test correspondence and risk evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.
@@ -173,6 +194,7 @@ brief concise:
   for execution if the workspace fingerprint changes.
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.
-- Do not emit confidence, priority, evidence-type, coverage-percentage,
+- Do not call an acceptance item satisfied, passed, complete, or verified: no
+  test was executed. Do not emit confidence, priority, evidence-type, coverage-percentage,
   `mapping_source`, or a next-step recommendation. State the static-analysis
   limitation once, at the end.

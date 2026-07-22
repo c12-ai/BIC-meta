@@ -217,20 +217,39 @@ If the user asks to execute tests, state that this skill only provides read-only
    the deterministic risk floor; do not run the wrapper again. Keep
    `requirement_alignment` separate. Missing, thematic, or ambiguous Issue
    context makes requirement alignment `unassessed` and assessment completeness
-   partial, but it cannot erase or lower technical risk. Compare every Issue
-   acceptance item with concrete Diff and test evidence only when
-   `acceptance_items_eligible` is true. Before adding rows, classify each eligible
-   item as `in-scope`, `adjacent`, or `unchanged/out-of-scope` for this Diff.
-   Add risk rows only for `in-scope` items; report the other items as context so
-   an umbrella Issue cannot inflate this change's risk matrix. An ordinary
+   partial, but it cannot erase or lower technical risk. Run requirement
+   verification as a separate pass after technical review, only when
+   `acceptance_items_eligible` is true. For every eligible acceptance item,
+   report these independent axes instead of collapsing them into one label:
+   - `scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`;
+   - `implementation`: `static-evidence-found`, `static-evidence-missing`, or
+     `cannot-verify`;
+   - `test_status`: `asserted`, `weak-or-disabled`, `missing`, `not-applicable`,
+     or `cannot-verify`.
+   Cite at least one exact changed file/object/route/journey for every positive
+   implementation claim and one exact test/assertion or explicit missing-test
+   statement for every `in-scope` item. Never group several items under one
+   blanket verdict. Do not say `satisfied`, `passed`, or `complete`: this phase
+   has static evidence only. Add risk rows only for `in-scope` items; report
+   adjacent and out-of-scope items as context so an umbrella Issue cannot
+   inflate this change's risk matrix. If an item has no concrete comparison
+   evidence, use `cannot-determine`/`cannot-verify` rather than guessing. An ordinary
    `thematic-candidate`, even when unique and semantically similar, remains
-   background context and keeps workspace Issue alignment `unassessed`. A
+   background context, receives no acceptance-item comparison, and keeps
+   workspace Issue alignment `unassessed`. A
    `reference-hint` may become `strong-related` only when its
    preserved commit/branch/PR provenance and hydrated body both agree with
    concrete changed objects; then state the promotion evidence explicitly.
-   Never perform a second Issue body lookup. Never lower the risk floor or infer
-   alignment from keyword overlap alone. This matrix describes pre-test
-   verification risk, not residual risk.
+   Never perform a second Issue body lookup. After item review, report
+   `narrow-issue-broad-diff` when concrete technical objects have no mapped
+   acceptance item, `broad-issue-narrow-diff` when an in-scope item has
+   `static-evidence-missing`, or `cannot-determine` when the evidence does not
+   support either direction. These divergence labels may raise requirement
+   risk but never filter technical scope. Group missing-test guidance as
+   `requirement-traced`, `technical-regression`, or `exploratory`; the effective
+   guidance is their union, and existing technical guidance must remain present.
+   Never lower the risk floor or infer alignment from keyword overlap alone.
+   This matrix describes pre-test verification risk, not residual risk.
 8. Preserve `test_execution_manifest` from the frozen snapshot. It contains
    affected repository heads/bases and change fingerprints, required direct and
    indirect candidates, optional possible candidates, selected cases, command

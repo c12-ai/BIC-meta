@@ -19,6 +19,14 @@ It is intentionally read-only:
 - It freezes a Diff/AST/test-derived technical scope before Issue analysis, then
   uses Issue context additively and generates a pre-test Risk Matrix with
   separate technical risk and requirement alignment.
+- It performs requirement verification as a separate static pass only for an
+  authoritative or explicitly justified strong-related Issue. Each eligible
+  acceptance item keeps independent scope, implementation-evidence, and test-
+  evidence states with exact Diff and test citations; thematic search matches
+  remain context and are not formally aligned.
+- It reports Issue-to-Diff scope divergence and groups test guidance as
+  requirement-traced, technical-regression, or exploratory. These groups are
+  combined by union, so Issue context cannot remove technical regression work.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
 - It treats each Playwright/CDP case as independent browser/user-journey
@@ -161,6 +169,15 @@ The expected output is one structured `BIC Quality Brief` with:
 - `Risk Matrix`
 - `Missing Tests`
 - `Phase 2 Test Execution Handoff (not run)`
+
+Within `Issue Context`, formal acceptance-item comparison is present only when
+the selected Issue has eligible provenance. Each item is reported on three
+independent axes (`scope`, `implementation`, and `test_status`) with exact
+static evidence. The brief uses `cannot-determine` or `cannot-verify` when that
+evidence is incomplete and never describes an item as passed, satisfied, or
+complete because this phase does not execute tests. Missing-test guidance is
+shown in requirement-traced, technical-regression, and exploratory groups; the
+combined result preserves every technical recommendation.
 
 `mapping_source` remains available in raw JSON for diagnostics but is omitted
 from the default brief. Direct, indirect, and possible test relations remain

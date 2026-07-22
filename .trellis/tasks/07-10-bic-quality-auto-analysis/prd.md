@@ -45,9 +45,8 @@ repository or test directory is added.
   events, and types. Fall back to changed-file facts when a language cannot be
   parsed safely.
 - After the Diff identifies affected repositories, scan open GitHub Issues in
-  each affected repository. Also search bounded closed-Issue metadata around
-  current-PR or local commit activity when timestamps are available. Preserve
-  current-PR links, PR/commit closing text,
+  each affected repository. Do not broaden ordinary discovery to closed Issues,
+  timelines, or comments. Preserve current-PR links and PR/commit closing text,
   and a strong branch-name pattern as higher-priority association evidence.
   Explicit overrides are authoritative. A current-PR linked/closing reference
   may resolve automatically only when one affected GitHub repository exists;
@@ -173,26 +172,25 @@ repository or test directory is added.
 
 ### 2026-07-22 dual-scope quality workflow
 
-- [ ] Technical repositories, files, changed objects, journeys, and test
+- [x] Technical repositories, files, changed objects, journeys, and test
       candidates are computed before Issue context and cannot be removed or
       downgraded by an explicit or discovered Issue.
-- [ ] Requirement context may add or re-rank test candidates but the final set
+- [x] Requirement context may add or re-rank test candidates but the final set
       is a union whose technical-candidate membership never decreases.
-- [ ] Risk output reports `technical_risk`, `requirement_alignment`, and
+- [x] Risk output reports `technical_risk`, `requirement_alignment`, and
       `assessment_completeness`; no Issue leaves technical risk intact and only
       requirement alignment unassessed.
-- [ ] Issue discovery searches bounded open and closed Issue metadata around
-      current-PR or local commit activity, validates top candidates against
-      timeline evidence, and reads only bounded comments as untrusted data.
-- [ ] Every eligible acceptance item is classified as direct, indirect,
-      claimed-but-unmatched, explicitly out-of-scope, or unresolved with
-      auditable Diff/object/test evidence.
-- [ ] Scope fusion reports narrow-Issue/broad-Diff and broad-Issue/narrow-Diff
+- [x] Ordinary broad discovery remains open-only with the existing 100-to-10
+      bound; this stage adds no closed-Issue, timeline, or comment expansion.
+- [x] Every eligible acceptance item reports independent scope, implementation-
+      evidence, and test-evidence states with exact Diff/object/test evidence;
+      uncertainty remains explicit instead of becoming a success verdict.
+- [x] Scope fusion reports narrow-Issue/broad-Diff and broad-Issue/narrow-Diff
       divergence as risk instead of using either side to hide the other.
-- [ ] Suggested tests are separated into requirement-acceptance, technical
-      regression, and exploratory-risk groups while retaining pytest,
+- [x] Suggested tests are separated into requirement-traced, technical-
+      regression, and exploratory groups while retaining pytest,
       frontend unit/component, Playwright, and CDP evidence.
-- [ ] Regression fixtures prove that supplying a narrow, incorrect, or absent
+- [x] Regression fixtures prove that supplying a narrow, incorrect, or absent
       Issue cannot reduce technical scope, candidate tests, or risk floor.
 
 ### 2026-07-22 Issue provenance refinement

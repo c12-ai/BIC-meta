@@ -87,11 +87,29 @@ not lower it.
 
 ## Issue alignment rows
 
-First classify every eligible acceptance item as `in-scope`, `adjacent`, or
-`unchanged/out-of-scope` by comparing it with concrete changed objects. Add one
-row per `in-scope` acceptance item. Keep adjacent and unchanged/out-of-scope
+Requirement verification is a separate pass after structural/technical review.
+Run it only for an authoritative or explicitly justified `strong-related`
+Issue. A thematic candidate receives no acceptance-item verdict and leaves
+requirement alignment `unassessed`.
+
+For every eligible acceptance item, report three independent axes:
+
+- `scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`.
+- `implementation`: `static-evidence-found`, `static-evidence-missing`, or
+  `cannot-verify`.
+- `test_status`: `asserted`, `weak-or-disabled`, `missing`, `not-applicable`,
+  or `cannot-verify`.
+
+Every `static-evidence-found` verdict must cite an exact changed file, object,
+route, or bounded journey. Every `in-scope` item must cite an exact related
+test/assertion or explicitly state that no test was found. Do not batch multiple
+acceptance items under one verdict. Keyword overlap alone is never sufficient.
+Use `cannot-determine` or `cannot-verify` when evidence is incomplete.
+
+Add one risk row per `in-scope` acceptance item. Keep adjacent and out-of-scope
 items visible as Issue context, but do not let an umbrella Issue inflate the
-risk matrix.
+risk matrix. Never call an item satisfied, passed, complete, or verified because
+tests were not executed.
 
 For each in-scope row:
 
@@ -106,6 +124,36 @@ For each in-scope row:
 
 Every row must cite Issue, Diff, and test evidence. Keyword overlap is a search
 hint only. Do not lower risk because an Issue checkbox is already checked.
+
+## Scope divergence
+
+After item review, report one of these evidence-bearing conditions:
+
+- `narrow-issue-broad-diff`: concrete changed technical objects have no mapped
+  acceptance item. Preserve their technical regression guidance.
+- `broad-issue-narrow-diff`: an `in-scope` acceptance item has
+  `static-evidence-missing`.
+- `bidirectional-divergence`: both conditions are present.
+- `none-observed`: every attributable changed object maps to an eligible item
+  and no in-scope item lacks static implementation evidence.
+- `cannot-determine`: attribution is too incomplete to compare scope safely.
+
+Absence of a match does not prove `out-of-scope`; that label requires explicit
+Issue scope text or concrete unchanged-code evidence. Divergence may raise
+requirement risk but never removes technical objects, candidates, or guidance.
+
+## Test guidance groups
+
+- `requirement-traced`: a concrete test to establish static evidence for an
+  eligible in-scope acceptance item.
+- `technical-regression`: existing add/strengthen guidance derived from the
+  immutable technical scope, including behavior the Issue does not mention.
+- `exploratory`: possible relations, partial journeys, or runtime behavior that
+  static analysis cannot close.
+
+The effective guidance is the union of all three groups. A test may carry more
+than one group label, but count and describe the asset once. No Issue outcome may
+remove or downgrade technical-regression guidance.
 
 ## Technical risk and requirement alignment
 

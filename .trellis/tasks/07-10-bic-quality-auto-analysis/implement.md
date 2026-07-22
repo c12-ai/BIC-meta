@@ -8,21 +8,21 @@
 - Split risk output into technical risk, requirement alignment, assessment
   completeness, and an overall known-risk floor. Keep technical risk available
   when Issue context is missing or thematic only.
-- Extend current-PR and local-commit evidence with bounded historical
-  open/closed Issue search, top-candidate timeline validation, and bounded
-  untrusted comment extraction.
-- Add a requirement-alignment module that classifies each eligible acceptance
-  item against changed objects, routes, journeys, and test evidence.
-- Fuse scopes by union, report scope divergence, and group suggested tests into
-  requirement acceptance, technical regression, and exploratory risk.
+- Keep the existing open-only 100-to-10 discovery unchanged; do not add closed-
+  Issue, timeline, comment, or second-body lookups.
+- Add a lightweight evidence-reporting pass that compares each eligible
+  acceptance item with changed objects, routes, journeys, and tests on separate
+  scope, implementation, and test-status axes.
+- Preserve scope fusion by union, report only evidence-supported divergence,
+  and group suggested tests into requirement-traced, technical-regression, and
+  exploratory guidance.
 - Implement and verify in three local commits so technical isolation, Issue
   evidence, and final fusion can be reverted independently.
 
-Validation: fixtures cover narrow/wrong/missing Issue inputs, historical closed
-Issues, timeline evidence, maintainer scope comments, acceptance-item alignment,
-frontend/backend journey gaps, and technical candidate-set monotonicity. Run
-source tests after every stage and the complete install/mirror verification at
-the end.
+Validation: fixtures cover narrow/wrong/missing Issue inputs, acceptance-item
+evidence contracts, frontend/backend journey gaps, and technical candidate-set
+monotonicity. Run source tests after every stage and the complete install/mirror
+verification at the end.
 
 ## 12. Issue Provenance Refinement
 
