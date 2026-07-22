@@ -1,7 +1,9 @@
 # GitHub Bot 身份：c12-apex-dev
 
-AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 GitHub App
-**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥只存在铸造机
+**完全自主**的 AI 会话（定时任务、批量流水线、无人值守 dispatch）做 GitHub 写操作
+（提 PR、建/评 issue 等）用 org 级 GitHub App **c12-apex-dev**（署名
+`c12-apex-dev[bot]`），不借用任何个人账号；交互式开发（开发者指挥 agent）用开发者
+自己的身份，见下方裁定。私钥只存在铸造机
 aws-test 的专用账户 **`ghmint`** 名下，其 ssh 公钥全部钉了 forced command：
 `ssh bic-mint` 只会铸出 1 小时 token，拿不到 shell、读不到私钥——**铸币权 ≠ 读钥权**，
 能碰私钥的只有箱管理员（sudo）。本地 `scripts/gh-app/gh-app-token.sh` 无钥匙时即走
@@ -13,7 +15,7 @@ aws-test 的专用账户 **`ghmint`** 名下，其 ssh 公钥全部钉了 forced
 - 铸 token 脚本：`scripts/gh-app/gh-app-token.sh`（免配置：installation 自动发现，
   token 缓存 55 分钟复用）
 
-## 同事一次性接入
+## 接入（只有跑无人值守任务的人需要）
 
 不需要团队部署 key，与部署权限完全解耦：
 
@@ -37,9 +39,22 @@ aws-test 的专用账户 **`ghmint`** 名下，其 ssh 公钥全部钉了 forced
 完成。本机不落任何秘密；个人的 `gh auth` / git 配置一概不动。
 （铸造机别名可用 `BIC_GH_APP_SSH` 覆盖；管理员/测试可用 `BIC_GH_APP_KEY=<pem>` 走本地钥匙。）
 
-## Agent 怎么用（无感的关键）
+## 什么时候用 bot、什么时候用个人身份（裁定）
 
-Agent 在做 gh 写操作前铸一次 token（55 分钟内重复调用走缓存，免费）：
+按"谁驱动"分，不按"是不是 AI 写的"分：
+
+- **完全自主的会话 → bot**：定时任务、批量流水线、无人值守 dispatch（S1/S2/S3 夜间批、
+  cron 触发的 ops）。没有人在场，署任何个人都是失真；bot 署名让审查者按机器产出的
+  标准审、审计一条查询列出 AI 干过的所有事。
+- **交互式会话 → 开发者个人身份**：开发者在场指挥 agent 写码、发 PR、建 issue——
+  作者是这个开发者，agent 只是键盘。用你自己的 `gh auth`，**什么都不用配**。
+- review / approve / merge / 产品裁定：永远是人、永远个人身份（bot 也批不了自己的 PR）。
+
+因此**多数同事不需要接入本页任何东西**；只有运行无人值守任务的人需要下面的接入。
+
+## 自主会话怎么用 bot
+
+GitHub 写操作前铸一次 token（55 分钟内重复调用走缓存，免费）：
 
 ```bash
 export GH_TOKEN=$(scripts/gh-app/gh-app-token.sh)
