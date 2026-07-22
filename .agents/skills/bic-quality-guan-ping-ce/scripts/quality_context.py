@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import subprocess
@@ -22,11 +23,13 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from symbol_extraction import extract_changed_symbols
+from diff_hunks import attach_canonical_hunks
+from execution_manifest import build_execution_manifest
 from issue_context import collect_issue_context
 from risk_assessment import assess_pretest_risk
 from test_assets import discover_test_assets as discover_assets
 from test_relations import analyze_test_relations
-from content_safety import sanitize_for_output
+from content_safety import safe_repository_file, sanitize_for_output
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -300,14 +303,68 @@ def collect_repository_changes(
     else:
         comparison["warnings"].append(f"Could not read untracked files: {error}")
 
+    ordered_changes = sorted(changes.values(), key=lambda item: item["path"])
+    comparison_base = comparison.get("merge_base") or head
+    if comparison_base:
+        attach_canonical_hunks(
+            repo,
+            repo_info["relative_path"],
+            comparison_base,
+            ordered_changes,
+        )
+
+    fingerprint = hashlib.sha256()
+    fingerprint.update(f"schema=1\0base={comparison_base or ''}\0head={head or ''}\0".encode())
+    for item in ordered_changes:
+        local_path = repository_relative_path(item["path"], repo_info["name"])
+        fingerprint.update(json.dumps(
+            {
+                "path": local_path,
+                "old_path": item.get("old_path"),
+                "change_types": item.get("change_types", []),
+                "diff_hunks": item.get("diff_hunks", []),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode())
+        source = repo / local_path
+        try:
+            safe_source, unsafe_reason = safe_repository_file(source, repo)
+            if safe_source is None:
+                fingerprint.update(
+                    f"content-not-read:{unsafe_reason or 'unsafe-file'}".encode()
+                )
+                try:
+                    stat = source.lstat()
+                    fingerprint.update(
+                        f":stat={stat.st_mode}:{stat.st_size}:{stat.st_mtime_ns}".encode()
+                    )
+                except OSError:
+                    pass
+            else:
+                fingerprint.update(f":mode={safe_source.stat().st_mode}".encode())
+                fingerprint.update(safe_source.read_bytes())
+        except OSError:
+            fingerprint.update(b"unreadable")
+        if comparison_base and ("deleted" in item.get("change_types", []) or item.get("old_path")):
+            old_workspace_path = item.get("old_path") or item["path"]
+            old_local_path = repository_relative_path(old_workspace_path, repo_info["name"])
+            code, old_object = run_git(
+                ["rev-parse", "--verify", f"{comparison_base}:{old_local_path}"], repo
+            )
+            fingerprint.update(
+                f"\0old-object={old_object if code == 0 else 'unavailable'}".encode()
+            )
+
     metadata = {
         **repo_info,
         "branch": branch,
         "head": head,
         **comparison,
         "change_count": len(changes),
+        "change_fingerprint": fingerprint.hexdigest(),
     }
-    return metadata, sorted(changes.values(), key=lambda item: item["path"])
+    return metadata, ordered_changes
 
 
 def collect_context(
@@ -479,7 +536,7 @@ def changed_source_symbols(
 ) -> list[dict[str, Any]]:
     test_paths = {
         asset["path"] for asset in tests["discovered_assets"]
-        if asset.get("asset_kind") in {"test-file", "test-candidate"}
+        if asset.get("asset_kind") in {"test-file", "test-candidate", "browser-scenario"}
     }
     changed_sources = [item for item in context["changed_files"] if item["path"] not in test_paths]
     return extract_changed_symbols(WORKSPACE_ROOT, changed_sources)
@@ -543,6 +600,11 @@ def assess_quality(
         payload["test_correspondence"],
         payload["context"]["issue_context"],
         load_json_yaml(CONFIG_DIR / "risk-model.yaml"),
+    )
+    payload["test_execution_manifest"] = build_execution_manifest(
+        payload["context"],
+        payload["test_correspondence"],
+        payload["test_inventory"],
     )
     # The raw inventory is an internal/diagnostic artifact. The Agent-facing
     # assessment only needs the derived correspondence and risk contracts.

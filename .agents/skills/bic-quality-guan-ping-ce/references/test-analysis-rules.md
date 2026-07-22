@@ -44,6 +44,13 @@ Record imports, referenced identifiers, test/describe names, assertions, and
 skip/xfail/todo state without importing the file. A disabled but structurally
 valid test remains a test asset.
 
+Treat Playwright and CDP as browser evidence, not merely JavaScript tests.
+Record navigation/input actions, DOM/network observations, scenario names,
+disabled state, and machine-checkable assertions separately. A screenshot,
+console trace, wait, click, or successful script completion is not an assertion.
+A standalone CDP script may be a `browser-scenario` search asset even when it is
+not a runner test; without an active assertion it cannot clear a test gap.
+
 Before reading content, reject symbolic links, any path component implemented as
 a symbolic link, files whose resolved path leaves their discovered repository,
 and credential-bearing paths such as live `.env` variants, credential stores,
@@ -59,6 +66,14 @@ and Diff matching can retain its evidence while secrets do not enter the Agent
 context.
 
 ## Correspondence
+
+Changed objects come from canonical base-to-current diff hunks intersected with
+the pinned `ast-outline` declaration ranges. Prefer the smallest qualified
+declaration, so a changed method does not collapse to its class. Analyze old-side
+base content for deletions and renames. Route decorators belong to their
+function/route declaration. Changes outside any declaration are `module-scope`.
+Unsupported file types remain changed-file objects and are never represented as
+invented language symbols.
 
 - Direct: an active test imports or references a changed file or object. For
   Python, this also includes a local file resolved through
@@ -123,3 +138,15 @@ documentation or planning files without an executable documentation contract.
 These outcomes are not risk, priority, confidence, pass/fail, or proof of
 runtime coverage. Describe the concrete missing object or scenario in natural
 language.
+
+## Phase 2 handoff
+
+The assessment emits a `test_execution_manifest` but does not execute it.
+Direct and safe-indirect candidates are required candidates; possible relations
+remain optional. Each entry retains repository/path, framework, selected cases,
+command source, prerequisites, assertion/browser evidence, and `not-run` status.
+Safely derivable commands are also represented as an argv array; consumers must
+not pass a free-form hint through a shell.
+The manifest is bound to repository change fingerprints. A separate executor
+must reject a stale fingerprint and obtain distinct authorization for test
+execution and for any state-changing setup or cleanup.

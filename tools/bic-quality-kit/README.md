@@ -7,6 +7,9 @@ It is intentionally read-only:
 - It dynamically discovers the root and immediate child Git repositories.
 - It reads committed changes relative to a local base plus worktree changes.
 - It combines explicit BIC module rules with repository-relative structural modules.
+- It installs the manifest-pinned `ast-outline` release into a BIC-owned user
+  cache on first use, validates its JSON schema, and maps canonical diff hunks
+  to qualified declarations across supported backend and frontend languages.
 - It inspects concrete tests and relates them to changed source objects by
   repository and functional module.
 - It recognizes local Python modules loaded through `importlib` and asserted
@@ -18,6 +21,10 @@ It is intentionally read-only:
   contract-boundary, and test evidence.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
+- It treats Playwright and CDP scenarios as browser/user-journey evidence and
+  distinguishes actions or screenshots from machine-checkable assertions.
+- It emits a fingerprint-bound, `not-run` Phase 2 execution manifest with
+  required/optional candidates, command sources, and environment prerequisites.
 - It outputs one `BIC Quality Brief`.
 - It reads content only from regular files contained by their discovered
   repository, skips symbolic links and credential-bearing paths, and redacts
@@ -140,6 +147,7 @@ The expected output is one structured `BIC Quality Brief` with:
 - `Test Correspondence`
 - `Risk Matrix`
 - `Missing Tests`
+- `Phase 2 Test Execution Handoff (not run)`
 
 `mapping_source` remains available in raw JSON for diagnostics but is omitted
 from the default brief. Direct, indirect, and possible test relations remain
@@ -157,8 +165,20 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.
 
 The assessment uses the complete test inventory internally but omits that raw,
 large intermediate from its final JSON. It returns derived test correspondence
-and risk evidence. Use the inventory or suggest diagnostics below only when raw
+and risk evidence plus `test_execution_manifest`. The manifest is static
+guidance and becomes stale when its workspace change fingerprint no longer
+matches. Use the inventory or suggest diagnostics below only when raw
 test-asset details are required.
+
+On the first structural-analysis run, the Skill uses `uv` to create a pinned
+`ast-outline` environment under the platform user cache (for example,
+`~/Library/Caches/bic-quality/tools` on macOS). It never writes that dependency
+into a BIC repository or project virtual environment. Set the absolute
+`BIC_QUALITY_TOOL_CACHE` path to relocate the managed cache, or
+`BIC_QUALITY_AST_OUTLINE` to a compatible executable; either path is capability-
+probed before use. Missing `uv`, unavailable Python 3.12/package access, or an
+incompatible JSON schema is reported as an incomplete required analyzer rather
+than silently changing the analysis method.
 
 The other bundled scripts are standalone diagnostic entry points. Do not chain
 all of them to build one final brief because separate processes perform separate

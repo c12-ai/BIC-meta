@@ -25,6 +25,8 @@ DELIVERABLES = KIT_DIR / "skill/bic-quality-guan-ping-ce/references/deliverables
 ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.py"
 TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
 TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
+EXECUTION_MANIFEST = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/execution_manifest.py"
+TOOL_RUNTIME = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/tool_runtime.py"
 CODEX_SKILL = ROOT_DIR / ".agents/skills/bic-quality-guan-ping-ce"
 CLAUDE_SKILL = ROOT_DIR / ".claude/skills/bic-quality-guan-ping-ce"
 
@@ -33,6 +35,7 @@ if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
 from content_safety import REDACTED_PATH, REDACTED_SECRET, safe_repository_file, sanitize_for_output
+from diff_hunks import canonical_hunks
 from symbol_extraction import extract_changed_symbols
 
 ISSUE_SPEC = importlib.util.spec_from_file_location("bic_quality_issue_context", ISSUE_CONTEXT)
@@ -49,6 +52,16 @@ TEST_RELATIONS_SPEC = importlib.util.spec_from_file_location("bic_quality_test_r
 assert TEST_RELATIONS_SPEC and TEST_RELATIONS_SPEC.loader
 TEST_RELATIONS_MODULE = importlib.util.module_from_spec(TEST_RELATIONS_SPEC)
 TEST_RELATIONS_SPEC.loader.exec_module(TEST_RELATIONS_MODULE)
+
+EXECUTION_MANIFEST_SPEC = importlib.util.spec_from_file_location("bic_quality_execution_manifest", EXECUTION_MANIFEST)
+assert EXECUTION_MANIFEST_SPEC and EXECUTION_MANIFEST_SPEC.loader
+EXECUTION_MANIFEST_MODULE = importlib.util.module_from_spec(EXECUTION_MANIFEST_SPEC)
+EXECUTION_MANIFEST_SPEC.loader.exec_module(EXECUTION_MANIFEST_MODULE)
+
+TOOL_RUNTIME_SPEC = importlib.util.spec_from_file_location("bic_quality_tool_runtime", TOOL_RUNTIME)
+assert TOOL_RUNTIME_SPEC and TOOL_RUNTIME_SPEC.loader
+TOOL_RUNTIME_MODULE = importlib.util.module_from_spec(TOOL_RUNTIME_SPEC)
+TOOL_RUNTIME_SPEC.loader.exec_module(TOOL_RUNTIME_MODULE)
 
 def run(command: list[str], cwd: Path) -> str:
     proc = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=True)
@@ -428,15 +441,18 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         agent_runtime = modules[("BIC-agent-service", "agent/runtime")]
         self.assertEqual(
             [(item["name"], item["kind"]) for item in agent_runtime["changed_symbols"]],
-            [("existing", "changed-file")],
+            [("untouched", "function")],
         )
-        self.assertIn("file-level changed object", agent_runtime["symbol_scope_note"])
+        self.assertIn("ast-outline Diff-hunk declarations", agent_runtime["symbol_scope_note"])
 
         model_inference = modules[("BIC-model-service", "app/inference")]
         self.assertTrue(any(item["path"].endswith("test_behavior.py") for item in model_inference["possibly_related_tests"]))
         self.assertTrue(any("predict" in reason for reason in model_inference["add_tests"]))
-        self.assertTrue(any("worker.go" in item["path"] and item["kind"] == "changed-file" for item in model_inference["changed_symbols"]))
-        self.assertTrue(any("worker.go" in reason for reason in model_inference["add_tests"]))
+        self.assertTrue(any(
+            "worker.go" in item["path"] and item["kind"] == "function" and item["name"] == "inference.Work"
+            for item in model_inference["changed_symbols"]
+        ))
+        self.assertTrue(any("function inference.Work" in reason and "worker.go" in reason for reason in model_inference["add_tests"]))
         other_inference = modules[("BIC-other-model", "app/inference")]
         self.assertTrue(any("engine" in reason for reason in other_inference["add_tests"]))
 
@@ -658,6 +674,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         risk = assessed["risk_assessment"]
         self.assertNotIn("test_inventory", assessed)
         self.assertIn("test_correspondence", assessed)
+        self.assertEqual(assessed["test_execution_manifest"]["execution_status"], "not-run")
         self.assertEqual(issue["title"], "Keep SSE feedback targets aligned")
         self.assertEqual(issue["repository"], "c12-ai/BIC-meta")
         self.assertEqual(issue["item_type"], "issue")
@@ -667,7 +684,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         dimensions = {item["dimension"] for item in risk["risk_matrix"]}
         self.assertEqual(
             dimensions,
-            {"issue-clarity", "impact-breadth", "contract-and-state-boundary", "test-evidence", "change-attribution"},
+            {
+                "issue-clarity", "impact-breadth", "contract-and-state-boundary",
+                "test-evidence", "browser-user-journey-evidence", "change-attribution",
+            },
         )
         self.assertTrue(risk["requires_semantic_issue_alignment"])
         self.assertTrue(all("reason" in item for item in risk["risk_matrix"]))
@@ -2121,10 +2141,278 @@ raise SystemExit(2)
         explicit_object_relation = self.recommend_for(context, scope, own_repo_inventory)
         modules = {(item["repo"], item["module_scope"]): item for item in explicit_object_relation["modules"]}
         self.assertFalse(modules[("repo-b", module)]["add_tests"])
-        self.assertTrue(any("file b" in reason for reason in modules[("repo-b", module)]["no_obvious_test_gaps"]))
+        self.assertTrue(any("module-scope b" in reason for reason in modules[("repo-b", module)]["no_obvious_test_gaps"]))
+
+
+class BrowserEvidenceAndManifestTest(unittest.TestCase):
+    def test_diff_hunk_selects_route_method_instead_of_container_class(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root / "app/api/routes.py", """class ExperimentRoutes:
+    @router.post('/experiments')
+    async def create_experiment(self):
+        return None
+""")
+            result = extract_changed_symbols(root, [{
+                "repo": "BIC-meta",
+                "repo_relative_path": ".",
+                "path": "app/api/routes.py",
+                "change_types": ["untracked"],
+                "diff_hunks": [{
+                    "old_start": 0, "old_end": -1, "old_count": 0,
+                    "new_start": 2, "new_end": 2, "new_count": 1,
+                }],
+            }])
+            symbols = result[0]["symbols"]
+            self.assertEqual(len(symbols), 1)
+            self.assertEqual(symbols[0]["qualified_name"], "ExperimentRoutes.create_experiment")
+            self.assertEqual(symbols[0]["kind"], "route")
+            self.assertEqual(symbols[0]["route_method"], "POST")
+            self.assertEqual(symbols[0]["route_path"], "/experiments")
+
+    def test_deleted_and_pure_renamed_sources_use_base_side_declarations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init_repo(root)
+            write(root / "app/old_service.py", "def moved_behavior():\n    return 'old'\n")
+            write(root / "app/deleted_service.py", "def deleted_behavior():\n    return 'old'\n")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "base")
+            base = git(root, "rev-parse", "HEAD")
+            git(root, "mv", "app/old_service.py", "app/new_service.py")
+            git(root, "rm", "app/deleted_service.py")
+
+            rename_hunks, rename_warning = canonical_hunks(
+                root, base, "app/new_service.py", "app/old_service.py", untracked=False,
+            )
+            delete_hunks, delete_warning = canonical_hunks(
+                root, base, "app/deleted_service.py", None, untracked=False,
+            )
+            self.assertIsNone(rename_warning)
+            self.assertIsNone(delete_warning)
+            result = extract_changed_symbols(root, [
+                {
+                    "repo": "BIC-meta", "repo_relative_path": ".",
+                    "path": "app/new_service.py", "old_path": "app/old_service.py",
+                    "change_types": ["renamed"], "comparison_base": base,
+                    "diff_hunks": rename_hunks,
+                },
+                {
+                    "repo": "BIC-meta", "repo_relative_path": ".",
+                    "path": "app/deleted_service.py", "change_types": ["deleted"],
+                    "comparison_base": base, "diff_hunks": delete_hunks,
+                },
+            ])
+            renamed, deleted = result
+            self.assertEqual(renamed["old_path"], "app/old_service.py")
+            self.assertEqual(renamed["symbols"][0]["name"], "moved_behavior")
+            self.assertEqual(renamed["symbols"][0]["change_kind"], "renamed")
+            self.assertEqual(deleted["symbols"][0]["name"], "deleted_behavior")
+            self.assertEqual(deleted["symbols"][0]["change_kind"], "deleted")
+
+    def test_playwright_and_cdp_evidence_distinguishes_actions_from_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checked = root / "checked.spec.ts"
+            screenshot_only = root / "screenshot.spec.ts"
+            cdp = root / "cdp.spec.ts"
+            write(checked, """import { test, expect } from '@playwright/test'
+test('creates experiment', async ({ page }) => {
+  await page.goto('/experiments')
+  await page.getByRole('button').click()
+  await expect(page.getByText('Created')).toBeVisible()
+})
+test.fixme('pending browser path', async ({ page }) => {
+  await page.goto('/pending')
+  expect(true).toBe(true)
+})
+""")
+            write(screenshot_only, """import { test } from '@playwright/test'
+test('captures page', async ({ page }) => {
+  await page.goto('/')
+  await page.screenshot({ path: 'page.png' })
+})
+""")
+            write(cdp, """import { test, expect } from '@playwright/test'
+test('observes network', async ({ page, context }) => {
+  const session = await context.newCDPSession(page)
+  await session.send('Network.enable')
+  expect(session).toBeDefined()
+})
+""")
+
+            checked_facts = TEST_ASSETS_MODULE.parse_test_file(checked)
+            screenshot_facts = TEST_ASSETS_MODULE.parse_test_file(screenshot_only)
+            cdp_facts = TEST_ASSETS_MODULE.parse_test_file(cdp)
+            self.assertEqual(checked_facts["browser_framework"], "playwright")
+            self.assertIn("goto", checked_facts["browser_actions"])
+            self.assertIn("click", checked_facts["browser_actions"])
+            self.assertTrue(checked_facts["browser_scenario_has_machine_check"])
+            self.assertIn("pending browser path", checked_facts["disabled_tests"])
+            self.assertFalse(screenshot_facts["browser_scenario_has_machine_check"])
+            self.assertIn("screenshot", screenshot_facts["browser_observations"])
+            self.assertEqual(cdp_facts["browser_framework"], "cdp")
+            self.assertTrue(cdp_facts["uses_cdp"])
+
+    def test_standalone_cdp_scenario_is_discovered_but_not_claimed_as_asserted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "portal"
+            write(repo / "tests/e2e/network_probe.ts", """export async function probe(context, page) {
+  const session = await context.newCDPSession(page)
+  await session.send('Network.enable')
+}
+""")
+            assets = TEST_ASSETS_MODULE.discover_test_assets(
+                [{"name": "portal", "path": str(repo), "relative_path": "."}],
+                lambda _path: False,
+            )
+            asset = next(item for item in assets if item["path"] == "tests/e2e/network_probe.ts")
+            self.assertEqual(asset["asset_kind"], "browser-scenario")
+            self.assertEqual(asset["framework"], "cdp")
+            self.assertFalse(asset["test_facts"]["browser_scenario_has_machine_check"])
+
+    def test_backend_route_to_cross_repo_browser_target_is_possible_journey_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            spec = workspace / "portal/tests/e2e/experiments.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('creates experiment', async ({ request }) => {
+  const response = await request.post('/experiments')
+  expect(response.status()).toBe(201)
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "file_mappings": [{
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "mapping": {"module_scope": "agent/api"},
+                    }],
+                    "changed_files": [{
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "change_types": ["modified"],
+                    }],
+                },
+                [{
+                    "repo": "backend", "path": "backend/app/routes.py",
+                    "change_types": ["modified"],
+                    "symbols": [{
+                        "name": "create_experiment", "kind": "route",
+                        "route_method": "POST", "route_path": "/experiments",
+                    }],
+                }],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/experiments.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": facts,
+                }],
+                [],
+            )
+            module = correspondence["modules"][0]
+            self.assertFalse(module["directly_related_tests"])
+            self.assertFalse(module["indirectly_related_tests"])
+            possible = module["possibly_related_tests"][0]
+            self.assertEqual(possible["related_symbols"], ["create_experiment"])
+            self.assertEqual(possible["browser_evidence"]["framework"], "playwright")
+            self.assertTrue(possible["browser_evidence"]["has_machine_check"])
+            self.assertTrue(any("Strengthen tests for route create_experiment" in item for item in module["strengthen_tests"]))
+
+    def test_execution_manifest_is_not_run_and_fingerprint_bound(self) -> None:
+        context = {
+            "repositories": [{
+                "name": "portal", "head": "abc", "base_ref": "main",
+                "merge_base": "base", "change_count": 1,
+                "change_fingerprint": "change-a",
+            }],
+        }
+        relation = {
+            "repo": "portal", "path": "portal/tests/e2e/flow.spec.ts",
+            "framework": "playwright", "test_names": ["flow"],
+            "has_active_test_with_assertion": True,
+            "browser_evidence": {"framework": "playwright", "has_machine_check": True},
+        }
+        correspondence = {"modules": [{
+            "directly_related_tests": [relation],
+            "indirectly_related_tests": [], "possibly_related_tests": [],
+        }]}
+        inventory = {"tests": [{
+            "repo": "portal", "matching_discovered_assets": [relation["path"]],
+            "command_hint": "pnpm exec playwright test tests/e2e/flow.spec.ts",
+        }]}
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(context, correspondence, inventory)
+        self.assertEqual(manifest["execution_status"], "not-run")
+        self.assertTrue(manifest["analysis_complete"])
+        self.assertEqual(len(manifest["workspace_change_fingerprint"]), 64)
+        self.assertTrue(manifest["required_candidates"][0]["required"])
+        self.assertEqual(
+            manifest["required_candidates"][0]["command_argv"],
+            ["pnpm", "exec", "playwright", "test", "tests/e2e/flow.spec.ts"],
+        )
+        self.assertTrue(manifest["required_candidates"][0]["command_ready"])
+        self.assertIn("healthy live BIC bench", manifest["required_candidates"][0]["environment_prerequisites"])
+
+    def test_runtime_lock_recovers_dead_installer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock = root / ".ast-outline-install.lock"
+            lock.mkdir()
+            write(lock / "owner.json", json.dumps({"pid": 99999999, "created_at": time.time()}))
+            with TOOL_RUNTIME_MODULE.installation_lock(root):
+                owner = json.loads((lock / "owner.json").read_text(encoding="utf-8"))
+                self.assertEqual(owner["pid"], os.getpid())
+            self.assertFalse(lock.exists())
+
+    def test_runtime_first_use_installs_once_and_reuse_skips_install(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "1.8.2", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = root / "ast-outline/1.8.2/venv/bin/ast-outline"
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE, "load_runtime_manifest", return_value=config),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "tool_cache_root", return_value=root),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "valid_managed_runtime", side_effect=[None, None]),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "install_managed_runtime", return_value=installed) as install,
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
+                self.assertEqual(TOOL_RUNTIME_MODULE.ensure_ast_outline(), installed)
+                install.assert_called_once()
+
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE, "load_runtime_manifest", return_value=config),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "tool_cache_root", return_value=root),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "valid_managed_runtime", return_value=installed),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "install_managed_runtime") as install,
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
+                self.assertEqual(TOOL_RUNTIME_MODULE.ensure_ast_outline(), installed)
+                install.assert_not_called()
 
 
 class ContentSafetyTest(unittest.TestCase):
+    def test_diff_attribution_does_not_follow_symlinks_or_read_sensitive_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            outside = Path(directory) / "outside.py"
+            repo.mkdir()
+            write(outside, "def outside_secret():\n    return 'secret'\n")
+            (repo / "linked.py").symlink_to(outside)
+            sensitive_hunks, sensitive_warning = canonical_hunks(
+                repo, "HEAD", "secrets/private.py", None, untracked=True,
+            )
+            linked_hunks, linked_warning = canonical_hunks(
+                repo, "HEAD", "linked.py", None, untracked=True,
+            )
+            self.assertFalse(sensitive_hunks)
+            self.assertIn("sensitive-path", sensitive_warning or "")
+            self.assertFalse(linked_hunks)
+            self.assertIn("symlink", linked_warning or "")
+
     def test_test_discovery_skips_symlinks_outside_paths_and_sensitive_roots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

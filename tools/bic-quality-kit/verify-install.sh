@@ -55,6 +55,7 @@ check_file "$SOURCE_DIR/agents/openai.yaml"
 check_file "$SOURCE_DIR/config/scope-taxonomy.yaml"
 check_file "$SOURCE_DIR/config/test-inventory.yaml"
 check_file "$SOURCE_DIR/config/risk-model.yaml"
+check_file "$SOURCE_DIR/config/analyzer-runtime.yaml"
 check_file "$SOURCE_DIR/references/risk-model.md"
 check_file "$SOURCE_DIR/references/test-analysis-rules.md"
 check_file "$SOURCE_DIR/scripts/content_safety.py"
@@ -62,6 +63,10 @@ check_file "$SOURCE_DIR/scripts/quality_context.py"
 check_file "$SOURCE_DIR/scripts/issue_context.py"
 check_file "$SOURCE_DIR/scripts/risk_assessment.py"
 check_file "$SOURCE_DIR/scripts/symbol_extraction.py"
+check_file "$SOURCE_DIR/scripts/ast_outline_adapter.py"
+check_file "$SOURCE_DIR/scripts/diff_hunks.py"
+check_file "$SOURCE_DIR/scripts/execution_manifest.py"
+check_file "$SOURCE_DIR/scripts/tool_runtime.py"
 check_file "$SOURCE_DIR/scripts/test_assets.py"
 check_file "$SOURCE_DIR/scripts/test_relations.py"
 check_file "$SOURCE_DIR/scripts/collect-quality-context.sh"
@@ -73,6 +78,8 @@ check_file "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
 python3 -m json.tool "$SOURCE_DIR/config/scope-taxonomy.yaml" >/dev/null
 python3 -m json.tool "$SOURCE_DIR/config/test-inventory.yaml" >/dev/null
 python3 -m json.tool "$SOURCE_DIR/config/risk-model.yaml" >/dev/null
+python3 -m json.tool "$SOURCE_DIR/config/analyzer-runtime.yaml" >/dev/null
+python3 "$SOURCE_DIR/scripts/tool_runtime.py" >/dev/null
 python3 -m unittest discover -s "$KIT_DIR/tests" -v
 
 check_workspace_root "$SOURCE_DIR/scripts/collect-quality-context.sh"

@@ -13,7 +13,8 @@ Use only concrete evidence from:
   repositories and their ambiguity warnings;
 - changed repositories, modules, files, objects, and change types;
 - contract/stateful module boundaries;
-- direct, safe indirect, possible, disabled, assertion-free, and missing tests.
+- direct, safe indirect, possible, disabled, assertion-free, and missing tests,
+  including Playwright/CDP browser evidence kept separate from backend/unit tests.
 
 Do not use a path, label, filename, or keyword match by itself to assign risk.
 Do not choose among equally authoritative Issue candidates; keep the overall result
@@ -54,8 +55,11 @@ evidence, never as proof that no open Issue exists. Keep overall risk
 ## Deterministic floor
 
 `assess-risk-matrix.sh` emits rows for Issue clarity, impact breadth,
-contract/state boundaries, test evidence, and change attribution. Treat the
-highest deterministic row as the risk floor. Semantic review may raise but must
+contract/state boundaries, test evidence, browser user-journey evidence, and
+change attribution. A frontend or backend-route change without related browser
+evidence raises the static verification floor; a possible, module-level,
+disabled, manual-only, or non-object-linked browser scenario remains medium.
+Treat the highest deterministic row as the risk floor. Semantic review may raise but must
 not lower it.
 
 ## Issue alignment rows

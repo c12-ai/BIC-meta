@@ -54,6 +54,22 @@ def assess_pretest_risk(
         symbol for module in module_results for symbol in module.get("changed_symbols", [])
         if symbol.get("kind") == "changed-file"
     ]
+    changed_routes = [
+        symbol for module in module_results for symbol in module.get("changed_symbols", [])
+        if symbol.get("kind") == "route"
+    ]
+    browser_relations: list[tuple[str, dict[str, Any]]] = []
+    for module in module_results:
+        for strength, field in (
+            ("direct", "directly_related_tests"),
+            ("indirect", "indirectly_related_tests"),
+            ("possible", "possibly_related_tests"),
+        ):
+            browser_relations.extend(
+                (strength, relation)
+                for relation in module.get(field, [])
+                if relation.get("browser_evidence")
+            )
 
     issue_evidence = []
     if issue.get("title"):
@@ -135,6 +151,48 @@ def assess_pretest_risk(
             f"strengthen: {len(strengthen_tests)}",
             f"no obvious gap: {len(no_gaps)}",
             f"possible candidates: {len(possible_tests)}",
+        ],
+    ))
+
+    frontend_changed = any(module.startswith("portal/") for module in modules)
+    browser_relevant = frontend_changed or bool(changed_routes)
+    strong_browser = [
+        relation
+        for strength, relation in browser_relations
+        if strength in {"direct", "indirect"}
+        and relation.get("browser_evidence", {}).get("has_machine_check")
+        and relation.get("related_symbols")
+    ]
+    checked_browser = [
+        relation
+        for _strength, relation in browser_relations
+        if relation.get("browser_evidence", {}).get("has_machine_check")
+    ]
+    if not browser_relevant:
+        browser_level = "low"
+        browser_reason = "No frontend module or backend route change makes browser-journey evidence a required static layer."
+    elif strong_browser:
+        browser_level = "low"
+        browser_reason = "An active object-related browser scenario has a machine-checkable assertion, but it has not been executed."
+    elif browser_relations:
+        browser_level = "medium"
+        browser_reason = "Browser scenarios exist, but they are only possible/module-level, disabled, manual-only, or not assertion-linked to the changed object."
+    else:
+        browser_level = "high"
+        browser_reason = "Frontend or route behavior changed without a related Playwright/CDP scenario in the static evidence."
+    rows.append(row(
+        "browser-user-journey-evidence",
+        browser_level,
+        browser_reason,
+        issue_evidence=issue_summary,
+        diff_evidence=[
+            f"frontend modules changed: {frontend_changed}",
+            f"backend routes changed: {len(changed_routes)}",
+        ],
+        test_evidence=[
+            f"browser relations: {len(browser_relations)}",
+            f"machine-checked browser candidates: {len(checked_browser)}",
+            f"strong object-related browser candidates: {len(strong_browser)}",
         ],
     ))
 

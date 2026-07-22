@@ -236,6 +236,46 @@ All behavior is contained in the kit source and committed mirrors. Reverting the
 task changes restores the previous hard-coded collector. No database or runtime
 state migration is involved.
 
+## Multi-language Analyzer Runtime
+
+`ast-outline` is a required phase-one analyzer pinned by repository-owned
+runtime metadata. A bootstrap module installs it under a lock, cleans up
+incomplete installs, and writes its completion marker last into
+`~/.cache/bic-quality/tools/ast-outline/<version>/`, guarded by an inter-process
+lock. The Skill invokes the absolute managed executable and validates the
+machine JSON envelope and schema before reading any project content. It does
+not call the tool's setup helpers, alter global PATH, or update agent config.
+
+Changed-object mapping consumes `outline --json` declarations and preserves
+the upstream native kind alongside BIC classifications. Current files are
+parsed in place only after repository containment checks. Old Git blobs for
+deleted/renamed content are parsed through an ephemeral file outside the
+workspace with the original extension. Parser failure on an affected supported
+source file makes analysis incomplete rather than silently lowering precision.
+
+Change provenance and attribution coordinates are separate contracts. Existing
+committed/staged/unstaged/untracked facts remain visible, while symbol mapping
+uses one canonical local-base-to-current-tree Diff so overlapping changes do
+not mix incompatible line coordinates.
+
+## User Journeys and Browser Evidence
+
+Bounded static edges connect backend routes and shared contracts to frontend
+API clients, hooks/stores, components/pages, and explicit browser scenarios.
+Framework adapters keep backend tests, frontend unit/component tests,
+Playwright E2E, and CDP/browser scripts separate. Actions alone do not prove a
+journey; a browser asset contributes positive static evidence only when it has
+a machine-checkable DOM, network, console, or explicit pass/fail condition.
+
+## Phase-Two Handoff
+
+Phase one emits a versioned Test Execution Manifest in the assessment JSON. The
+manifest fingerprints every repository's local HEAD/base and dirty/untracked
+state, identifies selected tests and user journeys, and records environment and
+state-mutation prerequisites. Commands are inert data and must be revalidated
+by the future executor. No phase-one code starts services, resets datasets, or
+executes a command from the manifest.
+
 ## Real-Agent Evaluation
 
 Agent evals live outside the runtime Skill under `tools/bic-quality-kit/evals`.

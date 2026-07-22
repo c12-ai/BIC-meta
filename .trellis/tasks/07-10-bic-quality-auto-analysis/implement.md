@@ -208,3 +208,60 @@ Validation: run the unit suite, synchronize the Skill mirrors, run the complete
 
 Validation: run the harness unit tests, run a dry-run smoke set, then run the
 real smoke set when model access is available.
+
+## 8. Required Multi-language Analyzer Runtime
+
+- Pin `ast-outline` and its supported JSON schema in one runtime manifest.
+- Add a lock-protected, interruption-recoverable first-use bootstrap into a BIC-owned user
+  cache; invoke the managed absolute executable and never mutate global PATH.
+- Fail the complete assessment when installation, capability probing, or schema
+  validation fails; do not label a reduced analysis complete.
+
+Validation: cover first install, reuse, version change, corruption, concurrent
+install, interrupted install, incompatible JSON, and unchanged repository state.
+
+## 9. Canonical Diff-to-Declaration Mapping
+
+- Preserve committed/staged/unstaged/untracked provenance while deriving one
+  canonical local-base-to-current Diff for old/new line coordinates.
+- Parse current supported source files with `ast-outline outline --json` after
+  containment checks and parse old blobs through ephemeral typed files.
+- Recursively normalize declaration ranges and map every hunk to the smallest
+  enclosing declaration, retaining ancestors and legitimate module-scope facts.
+- Classify Python/JS/JSX/TS/TSX functions, methods, classes, React components,
+  hooks, stores/actions, API clients, routes, types, and shared contracts.
+
+Validation: fixtures cover modified bodies/signatures/decorators, overlapping
+change provenance, cross-symbol hunks, module scope, add/delete/rename, TSX,
+syntax failure, symlink escape, and malformed analyzer output.
+
+## 10. User-Journey and Browser Evidence
+
+- Feed exact objects/routes into module mapping, the existing bounded Issue
+  shortlist, and test correspondence.
+- Add bounded cross-repository edges for backend route/shared-contract to
+  frontend client/hook/store/component and explicit E2E scenarios.
+- Analyze Playwright actions/assertions/skip/fixme and CDP DOM/network/console/
+  pass-fail checks; distinguish automated checks, manual observations, and
+  diagnostics.
+- Keep pytest, frontend unit/component, Playwright, and CDP evidence separate in
+  the risk matrix; possible or manual-only evidence cannot clear an object gap.
+
+Validation: fixtures cover route-to-browser journeys, action-only Playwright,
+effective browser assertions, skipped/fixme tests, screenshot-only CDP, and CDP
+with explicit machine checks.
+
+## 11. Phase-Two Manifest and Skill Contract
+
+- Emit a versioned Test Execution Manifest with local change fingerprints,
+  selected tests, objects/journeys, prerequisites, mutation flags, and inert
+  command hints.
+- Keep output on stdout and temporary/cache writes outside repositories.
+- Keep `SKILL.md` concise; move multi-language, browser, and manifest detail to
+  direct references and refresh `agents/openai.yaml` only if its interface is
+  stale.
+- Synchronize both discovery mirrors only after source verification.
+
+Validation: schema tests, stale-fingerprint fixtures, Skill Creator validation,
+unit tests, agent evals, install verification, mirror comparison, and
+`git diff --check`; then create local commits only.

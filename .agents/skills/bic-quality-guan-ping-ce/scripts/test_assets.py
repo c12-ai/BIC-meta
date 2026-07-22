@@ -22,12 +22,33 @@ TEST_FILE_RE = re.compile(
     r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+\.(test|spec)\.[^.\/]+)$",
     re.IGNORECASE,
 )
+BROWSER_SOURCE_SUFFIXES = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+PLAYWRIGHT_ACTION_RE = re.compile(
+    r"(?:\b(?:page|locator|browser|context|request)|\))\s*\.\s*"
+    r"(goto|click|fill|type|press|check|uncheck|selectOption|hover|dragTo|"
+    r"setInputFiles|reload|goBack|goForward|newPage|newContext|fetch|get|post|put|delete)\s*\("
+)
+PLAYWRIGHT_OBSERVATION_RE = re.compile(
+    r"(?:\b(?:page|locator|context|response|request)|\))\s*\.\s*"
+    r"(screenshot|textContent|innerText|inputValue|isVisible|waitForURL|"
+    r"waitForResponse|waitForRequest|waitForSelector|status|json|body)\s*\("
+)
+CDP_RE = re.compile(
+    r"\b(?:connectOverCDP|newCDPSession|CDPSession|chrome-remote-interface|"
+    r"(?:client|session|cdp)\.send)\b",
+    re.IGNORECASE,
+)
+BROWSER_TARGET_RE = re.compile(
+    r"\b(page|request)\s*\.\s*(goto|get|post|put|patch|delete)\s*"
+    r"\(\s*(['\"])([^'\"]+)\3",
+    re.IGNORECASE,
+)
 JS_IMPORT_RE = re.compile(
     r"(?:import\s+(?:type\s+)?(?:[^;]*?\s+from\s+)?|require\s*\()"
     r"['\"]([^'\"]+)['\"]"
 )
 JS_TEST_RE = re.compile(
-    r"\b(describe|test|it)(?:\.(skip|todo|only))?\s*\(\s*['\"]([^'\"]+)['\"]"
+    r"\b(describe|test|it)(?:\.(skip|todo|fixme|only))?\s*\(\s*['\"]([^'\"]+)['\"]"
 )
 JS_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
 JS_NAMED_IMPORT_RE = re.compile(
@@ -112,8 +133,12 @@ def javascript_import_aliases(content: str) -> dict[str, str]:
 
 def js_test_body_range(content: str, start: int) -> tuple[int, int]:
     """Locate a best-effort callback body for one JS test declaration."""
-    open_brace = content.find("{", start)
     next_declaration = JS_TEST_RE.search(content, start)
+    arrow = content.find("=>", start)
+    if arrow >= 0 and (not next_declaration or arrow < next_declaration.start()):
+        open_brace = content.find("{", arrow + 2)
+    else:
+        open_brace = content.find("{", start)
     if open_brace < 0 or (next_declaration and next_declaration.start() < open_brace):
         line_end = content.find("\n", start)
         end = line_end if line_end >= 0 else len(content)
@@ -625,7 +650,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     disabled_suite_ranges = [
         js_test_body_range(content, match.end())
         for match in test_matches
-        if match.group(1) == "describe" and match.group(2) in {"skip", "todo"}
+        if match.group(1) == "describe" and match.group(2) in {"skip", "todo", "fixme"}
     ]
     test_cases: list[dict[str, Any]] = []
     for match in test_matches:
@@ -644,24 +669,67 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
                 executable_body,
             )
         ]
+        browser_actions = [item.group(1) for item in PLAYWRIGHT_ACTION_RE.finditer(executable_body)]
+        browser_observations = [
+            item.group(1) for item in PLAYWRIGHT_OBSERVATION_RE.finditer(executable_body)
+        ]
+        uses_cdp = bool(CDP_RE.search(executable_body))
+        browser_targets = [
+            {
+                "receiver": item.group(1).lower(),
+                "method": item.group(2).upper(),
+                "target": item.group(4),
+            }
+            for item in BROWSER_TARGET_RE.finditer(body)
+        ]
         test_cases.append({
             "name": match.group(3),
             "assertions": case_assertions,
-            "disabled": match.group(2) in {"skip", "todo"} or any(
+            "disabled": match.group(2) in {"skip", "todo", "fixme"} or any(
                 start <= match.start() <= end for start, end in disabled_suite_ranges
             ),
             "referenced_identifiers": sorted(case_identifiers),
+            "browser_actions": sorted(browser_actions),
+            "browser_observations": sorted(browser_observations),
+            "uses_cdp": uses_cdp,
+            "browser_targets": browser_targets,
+            "has_machine_check": bool(case_assertions),
         })
     assertions = [item for case in test_cases for item in case["assertions"]]
     disabled = {case["name"] for case in test_cases if case["disabled"]}
+    imports = sorted(set(JS_IMPORT_RE.findall(content)))
+    uses_cdp = bool(CDP_RE.search(executable_code))
+    uses_playwright = any("playwright" in item.lower() for item in imports) or bool(
+        PLAYWRIGHT_ACTION_RE.search(executable_code)
+    )
+    browser_framework = "cdp" if uses_cdp else "playwright" if uses_playwright else None
     return {
-        "imports": sorted(set(JS_IMPORT_RE.findall(content))),
+        "imports": imports,
         "referenced_identifiers": sorted(set(JS_IDENTIFIER_RE.findall(executable_code))),
         "test_names": test_names,
         "scenario_names": scenario_names,
         "assertions": assertions,
         "disabled_tests": sorted(disabled),
         "test_cases": test_cases,
+        "browser_framework": browser_framework,
+        "uses_cdp": uses_cdp,
+        "browser_actions": sorted({
+            action for case in test_cases for action in case.get("browser_actions", [])
+        }),
+        "browser_observations": sorted({
+            observation
+            for case in test_cases
+            for observation in case.get("browser_observations", [])
+        }),
+        "browser_targets": [
+            {**target, "case_name": case["name"]}
+            for case in test_cases
+            for target in case.get("browser_targets", [])
+        ],
+        "browser_scenario_has_machine_check": any(
+            not case["disabled"] and case.get("has_machine_check")
+            for case in test_cases
+        ),
         "has_active_test_with_assertion": any(
             not case["disabled"] and bool(case["assertions"])
             for case in test_cases
@@ -694,7 +762,21 @@ def classify_test_candidate(path: Path, facts: dict[str, Any]) -> str:
             return "test-file"
     if facts.get("parse_warning"):
         return "test-candidate"
+    if facts.get("uses_cdp"):
+        return "browser-scenario"
     return "not-a-test"
+
+
+def javascript_framework(facts: dict[str, Any]) -> str:
+    browser_framework = facts.get("browser_framework")
+    if browser_framework:
+        return str(browser_framework)
+    imports = {str(item).lower() for item in facts.get("imports", [])}
+    if any("vitest" in item for item in imports):
+        return "vitest"
+    if any("jest" in item for item in imports):
+        return "jest"
+    return "js-test-runner"
 
 
 def discover_test_assets(
@@ -718,21 +800,31 @@ def discover_test_assets(
         for path in iter_repo_files(repo, nested_repositories, skipped):
             local = path.relative_to(repo).as_posix()
             output_path = workspace_path(path)
-            if is_ignored(output_path) or not TEST_FILE_RE.search(local):
+            browser_candidate = (
+                path.suffix.lower() in BROWSER_SOURCE_SUFFIXES
+                and any(part.lower() in {"e2e", "test", "tests"} for part in path.parts[:-1])
+            )
+            if is_ignored(output_path) or not (TEST_FILE_RE.search(local) or browser_candidate):
                 continue
             facts = parse_test_file(path)
             asset_kind = classify_test_candidate(path, facts)
             if asset_kind == "not-a-test":
                 continue
             test_type, reason = asset_type_for_path(local)
-            if asset_kind == "test-file":
+            if asset_kind in {"test-file", "browser-scenario"}:
                 test_dirs.add(workspace_path(path.parent))
             assets.append({
                 "id": f"discovered:{output_path}", "repo": repo_info["name"],
                 "path": output_path, "asset_kind": asset_kind, "type": test_type,
-                "framework": "pytest" if path.suffix == ".py" else "js-test-runner",
+                "framework": "pytest" if path.suffix == ".py" else javascript_framework(facts),
                 "discovery_source": "filesystem",
-                "reason": reason if asset_kind == "test-file" else "test-like filename could not be parsed into executable test cases",
+                "reason": (
+                    reason
+                    if asset_kind == "test-file"
+                    else "CDP browser scenario discovered by static API usage"
+                    if asset_kind == "browser-scenario"
+                    else "test-like filename could not be parsed into executable test cases"
+                ),
                 "test_facts": facts,
             })
 

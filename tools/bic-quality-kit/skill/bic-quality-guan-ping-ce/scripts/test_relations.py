@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import posixpath
 import re
+from urllib.parse import urlsplit
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -415,6 +416,14 @@ def assertion_linked_import_evidence(
     return case_names, roots
 
 
+def normalized_target_path(value: str) -> str:
+    parsed = urlsplit(value)
+    path = parsed.path or value.split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return path.rstrip("/") or "/"
+
+
 def relation_record(
     asset: dict[str, Any], reasons: list[str], related_files: Iterable[str],
     related_symbols: Iterable[str], relation_proves_object_path: bool = False,
@@ -471,6 +480,33 @@ def relation_record(
     if not has_active_assertion:
         linked_symbols.clear()
         linked_files.clear()
+    browser_evidence = None
+    if facts.get("browser_framework"):
+        browser_cases = [
+            case for case in test_cases
+            if case_names is None or case.get("name") in case_names
+        ]
+        browser_evidence = {
+            "framework": facts.get("browser_framework"),
+            "actions": sorted({
+                action for case in browser_cases for action in case.get("browser_actions", [])
+            }),
+            "observations": sorted({
+                observation
+                for case in browser_cases
+                for observation in case.get("browser_observations", [])
+            }),
+            "targets": [
+                target
+                for case in browser_cases
+                for target in case.get("browser_targets", [])
+            ],
+            "uses_cdp": bool(facts.get("uses_cdp")),
+            "has_machine_check": any(
+                not case.get("disabled") and bool(case.get("has_machine_check"))
+                for case in browser_cases
+            ),
+        }
     return {
         "repo": asset["repo"], "path": asset["path"], "framework": asset.get("framework"),
         "relation_reasons": sorted(set(reasons)),
@@ -483,6 +519,7 @@ def relation_record(
         "assertions": facts.get("assertions", []),
         "disabled_tests": disabled,
         "has_active_test_with_assertion": has_active_assertion,
+        "browser_evidence": browser_evidence,
     }
 
 
@@ -497,7 +534,10 @@ def analyze_test_relations(
         if module:
             module_files[(item["repo"], module)].append(item)
 
-    test_assets = [asset for asset in discovered_assets if asset.get("asset_kind") == "test-file"]
+    test_assets = [
+        asset for asset in discovered_assets
+        if asset.get("asset_kind") in {"test-file", "browser-scenario"}
+    ]
     inventory_by_asset: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entry in inventory:
         for path in entry.get("matching_discovered_assets", []):
@@ -766,7 +806,41 @@ def analyze_test_relations(
                     relation_proves_object_path=True,
                 ))
 
-            if related_files or asset_has_indirect_relation or asset["repo"] != repo:
+            browser_route_files: set[str] = set()
+            browser_route_symbols: set[str] = set()
+            browser_route_reasons: list[str] = []
+            browser_route_cases: set[str] = set()
+            if not related_files and not asset_has_indirect_relation and facts.get("browser_framework"):
+                for source in module_symbol_items:
+                    for symbol in source.get("symbols", []):
+                        route_path = symbol.get("route_path")
+                        route_method = str(symbol.get("route_method") or "").upper()
+                        if symbol.get("kind") != "route" or not route_path:
+                            continue
+                        for target in facts.get("browser_targets", []):
+                            if normalized_target_path(str(target.get("target") or "")) != normalized_target_path(str(route_path)):
+                                continue
+                            receiver = str(target.get("receiver") or "")
+                            target_method = str(target.get("method") or "").upper()
+                            if receiver == "request" and route_method and target_method != route_method:
+                                continue
+                            browser_route_files.add(source["path"])
+                            browser_route_symbols.add(symbol["name"])
+                            if target.get("case_name"):
+                                browser_route_cases.add(str(target["case_name"]))
+                            browser_route_reasons.append(
+                                f"browser scenario targets {target_method} {route_path}; route identity matches but runtime wiring is unexecuted"
+                            )
+            if browser_route_files:
+                possible.append(relation_record(
+                    asset,
+                    browser_route_reasons,
+                    browser_route_files,
+                    browser_route_symbols,
+                    related_case_names=browser_route_cases,
+                ))
+
+            if related_files or asset_has_indirect_relation or browser_route_files or asset["repo"] != repo:
                 continue
 
             file_affinity = set().union(*(basename_tokens(item["path"], repo) for item in changed)) & basename_tokens(asset["path"], repo)
@@ -805,7 +879,7 @@ def analyze_test_relations(
                 relation for relation in direct
                 if name in relation["related_symbols"]
                 or (
-                    symbol["kind"] in {"file", "changed-file"}
+                    symbol["kind"] in {"file", "changed-file", "module-scope"}
                     and symbol["path"] in relation["related_files"]
                 )
             ]
@@ -818,7 +892,7 @@ def analyze_test_relations(
                 and (
                     name in relation["assertion_linked_symbols"]
                     or (
-                        symbol["kind"] in {"file", "changed-file"}
+                        symbol["kind"] in {"file", "changed-file", "module-scope"}
                         and symbol["path"] in relation["assertion_linked_files"]
                     )
                 )
@@ -836,7 +910,12 @@ def analyze_test_relations(
             needs_strengthening = bool(
                 direct_for_object or indirect_for_object or possible_for_object
             )
-            observation = "declared in an added file" if "added" in symbol.get("change_types", []) else "declared in a changed file (diff-hunk attribution unavailable)"
+            if "added" in symbol.get("change_types", []):
+                observation = "declared in an added file"
+            elif symbol["kind"] == "module-scope":
+                observation = "changed outside a declaration"
+            else:
+                observation = "selected by a changed diff hunk"
             subject = f"{symbol['kind']} {name} in {symbol['path']} ({observation})"
             if active_direct or active_indirect:
                 no_gaps.append(f"No obvious static gap for {subject}: an active object-related test contains an assertion.")
@@ -855,7 +934,7 @@ def analyze_test_relations(
                 for item in changed
             ],
             "changed_symbols": flattened_symbols,
-            "symbol_scope_note": "Added/untracked files expose best-effort declarations; modified, renamed, or deleted files use one file-level changed object because diff-hunk symbol attribution is unavailable.",
+            "symbol_scope_note": "Supported source files use ast-outline Diff-hunk declarations; legitimate module-level changes remain module-scope objects.",
             "directly_related_tests": direct,
             "indirectly_related_tests": indirect,
             "possibly_related_tests": possible,

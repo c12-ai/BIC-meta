@@ -299,3 +299,53 @@ repository or test directory is added.
 - Repository discovery is limited to immediate children of `BIC-meta`; deeper
   nested repositories can be added later through explicit discovery settings.
 - Local refs are authoritative for the MVP. The analyzer must not fetch remotes.
+
+## Phase-One Multi-language Extension (2026-07-22)
+
+The read-only assessment now requires a pinned `ast-outline` runtime so changed
+objects can be attributed from Diff hunks across Python, JavaScript, JSX,
+TypeScript, and TSX. The Skill bootstraps that runtime into a BIC-owned user
+cache on first use; it never installs into the repository or the user's global
+PATH. A missing or incompatible required analyzer stops the assessment instead
+of silently producing a reduced file-level brief.
+
+The assessment must map changed backend routes, frontend API clients, hooks,
+stores, components, shared contracts, and browser-test scenarios into bounded,
+auditable user-journey evidence. Pytest, JavaScript unit/component tests,
+Playwright E2E tests, and CDP/browser scripts remain separate evidence layers.
+Static presence is not runtime verification, and a browser script without a
+machine-checkable outcome cannot clear a test gap.
+
+The phase-one output adds a machine-readable Test Execution Manifest for a
+future phase-two executor. It records the exact local change fingerprint,
+selected test assets, relation strength, affected objects and journeys,
+environment prerequisites, state-mutation requirements, and controlled command
+hints. Phase one still does not start services, reset data, execute project
+code, or execute tests.
+
+### Extension Acceptance Criteria
+
+- [x] First use installs the pinned `ast-outline` runtime into an isolated
+      BIC-owned cache with concurrency safety and a stable JSON-schema probe.
+- [x] Analyzer installation or schema failure prevents a complete brief; no
+      Python-only or file-level fallback is reported as complete.
+- [x] A canonical local-base-to-current Diff supplies one consistent old/new
+      line coordinate system while preserving committed/staged/unstaged/
+      untracked provenance separately.
+- [x] Python, JavaScript, JSX, TypeScript, and TSX modified files expose the
+      smallest enclosing changed function, method, class, component, hook,
+      store/action, route, API client, or module-scope declaration.
+- [x] Deleted and renamed declarations are attributed from the local base
+      without fetch or checkout.
+- [x] Exact changed objects and routes improve module, Issue, and test
+      correspondence inputs without changing the bounded 100-to-10 Issue
+      discovery contract.
+- [x] Playwright and CDP/browser scenarios report actions, machine-checkable
+      assertions, disabled/manual-only state, and affected user journeys as
+      distinct evidence from pytest and frontend unit/component tests.
+- [x] The public assessment includes a versioned Test Execution Manifest and a
+      local change fingerprint while executing no command hint or test.
+- [x] Source repositories remain unchanged; only the explicitly documented
+      analyzer cache and ephemeral system-temp files may be written.
+- [x] Unit, integration, install, Skill validation, and agent-eval gates pass
+      after source/mirror synchronization.

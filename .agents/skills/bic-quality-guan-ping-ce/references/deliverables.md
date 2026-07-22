@@ -56,6 +56,14 @@ BIC 质量简报
 - 建议完善测试：
 - 暂未发现明显缺口：
 
+第二阶段测试执行交接（本阶段不执行）
+- 变更指纹：
+- 必跑候选：<direct and indirect candidates>
+- 可选候选：<possible candidates>
+- 浏览器/用户旅程证据：<Playwright/CDP scenarios, actions, observations, machine checks>
+- 环境前置条件：
+- 执行状态：not-run
+
 说明：本次仅做静态分析，未执行测试；静态对应关系不代表测试已通过。
 ```
 
@@ -78,6 +86,10 @@ brief concise:
   explicit relation that produced each conclusion.
 - Possible candidates remain visible search clues but never count as proof that
   a changed behavior has an existing test.
+- For Playwright/CDP evidence, distinguish actions and observations from active
+  machine-checkable assertions. Never describe a screenshot-only or click-only
+  scenario as verified. Backend/unit evidence and browser evidence are separate
+  layers; neither alone proves the complete user journey.
 - Report `scan_warnings` when content inspection intentionally skipped a test-like
   symbolic link, outside-repository path, or sensitive path. Do not turn the
   skipped candidate into either positive test evidence or proof of a missing
@@ -118,6 +130,10 @@ brief concise:
 - Do not include the raw `test_inventory` in the final `assess` payload or
   brief. Use derived test correspondence and risk evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.
+- Summarize the emitted `test_execution_manifest` without executing it. State
+  its change fingerprint, required/optional candidates, unresolved commands,
+  prerequisites, browser journey evidence, and `not-run` status. It is invalid
+  for execution if the workspace fingerprint changes.
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.
 - Do not emit confidence, priority, evidence-type, coverage-percentage,

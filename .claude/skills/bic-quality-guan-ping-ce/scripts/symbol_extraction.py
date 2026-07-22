@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Deterministic symbol extraction for changed Python and JS/TS files."""
+"""Deterministic diff-hunk declaration extraction across supported languages."""
 
 from __future__ import annotations
 
 import ast
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from content_safety import safe_repository_file
+from ast_outline_adapter import (
+    StructuralAnalysisError,
+    analyze_file,
+    analyze_source_text,
+    managed_analyzer_metadata,
+)
 
 
 JS_DECLARATION_RE = re.compile(
@@ -27,6 +34,11 @@ JS_IMPORT_RE = re.compile(
     r"['\"]([^'\"]+)['\"]"
 )
 JS_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
+STRUCTURAL_SUFFIXES = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".kt", ".kts",
+    ".rs", ".php", ".rb", ".cs", ".cpp", ".cc", ".cxx", ".h", ".hpp",
+    ".swift", ".lua", ".ex", ".exs", ".scala", ".sc",
+}
 
 
 def decorator_name(node: ast.AST) -> str:
@@ -138,39 +150,172 @@ def extract_changed_symbols(
     workspace_root: Path,
     changed_files: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    analyzer = managed_analyzer_metadata()
+    executable = analyzer["executable"]
     results: list[dict[str, Any]] = []
     for changed in changed_files:
         path = changed["path"]
         suffix = Path(path).suffix.lower()
-        supported = suffix in {".py", ".js", ".jsx", ".ts", ".tsx"}
+        supported = suffix in STRUCTURAL_SUFFIXES
         absolute = workspace_root / path
         repo_relative = changed.get("repo_relative_path", ".")
         repository_root = workspace_root if repo_relative == "." else workspace_root / repo_relative
         warning: str | None = None
         symbols: list[dict[str, Any]] = []
-        is_new_file = bool({"added", "untracked"} & set(changed.get("change_types", [])))
+        change_types = set(changed.get("change_types", []))
+        is_new_file = bool({"added", "untracked"} & change_types)
         if not supported:
             symbols = [{"name": Path(path).name, "kind": "changed-file", "line": None}]
             warning = f"file-level object used because {suffix or 'extensionless'} parsing is unsupported"
-        elif not is_new_file:
-            symbols = [{"name": Path(path).stem, "kind": "changed-file", "line": None}]
-            warning = "file-level object used because diff-hunk symbol attribution is unavailable"
         else:
+            new_analysis: dict[str, Any] | None = None
+            old_analysis: dict[str, Any] | None = None
             safe_path, unsafe_reason = safe_repository_file(absolute, repository_root)
             if safe_path is not None:
-                symbols, warning = parse_python(safe_path) if suffix == ".py" else parse_javascript(safe_path)
+                try:
+                    new_analysis = analyze_file(safe_path, executable)
+                except StructuralAnalysisError as exc:
+                    raise StructuralAnalysisError(f"Complete changed-object analysis failed for {path}: {exc}") from exc
             elif unsafe_reason in {"symlink", "outside-repository", "sensitive-path"}:
+                symbols = [{"name": Path(path).stem, "kind": "changed-file", "line": None}]
                 warning = f"content inspection skipped: {unsafe_reason}"
-            else:
-                warning = "changed file is unavailable (possibly deleted)"
+
+            if symbols:
+                result = {
+                    "repo": changed["repo"], "path": path,
+                    "change_types": changed.get("change_types", []), "symbols": symbols,
+                    "symbol_scope": "file-level",
+                }
+                if warning:
+                    result["parse_warning"] = warning
+                if changed.get("old_path"):
+                    result["old_path"] = changed["old_path"]
+                results.append(result)
+                continue
+
+            comparison_base = changed.get("comparison_base")
+            old_workspace_path = changed.get("old_path") or path
+            prefix = "" if repo_relative == "." else f"{repo_relative}/"
+            old_local_path = (
+                old_workspace_path[len(prefix):]
+                if prefix and old_workspace_path.startswith(prefix)
+                else old_workspace_path
+            )
+            if comparison_base and any(hunk.get("old_count", 0) for hunk in changed.get("diff_hunks", [])):
+                try:
+                    proc = subprocess.run(
+                        ["git", "show", f"{comparison_base}:{old_local_path}"],
+                        cwd=str(repository_root),
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        check=False,
+                        timeout=30,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    raise StructuralAnalysisError(
+                        f"Complete old-source analysis failed for {old_workspace_path}: {type(exc).__name__}"
+                    ) from exc
+                if proc.returncode == 0:
+                    try:
+                        old_analysis = analyze_source_text(proc.stdout, suffix, executable)
+                    except StructuralAnalysisError as exc:
+                        raise StructuralAnalysisError(
+                            f"Complete old-source analysis failed for {old_workspace_path}: {exc}"
+                        ) from exc
+                elif "deleted" in change_types or "renamed" in change_types:
+                    raise StructuralAnalysisError(
+                        f"Complete old-source analysis could not read {old_workspace_path} from {comparison_base}"
+                    )
+
+            def selected_declarations(
+                analysis: dict[str, Any] | None,
+                side: str,
+            ) -> list[dict[str, Any]]:
+                if analysis is None:
+                    return []
+                selected: list[dict[str, Any]] = []
+                for hunk in changed.get("diff_hunks", []):
+                    count = int(hunk.get(f"{side}_count", 0))
+                    if count <= 0:
+                        continue
+                    start = int(hunk[f"{side}_start"])
+                    end = int(hunk[f"{side}_end"])
+                    candidates = [
+                        declaration for declaration in analysis["declarations"]
+                        if declaration["start_line"] <= end and declaration["end_line"] >= start
+                    ]
+                    leaf_candidates = [
+                        candidate for candidate in candidates
+                        if not any(
+                            other is not candidate
+                            and candidate["start_line"] <= other["start_line"]
+                            and candidate["end_line"] >= other["end_line"]
+                            and (
+                                candidate["start_line"] < other["start_line"]
+                                or candidate["end_line"] > other["end_line"]
+                            )
+                            for other in candidates
+                        )
+                    ]
+                    selected.extend(leaf_candidates or candidates)
+                unique: dict[tuple[str, str, int, int], dict[str, Any]] = {}
+                for declaration in selected:
+                    key = (
+                        declaration["qualified_name"], declaration["kind"],
+                        declaration["start_line"], declaration["end_line"],
+                    )
+                    unique[key] = declaration
+                return list(unique.values())
+
+            new_symbols = selected_declarations(new_analysis, "new")
+            old_symbols = selected_declarations(old_analysis, "old")
+            merged: dict[tuple[str, str], dict[str, Any]] = {}
+            for side, declarations in (("old", old_symbols), ("new", new_symbols)):
+                for declaration in declarations:
+                    key = (declaration["qualified_name"], declaration["kind"])
+                    entry = merged.setdefault(key, {**declaration, "sides": []})
+                    entry["sides"].append(side)
+                    entry[f"{side}_start_line"] = declaration["start_line"]
+                    entry[f"{side}_end_line"] = declaration["end_line"]
+            for declaration in merged.values():
+                sides = set(declaration.pop("sides"))
+                if sides == {"old", "new"}:
+                    declaration["change_kind"] = "renamed" if "renamed" in change_types else "modified"
+                elif sides == {"old"}:
+                    declaration["change_kind"] = "deleted"
+                else:
+                    declaration["change_kind"] = "added" if is_new_file else "modified"
+                declaration["line"] = declaration.get("new_start_line", declaration.get("old_start_line"))
+                symbols.append(declaration)
+
+            if not symbols:
+                symbols = [{
+                    "name": Path(path).stem,
+                    "symbol": Path(path).stem,
+                    "qualified_name": Path(path).stem,
+                    "kind": "module-scope",
+                    "native_kind": "module",
+                    "line": None,
+                    "start_line": None,
+                    "end_line": None,
+                    "change_kind": "renamed" if "renamed" in change_types else "modified",
+                }]
         if not symbols:
             symbols = [{"name": Path(path).stem, "kind": "file", "line": None}]
         result = {
             "repo": changed["repo"], "path": path,
             "change_types": changed.get("change_types", []), "symbols": symbols,
-            "symbol_scope": "declarations" if is_new_file and supported else "file-level",
+            "symbol_scope": "diff-hunk-declarations" if supported else "file-level",
+            "analyzer": {
+                "name": analyzer["name"],
+                "version": analyzer["version"],
+                "schema_version": analyzer["schema_version"],
+            } if supported else None,
         }
         if warning:
             result["parse_warning"] = warning
+        if changed.get("old_path"):
+            result["old_path"] = changed["old_path"]
         results.append(result)
     return results

@@ -806,7 +806,8 @@ def shortlist_issue_candidates(
         terms = object_terms_by_repo.setdefault(repo, set())
         for symbol in changed.get("symbols") or []:
             if isinstance(symbol, dict):
-                terms.update(search_terms(str(symbol.get("name") or "")))
+                for key in ("name", "symbol", "qualified_name", "route_path", "route_method"):
+                    terms.update(search_terms(str(symbol.get(key) or "")))
         path_terms = path_terms_by_repo.setdefault(repo, set())
         path = Path(str(changed.get("path") or ""))
         path_terms.update(search_terms(path.stem))

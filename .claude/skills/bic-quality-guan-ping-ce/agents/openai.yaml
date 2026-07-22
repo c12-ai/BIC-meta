@@ -1,4 +1,4 @@
 interface:
   display_name: "BIC Quality Review"
-  short_description: "Review BIC diffs, test gaps, and pre-test risk"
-  default_prompt: "Use $bic-quality-guan-ping-ce to review the current BIC diff, map affected modules and tests, and assess issue-aware pre-test risk."
+  short_description: "Review BIC diffs, browser evidence, and pre-test risk"
+  default_prompt: "Use $bic-quality-guan-ping-ce to map the current BIC diff to changed objects and backend/browser tests, assess issue-aware pre-test risk, and prepare the non-executing Phase 2 manifest."
