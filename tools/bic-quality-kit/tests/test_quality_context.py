@@ -714,6 +714,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
     def test_cli_payload_redacts_sensitive_paths_and_issue_credentials(self) -> None:
         write(self.root / ".env.production", "PASSWORD=workspace-live-password\n")
         sensitive_issue = Path(self.temp.name) / "sensitive-issue.json"
+        bare_jwt = (
+            "eyJhbGciOiJIUzI1NiJ9."
+            "eyJzdWIiOiJjbGktZml4dHVyZSJ9."
+            "Y2xpLWZpeHR1cmUtc2lnbmF0dXJl"
+        )
         write(
             sensitive_issue,
             json.dumps({
@@ -724,6 +729,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
                     "- [ ] Keep tokens private\n"
                     "api_key=issue-live-api-key\n"
                     "Authorization: Bearer issue-live-bearer\n"
+                    "Authorization: Basic Y2xpLXVzZXI6Y2xpLXBhc3M=\n"
+                    'password="cli quoted password"\n'
+                    f"Captured credential artifact {bare_jwt}\n"
+                    "client_secret: |\n"
+                    "  cli multiline secret\n"
+                    "peer_key: visible-peer\n"
                 ),
                 "state": "OPEN",
                 "url": "https://github.com/c12-ai/BIC-meta/issues/43",
@@ -736,6 +747,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertNotIn("workspace-live-password", serialized)
         self.assertNotIn("issue-live-api-key", serialized)
         self.assertNotIn("issue-live-bearer", serialized)
+        self.assertNotIn("Y2xpLXVzZXI6Y2xpLXBhc3M=", serialized)
+        self.assertNotIn("cli quoted password", serialized)
+        self.assertNotIn(bare_jwt, serialized)
+        self.assertNotIn("cli multiline secret", serialized)
+        self.assertIn("peer_key: visible-peer", serialized)
         self.assertIn(REDACTED_PATH, serialized)
         self.assertIn(REDACTED_SECRET, serialized)
 
@@ -2190,6 +2206,100 @@ class ContentSafetyTest(unittest.TestCase):
         self.assertEqual(sanitized["path"], REDACTED_PATH)
         self.assertEqual(sanitized["safe_path"], "BIC-agent-service/.env.example")
         self.assertIn(REDACTED_SECRET, serialized)
+
+    def test_output_redaction_covers_quoted_basic_jwt_and_yaml_block_secrets(self) -> None:
+        jwt = (
+            "eyJhbGciOiJIUzI1NiJ9."
+            "eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+            "c2lnbmF0dXJlLWJ5dGVz"
+        )
+        payload = {
+            "issue": {
+                "body": (
+                    'password="correct horse battery staple"\n'
+                    '"api_key": "json quoted secret"\n'
+                    "Authorization: Basic dXNlcjpwYXNzLHdvcmQ=\n"
+                    f"Captured session artifact {jwt}\n"
+                    "settings:\n"
+                    "  client_secret: |-\n"
+                    "    first multiline secret\n"
+                    "    second multiline secret\n"
+                    "  peer_key: preserved-peer-value\n"
+                    "  access_token: |2-\n"
+                    "    explicitly indented secret\n"
+                    "  second_peer: preserved-second-peer\n"
+                    "after: preserved-after-value\n"
+                ),
+            },
+            "warnings": [{
+                "message": (
+                    "auth_token: >\n"
+                    "  folded secret line one\n"
+                    "  folded secret line two\n"
+                    "next_key: preserved-next-value\n"
+                ),
+            }],
+        }
+
+        sanitized = sanitize_for_output(payload)
+        serialized = json.dumps(sanitized)
+        for secret in (
+            "correct horse battery staple",
+            "json quoted secret",
+            "dXNlcjpwYXNzLHdvcmQ=",
+            jwt,
+            "first multiline secret",
+            "second multiline secret",
+            "explicitly indented secret",
+            "folded secret line one",
+            "folded secret line two",
+        ):
+            self.assertNotIn(secret, serialized)
+        self.assertIn('password="[REDACTED]"', sanitized["issue"]["body"])
+        self.assertIn('"api_key": "[REDACTED]"', sanitized["issue"]["body"])
+        self.assertIn("Authorization: Basic [REDACTED]", sanitized["issue"]["body"])
+        self.assertIn("client_secret: |-\n    [REDACTED]\n", sanitized["issue"]["body"])
+        self.assertIn("access_token: |2-\n    [REDACTED]\n", sanitized["issue"]["body"])
+        self.assertIn("auth_token: >\n  [REDACTED]\n", sanitized["warnings"][0]["message"])
+        for preserved in (
+            "peer_key: preserved-peer-value",
+            "second_peer: preserved-second-peer",
+            "after: preserved-after-value",
+            "next_key: preserved-next-value",
+        ):
+            self.assertIn(preserved, serialized)
+
+    def test_secret_safety_preserves_false_positives_and_safe_examples(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "repo"
+            sensitive_paths = (".envrc", "auth.json", "token.txt", "credentials.yaml")
+            safe_paths = (
+                ".env.example",
+                ".env.production.example",
+                ".envrc.example",
+                "auth.example.json",
+                "src/auth/token_parser.py",
+            )
+            for relative_path in (*sensitive_paths, *safe_paths):
+                write(repo / relative_path, "fixture\n")
+
+            for relative_path in sensitive_paths:
+                result, reason = safe_repository_file(repo / relative_path, repo)
+                self.assertIsNone(result)
+                self.assertEqual(reason, "sensitive-path")
+            for relative_path in safe_paths:
+                result, reason = safe_repository_file(repo / relative_path, repo)
+                self.assertEqual(result, (repo / relative_path).resolve())
+                self.assertIsNone(reason)
+
+        ordinary = {
+            "prose": "The password policy requires twelve characters.",
+            "source_path": "src/auth/token_parser.py",
+            "schema_path": "schemas/auth.json.schema",
+            "commit": "0123456789abcdef0123456789abcdef01234567",
+            "safe_env": "BIC-agent-service/.env.production.example",
+        }
+        self.assertEqual(sanitize_for_output(ordinary), ordinary)
 
     def test_python_one_hop_reads_preserve_repository_containment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

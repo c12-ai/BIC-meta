@@ -13,11 +13,15 @@ REDACTED_SECRET = "[REDACTED]"
 REDACTED_PATH = "[REDACTED_SENSITIVE_PATH]"
 
 SENSITIVE_EXACT_NAMES = {
+    ".envrc",
     ".git-credentials",
     ".netrc",
     ".npmrc",
     ".pypirc",
+    "auth.json",
     "credentials.json",
+    "credentials.yaml",
+    "credentials.yml",
     "id_dsa",
     "id_ecdsa",
     "id_ed25519",
@@ -27,6 +31,7 @@ SENSITIVE_EXACT_NAMES = {
     "secrets.yml",
     "service-account.json",
     "service_account.json",
+    "token.txt",
 }
 SENSITIVE_DIRECTORIES = {
     ".aws",
@@ -56,14 +61,38 @@ PRIVATE_KEY_RE = re.compile(
     r"-----END(?: [A-Z0-9]+)? PRIVATE KEY-----",
     re.DOTALL,
 )
+SENSITIVE_KEY_PATTERN = (
+    r"(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|"
+    r"client[_-]?secret|password|passwd|private[_-]?key|secret|"
+    r"secret[_-]?key|token)"
+)
+YAML_BLOCK_SECRET_RE = re.compile(
+    rf"^(?P<indent> *)(?P<header>[\"']?{SENSITIVE_KEY_PATTERN}[\"']?"
+    r"\s*:\s*[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?)"
+    r"(?P<ending>\r?\n)?$",
+    re.IGNORECASE,
+)
+QUOTED_SECRET_ASSIGNMENT_RE = re.compile(
+    rf"(?P<prefix>[\"']?{SENSITIVE_KEY_PATTERN}[\"']?\s*[:=]\s*)"
+    r"(?P<quote>[\"'])(?P<value>(?:\\[^\r\n]|(?!(?P=quote))[^\r\n\\])*)"
+    r"(?P=quote)",
+    re.IGNORECASE,
+)
 SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?P<prefix>[\"']?(?:api[_-]?key|access[_-]?key|access[_-]?token|"
-    r"auth[_-]?token|client[_-]?secret|password|passwd|private[_-]?key|"
-    r"secret|secret[_-]?key|token)[\"']?\s*[:=]\s*[\"']?)"
+    rf"(?P<prefix>[\"']?{SENSITIVE_KEY_PATTERN}[\"']?\s*[:=]\s*)"
+    r"(?![|>])"
     r"(?P<value>[^\s,;\"']+)",
     re.IGNORECASE,
 )
 BEARER_RE = re.compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]+")
+BASIC_AUTH_RE = re.compile(
+    r"(?i)(\bAuthorization\s*:\s*Basic\s+)[A-Za-z0-9+/_=-]{4,}"
+)
+BARE_JWT_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])"
+    r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+    r"(?![A-Za-z0-9_-])"
+)
 KNOWN_TOKEN_RE = re.compile(
     r"\b(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
     r"AKIA[0-9A-Z]{16})\b"
@@ -165,14 +194,68 @@ def redact_sensitive_paths(text: str) -> str:
     )
 
 
+def redact_yaml_block_secrets(text: str) -> str:
+    """Replace YAML literal/folded secret values while preserving peer keys."""
+    lines = text.splitlines(keepends=True)
+    redacted: list[str] = []
+    index = 0
+    while index < len(lines):
+        header = YAML_BLOCK_SECRET_RE.match(lines[index])
+        if header is None:
+            redacted.append(lines[index])
+            index += 1
+            continue
+
+        redacted.append(lines[index])
+        header_indent = len(header.group("indent"))
+        block_end = index + 1
+        content_indent: int | None = None
+        line_ending = "\n" if header.group("ending") else ""
+        while block_end < len(lines):
+            candidate = lines[block_end]
+            candidate_body = candidate.rstrip("\r\n")
+            if not candidate_body.strip():
+                block_end += 1
+                continue
+            indentation = len(candidate_body) - len(candidate_body.lstrip(" "))
+            if indentation <= header_indent:
+                break
+            if content_indent is None:
+                content_indent = indentation
+                if candidate.endswith("\r\n"):
+                    line_ending = "\r\n"
+                elif candidate.endswith("\n"):
+                    line_ending = "\n"
+            block_end += 1
+
+        if content_indent is not None:
+            redacted.append(
+                f"{' ' * content_indent}{REDACTED_SECRET}{line_ending}"
+            )
+            index = block_end
+        else:
+            index += 1
+    return "".join(redacted)
+
+
 def redact_text(text: str) -> str:
     """Redact common credential forms and sensitive paths from public output."""
     redacted = PRIVATE_KEY_RE.sub(REDACTED_SECRET, text)
+    redacted = redact_yaml_block_secrets(redacted)
+    redacted = QUOTED_SECRET_ASSIGNMENT_RE.sub(
+        lambda match: (
+            f"{match.group('prefix')}{match.group('quote')}"
+            f"{REDACTED_SECRET}{match.group('quote')}"
+        ),
+        redacted,
+    )
     redacted = SECRET_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group('prefix')}{REDACTED_SECRET}",
         redacted,
     )
+    redacted = BASIC_AUTH_RE.sub(rf"\1{REDACTED_SECRET}", redacted)
     redacted = BEARER_RE.sub(rf"\1{REDACTED_SECRET}", redacted)
+    redacted = BARE_JWT_RE.sub(REDACTED_SECRET, redacted)
     redacted = KNOWN_TOKEN_RE.sub(REDACTED_SECRET, redacted)
     redacted = URL_CREDENTIAL_RE.sub(
         lambda match: (
