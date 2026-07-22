@@ -126,9 +126,7 @@ brief concise:
   evidence. Preserve the technical risk derived from Diff/test facts. This is a
   pre-test matrix, not a claim about executed verification or residual release
   risk.
-- Collect open Issue candidates only from repositories identified by the Diff;
-  when current-PR or local-commit timestamps exist, include a bounded closed
-  slice around that activity window within the same 100-record budget.
+- Collect open Issue candidates only from repositories identified by the Diff.
   Treat an explicit Issue override as authoritative. Auto-detect the current PR
   when available, but do not treat historical PR URLs supplied in conversation
   as analyzer inputs. A unique current-PR
@@ -137,14 +135,12 @@ brief concise:
   scan every repository and keep the current-PR Issue as a repository-local
   candidate without resolving workspace Issue alignment. Preserve Diff-commit
   and `issue-123` branch references as shortlist hints that still require
-  semantic confirmation. Scan at most 100 combined open/closed
+  semantic confirmation. Scan at most 100
   metadata records per affected repository, compare them with multilingual
   module, changed-object, changed-path, and label signals, and retain at most 10
   ordinary shortlist candidates. Keep at most one no-signal fallback per
   affected repository and do not fill unused budget with unrelated Issues. Read
-  every shortlisted body before semantic alignment. For only the top three,
-  read bounded timeline events and truncated untrusted comments; time or
-  timeline proximity never makes a thematic candidate authoritative;
+  every shortlisted body before semantic alignment;
   do not perform a second five-body or metadata-only cutoff. Batch multiple
   bodies into one read-only GraphQL request, then use at most three concurrent
   fallback lookups only for unresolved candidates. Apply bounded per-request
