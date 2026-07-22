@@ -266,10 +266,10 @@ def call_site(node: ast.Call) -> tuple[int, int]:
     return node.lineno, node.col_offset
 
 
-def assertion_linked_call_sites(
+def assertion_link_evidence(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> set[tuple[int, int]]:
-    """Find calls whose value is consumed by a local assertion or raises block."""
+) -> tuple[set[tuple[int, int]], set[str]]:
+    """Find calls and identifiers consumed by a local assertion or raises block."""
     nodes = function_nodes(node)
     asserted_names: set[str] = set()
     linked_calls: set[tuple[int, int]] = set()
@@ -325,7 +325,23 @@ def assertion_linked_call_sites(
                 call_site(child) for child in ast.walk(value) if isinstance(child, ast.Call)
             )
             changed = changed or before_names != len(asserted_names) or before_calls != len(linked_calls)
-    return linked_calls
+    linked_identifiers = set(asserted_names)
+    for child in nodes:
+        if not isinstance(child, ast.Call) or call_site(child) not in linked_calls:
+            continue
+        called = dotted_name(child.func)
+        if called:
+            linked_identifiers.add(called)
+            linked_identifiers.add(called.split(".", 1)[0])
+            linked_identifiers.add(called.rsplit(".", 1)[-1])
+    return linked_calls, linked_identifiers
+
+
+def assertion_linked_call_sites(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> set[tuple[int, int]]:
+    """Return call locations whose values flow into an assertion."""
+    return assertion_link_evidence(node)[0]
 
 
 class FunctionStaticFacts(ast.NodeVisitor):
@@ -425,12 +441,13 @@ def function_target_calls(tree: ast.Module, test_path: Path) -> dict[str, list[d
     }
     summaries: dict[str, dict[str, Any]] = {}
     for name, node in functions.items():
+        linked_calls, _ = assertion_link_evidence(node)
         visitor = FunctionStaticFacts(
             test_path,
             path_values,
             module_paths,
             set(functions),
-            assertion_linked_call_sites(node),
+            linked_calls,
         )
         for statement in node.body:
             visitor.visit(statement)
@@ -516,7 +533,10 @@ def parse_python_test(path: Path) -> dict[str, Any]:
     import_aliases: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.update(alias.name for alias in node.names)
+            for alias in node.names:
+                imports.add(alias.name)
+                if alias.asname:
+                    import_aliases[alias.asname] = alias.name
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 imported = python_import_name(node, alias)
@@ -560,11 +580,17 @@ def parse_python_test(path: Path) -> dict[str, Any]:
         for alias, original in import_aliases.items():
             if alias in case_identifiers:
                 case_identifiers.add(original)
+        _, linked_identifiers = assertion_link_evidence(node)
+        for alias, original in import_aliases.items():
+            for identifier in list(linked_identifiers):
+                if identifier == alias or identifier.startswith(f"{alias}."):
+                    linked_identifiers.add(f"{original}{identifier[len(alias):]}")
         test_cases.append({
             "name": node.name,
             "assertions": assertions,
             "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
+            "assertion_linked_identifiers": sorted(linked_identifiers),
             "target_calls": targets_by_function.get(node.name, []),
         })
 

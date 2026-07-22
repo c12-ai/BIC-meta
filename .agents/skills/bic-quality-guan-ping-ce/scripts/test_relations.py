@@ -97,13 +97,15 @@ def resolve_imported_source(
         if parts:
             sibling = importing_parent / parts[0]
             for candidate in (sibling.with_suffix(".py"), sibling / "__init__.py"):
-                if candidate.is_file():
-                    return candidate
+                safe_candidate, _ = safe_repository_file(candidate, repo_root)
+                if safe_candidate is not None:
+                    return safe_candidate
         for size in range(len(parts), 0, -1):
             base = repo_root.joinpath(*parts[:size])
             for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-                if candidate.is_file():
-                    return candidate
+                safe_candidate, _ = safe_repository_file(candidate, repo_root)
+                if safe_candidate is not None:
+                    return safe_candidate
         return None
 
     imported = javascript_import_path(import_value, importing_path, repo)
@@ -146,8 +148,9 @@ def target_matches(
     resolved = local_target_path(workspace_root, target, repo)
     if resolved is None:
         return False
-    changed = workspace_root / changed_path
-    return resolved == changed.resolve()
+    repo_root = workspace_root if repo == "BIC-meta" else workspace_root / repo
+    changed, _ = safe_repository_file(workspace_root / changed_path, repo_root)
+    return changed is not None and resolved == changed
 
 
 def ast_dotted_name(node: ast.AST) -> str:
@@ -207,13 +210,16 @@ def python_reachable_symbols(
     path: Path,
     roots: Iterable[str],
     argv: Iterable[str] = (),
+    *,
+    repository_root: Path,
 ) -> set[str]:
     """Return statically reachable local symbols without importing the file."""
-    if path.suffix != ".py" or not path.is_file():
-        return set(roots)
+    safe_path, _ = safe_repository_file(path, repository_root)
+    if safe_path is None or safe_path.suffix != ".py":
+        return set()
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except SyntaxError:
+        tree = ast.parse(safe_path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
         return set(roots)
 
     functions = {
@@ -267,16 +273,21 @@ def python_reachable_references(
     path: Path,
     roots: Iterable[str],
     argv: Iterable[str] = (),
+    *,
+    repository_root: Path,
 ) -> dict[str, list[str]]:
     """Return imports actually referenced by statically reachable functions."""
-    if path.suffix != ".py" or not path.is_file():
+    safe_path, _ = safe_repository_file(path, repository_root)
+    if safe_path is None or safe_path.suffix != ".py":
         return {"imports": [], "identifiers": []}
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except SyntaxError:
+        tree = ast.parse(safe_path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError):
         return {"imports": [], "identifiers": []}
 
-    reachable = python_reachable_symbols(path, roots, argv)
+    reachable = python_reachable_symbols(
+        safe_path, roots, argv, repository_root=repository_root,
+    )
     functions = {
         node.name: node
         for node in tree.body
@@ -376,10 +387,40 @@ def configured_objects(entry: dict[str, Any], key: tuple[str, str]) -> set[str]:
     return objects
 
 
+def assertion_linked_import_evidence(
+    import_value: str,
+    test_cases: Iterable[dict[str, Any]],
+) -> tuple[set[str], set[str]]:
+    """Return cases and imported roots whose values reach an assertion."""
+    imported = import_value.lstrip(".")
+    imported_leaf = imported.rsplit(".", 1)[-1]
+    case_names: set[str] = set()
+    roots: set[str] = set()
+    for case in test_cases:
+        if case.get("disabled"):
+            continue
+        for raw_identifier in case.get("assertion_linked_identifiers", []):
+            identifier = str(raw_identifier).lstrip(".")
+            root: str | None = None
+            if identifier == imported_leaf or imported.endswith(f".{identifier}"):
+                root = identifier.rsplit(".", 1)[-1]
+            elif identifier == imported:
+                root = imported_leaf
+            elif identifier.startswith(f"{imported}."):
+                root = identifier[len(imported) + 1:].split(".", 1)[0]
+            if root:
+                case_names.add(str(case.get("name", "")))
+                roots.add(root)
+    case_names.discard("")
+    return case_names, roots
+
+
 def relation_record(
     asset: dict[str, Any], reasons: list[str], related_files: Iterable[str],
     related_symbols: Iterable[str], relation_proves_object_path: bool = False,
     related_case_names: Iterable[str] | None = None,
+    assertion_linked_symbols: Iterable[str] | None = None,
+    assertion_linked_files: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     facts = asset.get("test_facts", {})
     test_names = facts.get("test_names", [])
@@ -404,16 +445,39 @@ def relation_record(
         has_active_assertion = any(
             not case.get("disabled")
             and bool(case.get("assertions"))
-            and bool(related_identifiers & set(case.get("referenced_identifiers", [])))
+            and bool(
+                related_identifiers
+                & set(
+                    case.get(
+                        "assertion_linked_identifiers",
+                        case.get("referenced_identifiers", []),
+                    )
+                )
+            )
             for case in test_cases
         )
     else:
-        has_active_assertion = bool(facts.get("has_active_test_with_assertion"))
+        has_active_assertion = False
+    related_files_set = set(related_files)
+    related_symbols_set = set(related_symbols)
+    linked_symbols = (
+        set(related_symbols_set) if assertion_linked_symbols is None
+        else set(assertion_linked_symbols)
+    )
+    linked_files = (
+        set(related_files_set) if assertion_linked_files is None
+        else set(assertion_linked_files)
+    )
+    if not has_active_assertion:
+        linked_symbols.clear()
+        linked_files.clear()
     return {
         "repo": asset["repo"], "path": asset["path"], "framework": asset.get("framework"),
         "relation_reasons": sorted(set(reasons)),
-        "related_files": sorted(set(related_files)),
-        "related_symbols": sorted(set(related_symbols)),
+        "related_files": sorted(related_files_set),
+        "related_symbols": sorted(related_symbols_set),
+        "assertion_linked_files": sorted(linked_files),
+        "assertion_linked_symbols": sorted(linked_symbols),
         "imports": facts.get("imports", []),
         "test_names": test_names,
         "assertions": facts.get("assertions", []),
@@ -439,17 +503,26 @@ def analyze_test_relations(
         for path in entry.get("matching_discovered_assets", []):
             inventory_by_asset[path].append(entry)
     source_reference_cache: dict[Path, dict[str, list[str]]] = {}
-    reachable_symbol_cache: dict[tuple[Path, tuple[str, ...], tuple[str, ...]], set[str]] = {}
+    reachable_symbol_cache: dict[tuple[Path, Path, tuple[str, ...], tuple[str, ...]], set[str]] = {}
 
-    def reachable_symbols(path: Path, roots: Iterable[str], argv: Iterable[str] = ()) -> set[str]:
-        key = (path.resolve(), tuple(sorted(set(roots))), tuple(argv))
+    def reachable_symbols(
+        path: Path,
+        roots: Iterable[str],
+        argv: Iterable[str] = (),
+        *,
+        repository_root: Path,
+    ) -> set[str]:
+        key = (path, repository_root, tuple(sorted(set(roots))), tuple(argv))
         if key not in reachable_symbol_cache:
-            reachable_symbol_cache[key] = python_reachable_symbols(path, key[1], key[2])
+            reachable_symbol_cache[key] = python_reachable_symbols(
+                path, key[2], key[3], repository_root=repository_root,
+            )
         return reachable_symbol_cache[key]
 
     module_results: list[dict[str, Any]] = []
     for key in sorted(module_files):
         repo, module = key
+        repo_root = workspace_root if repo == "BIC-meta" else workspace_root / repo
         changed = module_files[key]
         module_symbol_items = [symbols_by_path[item["path"]] for item in changed if item["path"] in symbols_by_path]
         flattened_symbols = [
@@ -464,6 +537,10 @@ def analyze_test_relations(
             facts = asset.get("test_facts", {})
             imports = facts.get("imports", [])
             identifiers = set(facts.get("referenced_identifiers", []))
+            has_assertion_linkage_facts = any(
+                "assertion_linked_identifiers" in case
+                for case in facts.get("test_cases", [])
+            )
             target_calls = [
                 {**target, "case_name": case.get("name")}
                 for case in facts.get("test_cases", [])
@@ -472,8 +549,9 @@ def analyze_test_relations(
             related_files: set[str] = set()
             related_symbols: set[str] = set()
             reasons: list[str] = []
-            direct_target_cases: set[str] = set()
-            has_regular_direct_relation = False
+            direct_assertion_cases: set[str] = set()
+            direct_assertion_files: set[str] = set()
+            direct_assertion_symbols: set[str] = set()
             configured_entries = [
                 entry for entry in inventory_by_asset[asset["path"]]
                 if key in configured_targets(entry)
@@ -483,14 +561,30 @@ def analyze_test_relations(
                 for source in module_symbol_items:
                     matching_imports = [value for value in imports if import_matches(value, asset["path"], source["path"], repo)]
                     if matching_imports:
-                        has_regular_direct_relation = True
                         related_files.add(source["path"])
                         reasons.append(f"imports changed file via {', '.join(matching_imports)}")
+                        source_linked_cases: set[str] = set()
+                        for matching_import in matching_imports:
+                            linked_cases, _ = assertion_linked_import_evidence(
+                                matching_import, facts.get("test_cases", []),
+                            )
+                            direct_assertion_cases.update(linked_cases)
+                            source_linked_cases.update(linked_cases)
+                        linked_identifiers = {
+                            identifier
+                            for case in facts.get("test_cases", [])
+                            if case.get("name") in source_linked_cases
+                            for identifier in case.get("assertion_linked_identifiers", [])
+                        }
+                        if source_linked_cases:
+                            direct_assertion_files.add(source["path"])
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
                             if identifier and identifier in identifiers:
                                 related_symbols.add(symbol["name"])
                                 reasons.append(f"references {identifier} from the imported changed file")
+                                if identifier in linked_identifiers:
+                                    direct_assertion_symbols.add(symbol["name"])
 
                     matching_targets = [
                         target for target in target_calls
@@ -503,7 +597,8 @@ def analyze_test_relations(
                         source_kind = target.get("source", "local target")
                         reasons.append(f"reaches changed file through {source_kind}")
                         if target.get("case_name") and target.get("assertion_linked"):
-                            direct_target_cases.add(target["case_name"])
+                            direct_assertion_cases.add(target["case_name"])
+                            direct_assertion_files.add(source["path"])
                         target_path = local_target_path(
                             workspace_root, target.get("path", ""), repo,
                         )
@@ -513,19 +608,30 @@ def analyze_test_relations(
                                 target_path,
                                 target_symbols,
                                 target.get("argv", []),
+                                repository_root=repo_root,
                             ))
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
                             if identifier and identifier in target_symbols:
                                 related_symbols.add(symbol["name"])
                                 reasons.append(f"statically reaches {identifier} from the resolved local target")
+                                if target.get("assertion_linked"):
+                                    direct_assertion_symbols.add(symbol["name"])
             if related_files:
                 direct.append(relation_record(
                     asset,
                     reasons,
                     related_files,
                     related_symbols,
-                    related_case_names=None if has_regular_direct_relation else direct_target_cases,
+                    related_case_names=(
+                        direct_assertion_cases if has_assertion_linkage_facts else None
+                    ),
+                    assertion_linked_symbols=(
+                        direct_assertion_symbols if has_assertion_linkage_facts else None
+                    ),
+                    assertion_linked_files=(
+                        direct_assertion_files if has_assertion_linkage_facts else None
+                    ),
                 ))
 
             asset_has_indirect_relation = False
@@ -534,14 +640,24 @@ def analyze_test_relations(
                 one_hop_symbols: set[str] = set()
                 one_hop_reasons: list[str] = []
                 one_hop_cases: set[str] = set()
-                entrypoints: list[tuple[Path, str, str | None, dict[str, Any] | None]] = []
+                one_hop_assertion_files: set[str] = set()
+                one_hop_assertion_symbols: set[str] = set()
+                entrypoints: list[
+                    tuple[Path, str, str | None, dict[str, Any] | None, set[str], set[str]]
+                ] = []
                 for test_import in imports:
                     entry_path = resolve_imported_source(
                         workspace_root, test_import, asset["path"], repo,
                     )
                     if not entry_path:
                         continue
-                    entrypoints.append((entry_path, f"imports {test_import}", None, None))
+                    linked_cases, linked_roots = assertion_linked_import_evidence(
+                        test_import, facts.get("test_cases", []),
+                    )
+                    entrypoints.append((
+                        entry_path, f"imports {test_import}", None, None,
+                        linked_cases, linked_roots,
+                    ))
                 for target in target_calls:
                     entry_path = local_target_path(workspace_root, target.get("path", ""), repo)
                     if entry_path is None:
@@ -551,12 +667,16 @@ def analyze_test_relations(
                         target.get("source", "local target"),
                         target.get("case_name"),
                         target,
+                        ({target["case_name"]} if target.get("case_name") and target.get("assertion_linked") else set()),
+                        set(target.get("symbols", [])),
                     ))
 
                 seen_entrypoints: set[tuple[Path, str | None]] = set()
-                has_unscoped_one_hop_relation = False
-                has_target_scoped_one_hop_relation = False
-                for entry_path, entry_reason, case_name, target in entrypoints:
+                for entry_path, entry_reason, case_name, target, linked_cases, linked_roots in entrypoints:
+                    safe_entry_path, _ = safe_repository_file(entry_path, repo_root)
+                    if safe_entry_path is None:
+                        continue
+                    entry_path = safe_entry_path
                     entry_key = (entry_path, case_name)
                     if entry_key in seen_entrypoints:
                         continue
@@ -567,17 +687,29 @@ def analyze_test_relations(
                             entry_path,
                             target.get("symbols", []),
                             target.get("argv", []),
+                            repository_root=repo_root,
+                        )
+                    elif linked_roots:
+                        references = python_reachable_references(
+                            entry_path,
+                            linked_roots,
+                            repository_root=repo_root,
                         )
                     else:
                         if entry_path not in source_reference_cache:
                             source_reference_cache[entry_path] = extract_source_references(entry_path)
                         references = source_reference_cache[entry_path]
                     for source in module_symbol_items:
+                        source_path, _ = safe_repository_file(
+                            workspace_root / source["path"], repo_root,
+                        )
+                        if source_path is None:
+                            continue
                         matching_source_imports = [
                             value for value in references["imports"]
                             if (
                                 resolve_imported_source(workspace_root, value, entry_workspace_path, repo)
-                                == (workspace_root / source["path"]).resolve()
+                                == source_path
                                 or import_matches(value, entry_workspace_path, source["path"], repo)
                             )
                         ]
@@ -588,34 +720,40 @@ def analyze_test_relations(
                             f"{entry_reason} reaches {entry_workspace_path}, which imports the changed file via "
                             f"{', '.join(matching_source_imports)}"
                         )
-                        if case_name:
-                            has_target_scoped_one_hop_relation = True
-                            if target and target.get("assertion_linked"):
-                                one_hop_cases.add(case_name)
-                        else:
-                            has_unscoped_one_hop_relation = True
+                        one_hop_cases.update(linked_cases)
                         entry_identifiers = set(references["identifiers"])
                         source_roots: set[str] = set()
+                        source_related_symbols: set[str] = set()
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
                             if identifier and identifier in entry_identifiers:
                                 one_hop_symbols.add(symbol["name"])
+                                source_related_symbols.add(symbol["name"])
                                 source_roots.add(identifier)
-                        source_path = (workspace_root / source["path"]).resolve()
-                        expanded_symbols = reachable_symbols(source_path, source_roots)
+                        expanded_symbols = reachable_symbols(
+                            source_path, source_roots, repository_root=repo_root,
+                        )
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
                             if identifier and identifier in expanded_symbols:
                                 one_hop_symbols.add(symbol["name"])
+                                source_related_symbols.add(symbol["name"])
+                        if linked_cases:
+                            one_hop_assertion_files.add(source["path"])
+                            one_hop_assertion_symbols.update(source_related_symbols)
                 if one_hop_files:
                     asset_has_indirect_relation = True
                     indirect.append(relation_record(
                         asset, one_hop_reasons, one_hop_files, one_hop_symbols,
                         relation_proves_object_path=True,
                         related_case_names=(
-                            None if has_unscoped_one_hop_relation
-                            else one_hop_cases if has_target_scoped_one_hop_relation
-                            else None
+                            one_hop_cases if has_assertion_linkage_facts else None
+                        ),
+                        assertion_linked_symbols=(
+                            one_hop_assertion_symbols if has_assertion_linkage_facts else None
+                        ),
+                        assertion_linked_files=(
+                            one_hop_assertion_files if has_assertion_linkage_facts else None
                         ),
                     ))
 
@@ -677,11 +815,18 @@ def analyze_test_relations(
             ]
             active_direct = any(
                 relation["has_active_test_with_assertion"]
-                and (name in relation["related_symbols"] or symbol["kind"] == "file")
+                and (
+                    name in relation["assertion_linked_symbols"]
+                    or (
+                        symbol["kind"] in {"file", "changed-file"}
+                        and symbol["path"] in relation["assertion_linked_files"]
+                    )
+                )
                 for relation in direct_for_object
             )
             active_indirect = any(
                 relation["has_active_test_with_assertion"]
+                and name in relation["assertion_linked_symbols"]
                 for relation in indirect_for_object
             )
             possible_for_object = any(

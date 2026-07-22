@@ -1763,6 +1763,129 @@ raise SystemExit(2)
         self.assertFalse(module["no_obvious_test_gaps"])
         self.assertTrue(any("changed_behavior" in item for item in module["strengthen_tests"]))
 
+    def test_ordinary_import_requires_assertion_flow_to_changed_object(self) -> None:
+        workspace = Path(self.temp.name) / "ordinary-import-assertion-flow"
+        write(workspace / "target.py", "def changed_behavior():\n    return 'ok'\n")
+        scope = {
+            "changed_files": [{"repo": "BIC-meta", "path": "target.py", "change_types": ["added"]}],
+            "file_mappings": [{"repo": "BIC-meta", "path": "target.py", "mapping": {"module_scope": "meta/tooling"}}],
+        }
+        symbols = [{
+            "path": "target.py",
+            "symbols": [{"name": "changed_behavior", "kind": "function"}],
+        }]
+
+        def analyze_test(source: str, filename: str) -> dict:
+            test_file = workspace / f"tests/{filename}"
+            write(test_file, source)
+            facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+            asset = {
+                "repo": "BIC-meta",
+                "path": f"tests/{filename}",
+                "asset_kind": "test-file",
+                "framework": "pytest",
+                "test_facts": facts,
+            }
+            return TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace, scope, symbols, [asset], [],
+            )["modules"][0]
+
+        unrelated = analyze_test(
+            "from target import changed_behavior\n\n"
+            "def test_changed_behavior():\n"
+            "    changed_behavior()\n"
+            "    assert True\n",
+            "test_unrelated_assertion.py",
+        )
+        self.assertEqual(len(unrelated["directly_related_tests"]), 1)
+        self.assertFalse(unrelated["directly_related_tests"][0]["has_active_test_with_assertion"])
+        self.assertFalse(unrelated["no_obvious_test_gaps"])
+        self.assertTrue(any("changed_behavior" in item for item in unrelated["strengthen_tests"]))
+
+        asserted_result = analyze_test(
+            "from target import changed_behavior\n\n"
+            "def test_changed_behavior():\n"
+            "    result = changed_behavior()\n"
+            "    assert result == 'ok'\n",
+            "test_asserted_result.py",
+        )
+        self.assertTrue(asserted_result["directly_related_tests"][0]["has_active_test_with_assertion"])
+        self.assertTrue(any("changed_behavior" in item for item in asserted_result["no_obvious_test_gaps"]))
+
+        from_alias = analyze_test(
+            "from target import changed_behavior as cb\n\n"
+            "def test_changed_behavior():\n"
+            "    assert cb()\n",
+            "test_asserted_from_alias.py",
+        )
+        self.assertEqual(
+            from_alias["directly_related_tests"][0]["assertion_linked_symbols"],
+            ["changed_behavior"],
+        )
+        self.assertTrue(any("changed_behavior" in item for item in from_alias["no_obvious_test_gaps"]))
+
+        module_alias = analyze_test(
+            "import target as t\n\n"
+            "def test_changed_behavior():\n"
+            "    assert t.changed_behavior()\n",
+            "test_asserted_module_alias.py",
+        )
+        self.assertEqual(
+            module_alias["directly_related_tests"][0]["assertion_linked_symbols"],
+            ["changed_behavior"],
+        )
+        self.assertTrue(any("changed_behavior" in item for item in module_alias["no_obvious_test_gaps"]))
+
+    def test_asserted_one_hop_entrypoint_excludes_unreached_sibling_import(self) -> None:
+        workspace = Path(self.temp.name) / "ordinary-one-hop-reachability"
+        write(workspace / "target.py", "def target_behavior():\n    return 'target'\n")
+        write(workspace / "sibling.py", "def sibling_behavior():\n    return 'sibling'\n")
+        write(
+            workspace / "entrypoint.py",
+            "from target import target_behavior\n"
+            "from sibling import sibling_behavior\n\n"
+            "def run_target():\n    return target_behavior()\n\n"
+            "def run_sibling():\n    return sibling_behavior()\n",
+        )
+        test_file = workspace / "tests/test_entrypoint.py"
+        write(
+            test_file,
+            "from entrypoint import run_target\n\n"
+            "def test_target():\n"
+            "    result = run_target()\n"
+            "    assert result == 'target'\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(test_file)
+        paths = ["target.py", "sibling.py"]
+        scope = {
+            "changed_files": [
+                {"repo": "BIC-meta", "path": path, "change_types": ["added"]}
+                for path in paths
+            ],
+            "file_mappings": [
+                {"repo": "BIC-meta", "path": path, "mapping": {"module_scope": "meta/tooling"}}
+                for path in paths
+            ],
+        }
+        symbols = [
+            {"path": "target.py", "symbols": [{"name": "target_behavior", "kind": "function"}]},
+            {"path": "sibling.py", "symbols": [{"name": "sibling_behavior", "kind": "function"}]},
+        ]
+        asset = {
+            "repo": "BIC-meta",
+            "path": "tests/test_entrypoint.py",
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": facts,
+        }
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [asset], [],
+        )["modules"][0]
+
+        self.assertEqual(module["indirectly_related_tests"][0]["related_files"], ["target.py"])
+        self.assertTrue(any("target_behavior" in item for item in module["no_obvious_test_gaps"]))
+        self.assertTrue(any("sibling_behavior" in item for item in module["add_tests"]))
+
     def test_subprocess_command_maps_only_the_selected_entrypoint_branch(self) -> None:
         workspace = Path(self.temp.name) / "command-entrypoint"
         entrypoint = workspace / "entrypoint.py"
@@ -2067,6 +2190,54 @@ class ContentSafetyTest(unittest.TestCase):
         self.assertEqual(sanitized["path"], REDACTED_PATH)
         self.assertEqual(sanitized["safe_path"], "BIC-agent-service/.env.example")
         self.assertIn(REDACTED_SECRET, serialized)
+
+    def test_python_one_hop_reads_preserve_repository_containment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "workspace"
+            repo = workspace / "repo-a"
+            other_repo = workspace / "repo-b"
+            outside = Path(directory) / "outside"
+            write(repo / "safe_entry.py", "from safe_target import safe_behavior\n\ndef run():\n    return safe_behavior()\n")
+            write(repo / "safe_target.py", "def safe_behavior():\n    return 'safe'\n")
+            write(other_repo / "cross_repo.py", "def escaped_behavior():\n    return 'cross-repo'\n")
+            write(outside / "outside.py", "def escaped_behavior():\n    return 'outside'\n")
+            (repo / "cross_repo.py").symlink_to(other_repo / "cross_repo.py")
+            (repo / "outside.py").symlink_to(outside / "outside.py")
+
+            safe = TEST_RELATIONS_MODULE.resolve_imported_source(
+                workspace, "safe_entry", "repo-a/tests/test_entry.py", "repo-a",
+            )
+            self.assertEqual(safe, (repo / "safe_entry.py").resolve())
+            for imported in ("cross_repo", "outside"):
+                self.assertIsNone(TEST_RELATIONS_MODULE.resolve_imported_source(
+                    workspace, imported, "repo-a/tests/test_entry.py", "repo-a",
+                ))
+
+            self.assertEqual(
+                TEST_RELATIONS_MODULE.python_reachable_symbols(
+                    repo / "safe_entry.py", ["run"], repository_root=repo,
+                ),
+                {"run"},
+            )
+            self.assertEqual(
+                TEST_RELATIONS_MODULE.python_reachable_references(
+                    repo / "safe_entry.py", ["run"], repository_root=repo,
+                )["imports"],
+                ["safe_target.safe_behavior"],
+            )
+            for unsafe in (repo / "cross_repo.py", repo / "outside.py"):
+                self.assertEqual(
+                    TEST_RELATIONS_MODULE.python_reachable_symbols(
+                        unsafe, ["escaped_behavior"], repository_root=repo,
+                    ),
+                    set(),
+                )
+                self.assertEqual(
+                    TEST_RELATIONS_MODULE.python_reachable_references(
+                        unsafe, ["escaped_behavior"], repository_root=repo,
+                    ),
+                    {"imports": [], "identifiers": []},
+                )
 
 
 if __name__ == "__main__":

@@ -124,11 +124,21 @@ def safe_repository_file(
 ) -> tuple[Path | None, str | None]:
     """Resolve a regular, non-sensitive file without crossing repository boundaries."""
     root = Path(os.path.abspath(repository_root))
+    try:
+        resolved_root = root.resolve(strict=True)
+    except OSError:
+        return None, "outside-repository-or-unavailable"
     relative = lexical_relative(path, root)
+    component_root = root
+    if relative is None:
+        # A previously guarded path is returned in real-path form. Accept that
+        # canonical spelling only when it remains below the same repository.
+        relative = lexical_relative(path, resolved_root)
+        component_root = resolved_root
     if relative is None:
         return None, "outside-repository"
 
-    current = root
+    current = component_root
     for part in relative.parts:
         current = current / part
         if current.is_symlink():
@@ -138,7 +148,6 @@ def safe_repository_file(
         return None, "sensitive-path"
 
     try:
-        resolved_root = root.resolve(strict=True)
         resolved = path.resolve(strict=True)
         resolved.relative_to(resolved_root)
     except (OSError, ValueError):
