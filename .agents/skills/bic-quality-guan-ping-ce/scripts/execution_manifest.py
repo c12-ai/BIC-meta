@@ -60,6 +60,27 @@ def prerequisites_for(framework: str | None) -> list[str]:
     return []
 
 
+def manifest_journey_paths(
+    graph: dict[str, Any], field: str,
+) -> list[dict[str, Any]]:
+    nodes = {item.get("id"): item for item in graph.get("nodes", [])}
+    edges = {item.get("id"): item for item in graph.get("edges", [])}
+    records: list[dict[str, Any]] = []
+    for path in graph.get(field, []):
+        node_ids = list(path.get("nodes", []))
+        edge_ids = list(path.get("edges", []))
+        records.append({
+            **path,
+            "node_path": [nodes[node_id] for node_id in node_ids if node_id in nodes],
+            "edge_path": [edges[edge_id] for edge_id in edge_ids if edge_id in edges],
+            "execution_status": "not-run",
+            "interpretation": (
+                "Auditable static journey evidence only; this path does not clear an object-level test gap."
+            ),
+        })
+    return records
+
+
 def build_execution_manifest(
     context: dict[str, Any],
     correspondence: dict[str, Any],
@@ -80,6 +101,7 @@ def build_execution_manifest(
     workspace_fingerprint = hashlib.sha256(
         json.dumps(repositories, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    journey_graph = correspondence.get("user_journey_graph", {})
 
     candidates: dict[tuple[str, str], dict[str, Any]] = {}
     relation_rank = {"possible": 0, "indirect": 1, "direct": 2}
@@ -100,7 +122,9 @@ def build_execution_manifest(
             "related_symbols": record.get("related_symbols", []),
             "assertion_linked_files": record.get("assertion_linked_files", []),
             "assertion_linked_symbols": record.get("assertion_linked_symbols", []),
-            "selected_test_cases": record.get("test_names", []),
+            "selected_test_cases": record.get(
+                "selected_test_cases", record.get("test_names", []),
+            ),
             "command_hint": command,
             "command_argv": command_argv,
             "command_source": source,
@@ -138,7 +162,9 @@ def build_execution_manifest(
                 "test_path": key[1],
                 "relation": relation,
                 "changed_module": module_ref,
-                "scenarios": record.get("test_names", []),
+                "scenarios": record.get(
+                    "selected_test_cases", record.get("test_names", []),
+                ),
                 "browser_framework": browser.get("framework"),
                 "browser_actions": browser.get("actions", []),
                 "browser_observations": browser.get("observations", []),
@@ -164,6 +190,9 @@ def build_execution_manifest(
                 item["test_path"],
             ),
         ),
+        "user_journey_graph_schema_version": journey_graph.get("schema_version"),
+        "completed_user_journey_paths": manifest_journey_paths(journey_graph, "paths"),
+        "partial_user_journey_paths": manifest_journey_paths(journey_graph, "partial_paths"),
         "coverage_layers": {
             "unit_or_service_tests": sorted({
                 str(item["framework"])

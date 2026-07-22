@@ -177,7 +177,9 @@ If the user asks to execute tests, state that this skill only provides read-only
    test-asset details are needed.
    Parse Playwright tests and CDP scenarios without running them. Record browser
    actions, observations, scenario names, skip/todo state, assertions, and
-   whether an active scenario has a machine-checkable assertion. Browser steps
+   whether each active scenario has a target-linked machine check. Preserve the
+   bounded `user_journey_graph` completed and partial paths; its import/literal
+   edges are static evidence and always keep `clears_object_gap: false`. Browser steps
    without such a check remain correspondence only and require strengthening.
 6. Keep relation facts separate from add-test guidance. Report direct and safe
    indirect relations, possible candidates, tests to add, tests to strengthen,
@@ -200,7 +202,7 @@ If the user asks to execute tests, state that this skill only provides read-only
    affected repository heads/bases and change fingerprints, required direct and
    indirect candidates, optional possible candidates, selected cases, command
    source, inert structured argv when safely derivable, environment
-   prerequisites, browser/user-journey evidence, and
+   prerequisites, expanded completed/partial browser journey paths, and
    pre-execution gates. Commands are guidance only. A future executor must
    obtain explicit authority, recompute the fingerprint, and separately
    authorize any reset, seed, migration, cleanup, or other state change.

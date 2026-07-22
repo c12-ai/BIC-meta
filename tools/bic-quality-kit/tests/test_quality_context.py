@@ -2254,6 +2254,471 @@ test('observes network', async ({ page, context }) => {
             self.assertEqual(cdp_facts["browser_framework"], "cdp")
             self.assertTrue(cdp_facts["uses_cdp"])
 
+    def test_browser_machine_checks_are_target_linked_and_case_ids_do_not_collide(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "checks.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('unrelated assertion', async ({ request }) => {
+  await request.post('/experiments')
+  expect(true).toBe(true)
+})
+test('response assertion', async ({ request }) => {
+  const response = await request.post('/experiments')
+  expect(response.status()).toBe(201)
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            unrelated, response = facts["test_cases"]
+            self.assertFalse(unrelated["has_machine_check"])
+            self.assertFalse(unrelated["browser_targets"][0]["machine_check_linked"])
+            self.assertTrue(response["has_machine_check"])
+            self.assertTrue(response["browser_targets"][0]["machine_check_linked"])
+            self.assertNotEqual(
+                unrelated["browser_targets"][0]["id"],
+                response["browser_targets"][0]["id"],
+            )
+            self.assertEqual(response["machine_checks"][0]["kind"], "request-result")
+
+    def test_multiline_browser_assertions_link_request_and_dom_but_not_literal_true(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "multiline.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('multiline checks', async ({ page, request }) => {
+  await page.goto('/experiments')
+  const response = await request.post('/experiments')
+  expect(
+    response.status()
+  ).toBe(201)
+  await expect(
+    page.getByRole('heading')
+  ).toBeVisible()
+  expect(
+    true
+  ).toBe(true)
+})
+""")
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            self.assertEqual(
+                {check["kind"] for check in case["machine_checks"]},
+                {"request-result", "dom-assertion"},
+            )
+            self.assertTrue(all(target["machine_check_linked"] for target in case["browser_targets"]))
+            self.assertIn("response", case["assertion_linked_identifiers"])
+            self.assertIn("page", case["assertion_linked_identifiers"])
+
+    def test_dom_assertion_before_navigation_does_not_link_future_target(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "ordering.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('ordering', async ({ page }) => {
+  await expect(page.getByText('Before')).toBeVisible()
+  await page.goto('/after')
+})
+""")
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            self.assertTrue(case["has_machine_check"])
+            self.assertFalse(case["browser_targets"][0]["machine_check_linked"])
+            self.assertFalse(case["machine_checks"][0]["target_ids"])
+
+    def test_dom_assertion_links_only_latest_preceding_navigation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "latest-navigation.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('latest navigation', async ({ page }) => {
+  await page.goto('/first')
+  await page.goto('/second')
+  await expect(page.getByText('Second')).toBeVisible()
+})
+""")
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            targets = {target["target"]: target for target in case["browser_targets"]}
+            self.assertFalse(targets["/first"]["machine_check_linked"])
+            self.assertTrue(targets["/second"]["machine_check_linked"])
+
+    def test_inline_request_assertion_is_linked_and_commented_or_quoted_targets_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "inline.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('inline request', async ({ request }) => {
+  // request.post('/commented')
+  const example = \"request.post('/quoted')\"
+  expect(await request.post('/inline')).toBeTruthy()
+})
+""")
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            self.assertEqual(
+                [target["target"] for target in case["browser_targets"]],
+                ["/inline"],
+            )
+            self.assertTrue(case["browser_targets"][0]["machine_check_linked"])
+            self.assertEqual(case["machine_checks"][0]["kind"], "request-result")
+
+    def test_expect_requires_matcher_and_supports_soft_poll_chains(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bare = root / "bare.spec.ts"
+            spec = root / "matcher.spec.ts"
+            write(bare, """import { test, expect } from '@playwright/test'
+test('bare expect', async ({ request }) => {
+  const response = await request.post('/bare')
+  expect(response.status())
+})
+""")
+            write(spec, """import { test, expect } from '@playwright/test'
+test('matcher boundaries', async ({ page, request }) => {
+  const unmatched = await request.post('/unmatched')
+  expect(unmatched.status())
+  const checked = await request.post('/checked')
+  expect.soft(checked.status()).not.toBe(500)
+  await page.goto('/page')
+  await expect.poll(() => page.title()).resolves.toContain('BIC')
+})
+""")
+            bare_facts = TEST_ASSETS_MODULE.parse_test_file(bare)
+            self.assertFalse(bare_facts["assertions"])
+            self.assertFalse(bare_facts["has_active_test_with_assertion"])
+            self.assertFalse(bare_facts["test_cases"][0]["has_machine_check"])
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            target_by_path = {target["target"]: target for target in case["browser_targets"]}
+            self.assertFalse(target_by_path["/unmatched"]["machine_check_linked"])
+            self.assertTrue(target_by_path["/checked"]["machine_check_linked"])
+            self.assertTrue(target_by_path["/page"]["machine_check_linked"])
+            expressions = " ".join(check["expression"] for check in case["machine_checks"])
+            self.assertIn("toBe(500)", expressions)
+            self.assertIn("toContain('BIC')", expressions)
+
+    def test_disabled_matching_case_does_not_borrow_active_same_name_check(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            spec = workspace / "portal/tests/e2e/disabled.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test.skip('same name', async ({ request }) => {
+  const response = await request.post('/experiments')
+  expect(response.status()).toBe(201)
+})
+test('same name', async ({ request }) => {
+  const response = await request.post('/other')
+  expect(response.status()).toBe(200)
+})
+""")
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "changed_files": [{"repo": "backend", "path": "backend/app/routes.py", "change_types": ["modified"]}],
+                    "file_mappings": [{"repo": "backend", "path": "backend/app/routes.py", "mapping": {"module_scope": "agent/api"}}],
+                },
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "create_experiment", "kind": "route",
+                    "route_method": "POST", "route_path": "/experiments",
+                }]}],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/disabled.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": TEST_ASSETS_MODULE.parse_test_file(spec),
+                }],
+                [],
+            )
+            relation = correspondence["modules"][0]["possibly_related_tests"][0]
+            self.assertFalse(relation["browser_evidence"]["has_machine_check"])
+            self.assertFalse(relation["has_active_test_with_assertion"])
+
+    def test_same_file_same_route_cases_produce_independent_journey_outcomes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            spec = workspace / "portal/tests/e2e/duplicate.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('duplicate name', async ({ request }) => {
+  await request.post('/experiments')
+  expect(true).toBe(true)
+})
+test('duplicate name', async ({ request }) => {
+  const response = await request.post('/experiments')
+  expect(response.status()).toBe(201)
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            self.assertNotEqual(
+                facts["test_cases"][0]["browser_targets"][0]["id"],
+                facts["test_cases"][1]["browser_targets"][0]["id"],
+            )
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "changed_files": [{
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "change_types": ["modified"],
+                    }],
+                    "file_mappings": [{
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "mapping": {"module_scope": "agent/api"},
+                    }],
+                },
+                [{
+                    "repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                        "name": "create_experiment", "kind": "route",
+                        "route_method": "POST", "route_path": "/experiments",
+                    }],
+                }],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/duplicate.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright", "test_facts": facts,
+                }],
+                [],
+            )
+            graph = correspondence["user_journey_graph"]
+            node_by_id = {node["id"]: node for node in graph["nodes"]}
+            scenario_paths = sorted(
+                (
+                    node_by_id[path["scenario"]]["scenario_index"],
+                    path["machine_check"],
+                )
+                for path in graph["paths"]
+            )
+            self.assertEqual(scenario_paths, [(1, False), (2, True)])
+
+    def test_journey_graph_preserves_completed_and_dead_end_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            write(workspace / "portal/src/api/live.ts", "export const live = () => client.get('/items')\n")
+            write(workspace / "portal/src/pages/ItemsPage.tsx", "import { live } from '../api/live'\nexport const ItemsPage = () => live()\n")
+            write(workspace / "portal/src/router.tsx", "import { ItemsPage } from './pages/ItemsPage'\nexport const routes = <Route path=\"/items\" element={<ItemsPage />} />\n")
+            write(workspace / "portal/src/api/orphan.ts", "export const orphan = () => client.get('/items')\n")
+            write(workspace / "portal/src/components/OrphanPanel.tsx", "import { orphan } from '../api/orphan'\nexport const OrphanPanel = () => orphan()\n")
+            spec = workspace / "portal/tests/e2e/items.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('items page', async ({ page }) => {
+  await page.goto('/items')
+  await expect(page.getByText('Items')).toBeVisible()
+})
+""")
+            graph = TEST_RELATIONS_MODULE.build_user_journey_graph(
+                workspace,
+                {"changed_files": [{"repo": "backend", "path": "backend/app/routes.py"}]},
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "list_items", "kind": "route", "route_method": "GET", "route_path": "/items",
+                }]}],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/items.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": TEST_ASSETS_MODULE.parse_test_file(spec),
+                }],
+            )
+            self.assertTrue(graph["paths"])
+            node_by_id = {node["id"]: node for node in graph["nodes"]}
+            partial_terminals = {
+                node_by_id[path["terminal"]]["path"] for path in graph["partial_paths"]
+            }
+            self.assertIn("portal/src/components/OrphanPanel.tsx", partial_terminals)
+            self.assertFalse(any(
+                node_by_id[path["terminal"]]["path"] == "portal/src/router.tsx"
+                for path in graph["partial_paths"]
+            ))
+
+    def test_journey_graph_emits_anchor_only_partial_without_static_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            graph = TEST_RELATIONS_MODULE.build_user_journey_graph(
+                workspace,
+                {"changed_files": [{"repo": "backend", "path": "backend/app/routes.py"}]},
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "unwired", "kind": "route", "route_method": "POST", "route_path": "/unwired",
+                }]}],
+                [],
+            )
+            self.assertFalse(graph["paths"])
+            self.assertEqual(len(graph["partial_paths"]), 1)
+            self.assertEqual(graph["partial_paths"][0]["reason"], "no-static-bridge")
+            self.assertEqual(graph["partial_paths"][0]["nodes"], [graph["partial_paths"][0]["anchor"]])
+            manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+                {"repositories": [{
+                    "name": "backend", "head": "abc", "base_ref": "main",
+                    "merge_base": "base", "change_count": 1, "change_fingerprint": "fp",
+                }]},
+                {"modules": [], "user_journey_graph": graph},
+                {"tests": []},
+            )
+            self.assertFalse(manifest["completed_user_journey_paths"])
+            self.assertEqual(len(manifest["partial_user_journey_paths"]), 1)
+            self.assertEqual(manifest["partial_user_journey_paths"][0]["reason"], "no-static-bridge")
+
+    def test_route_relation_and_manifest_select_only_matching_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            spec = workspace / "portal/tests/e2e/selected.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('other route', async ({ request }) => {
+  const response = await request.post('/other')
+  expect(response.status()).toBe(200)
+})
+test('experiment route', async ({ request }) => {
+  const response = await request.post('/experiments')
+  expect(response.status()).toBe(201)
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "changed_files": [{"repo": "backend", "path": "backend/app/routes.py", "change_types": ["modified"]}],
+                    "file_mappings": [{"repo": "backend", "path": "backend/app/routes.py", "mapping": {"module_scope": "agent/api"}}],
+                },
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "create_experiment", "kind": "route",
+                    "route_method": "POST", "route_path": "/experiments",
+                }]}],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/selected.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright", "test_facts": facts,
+                }],
+                [],
+            )
+            relation = correspondence["modules"][0]["possibly_related_tests"][0]
+            self.assertEqual(relation["selected_test_cases"], ["experiment route"])
+            manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+                {"repositories": [{
+                    "name": "backend", "head": "abc", "base_ref": "main",
+                    "merge_base": "base", "change_count": 1, "change_fingerprint": "fp",
+                }]},
+                correspondence,
+                {"tests": []},
+            )
+            self.assertEqual(manifest["optional_candidates"][0]["selected_test_cases"], ["experiment route"])
+            self.assertEqual(manifest["affected_user_journey_evidence"][0]["scenarios"], ["experiment route"])
+            self.assertEqual(len(manifest["completed_user_journey_paths"]), 1)
+            completed = manifest["completed_user_journey_paths"][0]
+            self.assertEqual(completed["execution_status"], "not-run")
+            self.assertFalse(completed["clears_object_gap"])
+            self.assertTrue(completed["node_path"])
+            self.assertTrue(completed["edge_path"])
+
+    def test_route_relation_unrelated_expect_is_not_active_assertion_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            spec = workspace / "portal/tests/e2e/unrelated.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('unrelated', async ({ request }) => {
+  await request.post('/experiments')
+  expect(true).toBe(true)
+})
+""")
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "changed_files": [{"repo": "backend", "path": "backend/app/routes.py", "change_types": ["modified"]}],
+                    "file_mappings": [{"repo": "backend", "path": "backend/app/routes.py", "mapping": {"module_scope": "agent/api"}}],
+                },
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "create_experiment", "kind": "route",
+                    "route_method": "POST", "route_path": "/experiments",
+                }]}],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/unrelated.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": TEST_ASSETS_MODULE.parse_test_file(spec),
+                }],
+                [],
+            )
+            relation = correspondence["modules"][0]["possibly_related_tests"][0]
+            self.assertFalse(relation["browser_evidence"]["has_machine_check"])
+            self.assertFalse(relation["has_active_test_with_assertion"])
+
+    def test_page_navigation_does_not_match_non_get_backend_route(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            spec = workspace / "portal/tests/e2e/navigation.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('opens experiments', async ({ page }) => {
+  await page.goto('/experiments')
+  await expect(page).toHaveURL('/experiments')
+})
+""")
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "changed_files": [{"repo": "backend", "path": "backend/app/routes.py", "change_types": ["modified"]}],
+                    "file_mappings": [{"repo": "backend", "path": "backend/app/routes.py", "mapping": {"module_scope": "agent/api"}}],
+                },
+                [{"repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                    "name": "create_experiment", "kind": "route",
+                    "route_method": "POST", "route_path": "/experiments",
+                }]}],
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/navigation.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": TEST_ASSETS_MODULE.parse_test_file(spec),
+                }],
+                [],
+            )
+            module = correspondence["modules"][0]
+            self.assertFalse(module["possibly_related_tests"])
+            self.assertFalse(any(
+                edge["relation"] == "browser-route-target"
+                for edge in correspondence["user_journey_graph"]["edges"]
+            ))
+
+    def test_journey_graph_omits_disconnected_scan_only_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            for index in range(25):
+                write(
+                    workspace / f"shared-types/src/unrelated-{index}.ts",
+                    f"export const unrelated{index} = {index}\n",
+                )
+            graph = TEST_RELATIONS_MODULE.build_user_journey_graph(
+                workspace,
+                {"changed_files": [{"repo": "shared-types", "path": "shared-types/src/index.ts"}]},
+                [{"repo": "shared-types", "path": "shared-types/src/index.ts", "symbols": [{
+                    "name": "Experiment", "kind": "type",
+                }]}],
+                [],
+            )
+            self.assertEqual(len(graph["nodes"]), 1)
+            self.assertEqual(graph["nodes"][0]["layer"], "shared-contract")
+            self.assertLessEqual(len(graph["nodes"]), graph["limits"]["max_output_nodes"])
+
+    def test_javascript_assertion_linkage_propagates_through_assignment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "client.test.ts"
+            write(spec, """import { createExperiment } from './client'
+test('creates', async () => {
+  const result = await createExperiment()
+  expect(result.status).toBe(201)
+})
+""")
+            case = TEST_ASSETS_MODULE.parse_test_file(spec)["test_cases"][0]
+            self.assertIn("result", case["assertion_linked_identifiers"])
+            self.assertIn("createExperiment", case["assertion_linked_identifiers"])
+
+    def test_standalone_cdp_requires_explicit_conditional_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checked = root / "checked.ts"
+            always_throws = root / "always-throws.ts"
+            write(checked, """export async function probe(context, page) {
+  const session = await context.newCDPSession(page)
+  const failures = []
+  session.on('Network.loadingFailed', event => failures.push(event))
+  if (failures.length) throw new Error('network failures')
+}
+""")
+            write(always_throws, """export async function probe(context, page) {
+  const session = await context.newCDPSession(page)
+  try { throw new Error('fixture control flow') } catch (error) {}
+}
+""")
+            checked_case = TEST_ASSETS_MODULE.parse_test_file(checked)["test_cases"][0]
+            throw_case = TEST_ASSETS_MODULE.parse_test_file(always_throws)["test_cases"][0]
+            self.assertTrue(checked_case["has_machine_check"])
+            self.assertEqual(checked_case["machine_checks"][0]["kind"], "cdp-pass-fail")
+            self.assertFalse(throw_case["has_machine_check"])
+
     def test_standalone_cdp_scenario_is_discovered_but_not_claimed_as_asserted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "portal"
@@ -2317,6 +2782,88 @@ test('creates experiment', async ({ request }) => {
             self.assertEqual(possible["browser_evidence"]["framework"], "playwright")
             self.assertTrue(possible["browser_evidence"]["has_machine_check"])
             self.assertTrue(any("Strengthen tests for route create_experiment" in item for item in module["strengthen_tests"]))
+
+    def test_bounded_user_journey_graph_traces_route_and_shared_contract_to_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            write(
+                workspace / "shared-types/package.json",
+                json.dumps({"name": "@bic/shared-types", "types": "src/index.ts"}),
+            )
+            write(workspace / "shared-types/src/index.ts", "export interface Experiment { id: string }\n")
+            write(workspace / "portal/src/api/experiments.ts", """import type { Experiment } from '@bic/shared-types'
+export async function createExperiment(): Promise<Experiment> {
+  return client.post('/experiments')
+}
+""")
+            write(workspace / "portal/src/hooks/useExperiments.ts", "import { createExperiment } from '../api/experiments'\nexport const useExperiments = () => createExperiment\n")
+            write(workspace / "portal/src/components/ExperimentForm.tsx", "import { useExperiments } from '../hooks/useExperiments'\nexport const ExperimentForm = () => useExperiments()\n")
+            write(workspace / "portal/src/pages/ExperimentsPage.tsx", "import { ExperimentForm } from '../components/ExperimentForm'\nexport const ExperimentsPage = () => <ExperimentForm />\n")
+            write(workspace / "portal/src/router.tsx", "import { ExperimentsPage } from './pages/ExperimentsPage'\nexport const routes = <Route path=\"/experiments\" element={<ExperimentsPage />} />\n")
+            spec = workspace / "portal/tests/e2e/experiments.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('creates experiment', async ({ page }) => {
+  await page.goto('/experiments')
+  await expect(page.getByRole('heading')).toBeVisible()
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            scope = {
+                "changed_files": [
+                    {"repo": "backend", "path": "backend/app/routes.py", "change_types": ["modified"]},
+                    {"repo": "shared-types", "path": "shared-types/src/index.ts", "change_types": ["modified"]},
+                ],
+                "file_mappings": [
+                    {"repo": "backend", "path": "backend/app/routes.py", "mapping": {"module_scope": "agent/api"}},
+                    {"repo": "shared-types", "path": "shared-types/src/index.ts", "mapping": {"module_scope": "shared/contracts"}},
+                ],
+            }
+            symbols = [
+                {
+                    "repo": "backend", "path": "backend/app/routes.py", "symbols": [{
+                        "name": "create_experiment", "kind": "route",
+                        "route_method": "POST", "route_path": "/experiments",
+                    }],
+                },
+                {
+                    "repo": "shared-types", "path": "shared-types/src/index.ts", "symbols": [{
+                        "name": "Experiment", "kind": "type",
+                    }],
+                },
+            ]
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                scope,
+                symbols,
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/experiments.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright", "test_facts": facts,
+                }],
+                [],
+            )
+            graph = correspondence["user_journey_graph"]
+            self.assertEqual(graph["schema_version"], 1)
+            self.assertFalse(graph["partial_paths"])
+            self.assertGreaterEqual(len(graph["paths"]), 2)
+            relations = {edge["relation"] for edge in graph["edges"]}
+            self.assertIn("route-client-literal", relations)
+            self.assertIn("shared-contract-package-import", relations)
+            self.assertIn("reverse-import", relations)
+            self.assertIn("frontend-route-browser-target", relations)
+            self.assertTrue(all(path["machine_check"] for path in graph["paths"]))
+            self.assertTrue(all(path["clears_object_gap"] is False for path in graph["paths"]))
+            route_path = max(
+                (
+                    path for path in graph["paths"]
+                    if graph["nodes"] and "create_experiment" in path["anchor"]
+                ),
+                key=lambda path: len(path["nodes"]),
+            )
+            route_layers = {
+                node["layer"] for node in graph["nodes"] if node["id"] in route_path["nodes"]
+            }
+            self.assertTrue({"backend-route", "api-client", "hook", "component", "page", "browser-scenario"} <= route_layers)
 
     def test_execution_manifest_is_not_run_and_fingerprint_bound(self) -> None:
         context = {
@@ -2392,6 +2939,198 @@ test('creates experiment', async ({ request }) => {
                 os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
                 self.assertEqual(TOOL_RUNTIME_MODULE.ensure_ast_outline(), installed)
                 install.assert_not_called()
+
+    def test_runtime_version_change_uses_a_new_versioned_environment(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "2.0.0", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root / "ast-outline/1.8.2/legacy-marker", "preserved\n")
+            installed = root / "ast-outline/2.0.0/venv/bin/ast-outline"
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE, "load_runtime_manifest", return_value=config),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "tool_cache_root", return_value=root),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "valid_managed_runtime", return_value=None),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "install_managed_runtime", return_value=installed) as install,
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
+                self.assertEqual(TOOL_RUNTIME_MODULE.ensure_ast_outline(), installed)
+            self.assertEqual(install.call_args.args[0], root / "ast-outline/2.0.0")
+            self.assertTrue((root / "ast-outline/1.8.2/legacy-marker").is_file())
+
+    def test_runtime_corrupt_marker_or_executable_is_not_reused(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "1.8.2", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            environment = Path(directory) / "ast-outline/1.8.2"
+            executable = environment / "venv/bin/ast-outline"
+            write(executable, "broken\n")
+            write(environment / "install.json", "{not-json\n")
+            self.assertIsNone(TOOL_RUNTIME_MODULE.valid_managed_runtime(environment, config))
+
+            write(environment / "install.json", json.dumps(config, sort_keys=True))
+            with mock.patch.object(
+                TOOL_RUNTIME_MODULE,
+                "probe_ast_outline",
+                side_effect=TOOL_RUNTIME_MODULE.AnalyzerRuntimeError("corrupt executable"),
+            ):
+                self.assertIsNone(TOOL_RUNTIME_MODULE.valid_managed_runtime(environment, config))
+
+    def test_runtime_true_concurrent_first_use_installs_once(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "1.8.2", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = root / "ast-outline/1.8.2"
+            installed = environment / "venv/bin/ast-outline"
+            ready = environment / "ready"
+            installs: list[int] = []
+            barrier = threading.Barrier(2)
+            results: list[Path] = []
+            failures: list[BaseException] = []
+
+            def valid(candidate: Path, _config: dict) -> Path | None:
+                return installed if candidate == environment and ready.is_file() else None
+
+            def install(candidate: Path, _config: dict) -> Path:
+                installs.append(threading.get_ident())
+                time.sleep(0.15)
+                write(installed, "fixture\n")
+                write(ready, "ready\n")
+                return installed
+
+            def worker() -> None:
+                try:
+                    barrier.wait()
+                    results.append(TOOL_RUNTIME_MODULE.ensure_ast_outline())
+                except BaseException as exc:  # pragma: no cover - surfaced below
+                    failures.append(exc)
+
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE, "load_runtime_manifest", return_value=config),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "tool_cache_root", return_value=root),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "valid_managed_runtime", side_effect=valid),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "install_managed_runtime", side_effect=install),
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
+                threads = [threading.Thread(target=worker) for _ in range(2)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=5)
+            self.assertFalse(failures)
+            self.assertEqual(results, [installed, installed])
+            self.assertEqual(len(installs), 1)
+
+    def test_runtime_interrupted_install_removes_partial_environment(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "1.8.2", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            environment = Path(directory) / "ast-outline/1.8.2"
+            created = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE.shutil, "which", return_value="/fixture/uv"),
+                mock.patch.object(
+                    TOOL_RUNTIME_MODULE,
+                    "run_checked",
+                    side_effect=[created, TOOL_RUNTIME_MODULE.AnalyzerRuntimeError("interrupted")],
+                ),
+            ):
+                with self.assertRaises(TOOL_RUNTIME_MODULE.AnalyzerRuntimeError):
+                    TOOL_RUNTIME_MODULE.install_managed_runtime(environment, config)
+            self.assertFalse(environment.exists())
+
+    def test_runtime_probe_rejects_invalid_json_and_incompatible_schema(self) -> None:
+        executable = Path("/fixture/ast-outline")
+        invalid_json = subprocess.CompletedProcess([], 0, stdout="not-json", stderr="")
+        incompatible = subprocess.CompletedProcess(
+            [], 0,
+            stdout=json.dumps({
+                "tool": "ast-outline", "command": "outline", "schema_version": 99,
+                "files": [{"declarations": []}],
+            }),
+            stderr="",
+        )
+        with mock.patch.object(Path, "is_file", return_value=True):
+            for result in (invalid_json, incompatible):
+                with self.subTest(stdout=result.stdout):
+                    with mock.patch.object(TOOL_RUNTIME_MODULE, "run_checked", return_value=result):
+                        with self.assertRaises(TOOL_RUNTIME_MODULE.AnalyzerRuntimeError):
+                            TOOL_RUNTIME_MODULE.probe_ast_outline(executable, 1)
+
+    def test_runtime_bootstrap_leaves_repository_state_unchanged(self) -> None:
+        config = {
+            "package": "ast-outline", "version": "1.8.2", "python": "3.12",
+            "schema_version": 1,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            repo = base / "repo"
+            cache = base / "cache"
+            init_repo(repo)
+            write(repo / "tracked.txt", "unchanged\n")
+            git(repo, "add", ".")
+            git(repo, "commit", "-m", "base")
+            before = git(repo, "status", "--porcelain=v1", "--untracked-files=all")
+            installed = cache / "ast-outline/1.8.2/venv/bin/ast-outline"
+
+            def install(environment: Path, _config: dict) -> Path:
+                write(installed, "fixture\n")
+                write(environment / "ready", "ready\n")
+                return installed
+
+            def valid(environment: Path, _config: dict) -> Path | None:
+                return installed if (environment / "ready").is_file() else None
+
+            with (
+                mock.patch.object(TOOL_RUNTIME_MODULE, "load_runtime_manifest", return_value=config),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "tool_cache_root", return_value=cache),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "valid_managed_runtime", side_effect=valid),
+                mock.patch.object(TOOL_RUNTIME_MODULE, "install_managed_runtime", side_effect=install),
+                mock.patch.dict(os.environ, {}, clear=False),
+            ):
+                os.environ.pop("BIC_QUALITY_AST_OUTLINE", None)
+                self.assertEqual(TOOL_RUNTIME_MODULE.ensure_ast_outline(), installed)
+            after = git(repo, "status", "--porcelain=v1", "--untracked-files=all")
+            self.assertEqual(after, before)
+
+    def test_python_javascript_jsx_typescript_tsx_diff_hunks_map_to_declarations(self) -> None:
+        fixtures = {
+            "feature.py": ("def calculate():\n    return 2\n", 2, "calculate", "function"),
+            "feature.js": ("export function loadData() {\n  return 2\n}\n", 2, "loadData", "function"),
+            "feature.jsx": ("export function UserCard() {\n  return <div>2</div>\n}\n", 2, "UserCard", "component"),
+            "feature.ts": ("export function useResult(): number {\n  return 2\n}\n", 2, "useResult", "hook"),
+            "feature.tsx": ("export function DashboardPage() {\n  return <main>2</main>\n}\n", 2, "DashboardPage", "component"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            changed = []
+            for filename, (source, line, _name, _kind) in fixtures.items():
+                write(root / filename, source)
+                changed.append({
+                    "repo": "BIC-meta", "repo_relative_path": ".", "path": filename,
+                    "change_types": ["untracked"],
+                    "diff_hunks": [{
+                        "old_start": 0, "old_end": -1, "old_count": 0,
+                        "new_start": line, "new_end": line, "new_count": 1,
+                    }],
+                })
+            results = {item["path"]: item for item in extract_changed_symbols(root, changed)}
+            for filename, (_source, _line, name, kind) in fixtures.items():
+                with self.subTest(filename=filename):
+                    self.assertEqual(results[filename]["symbol_scope"], "diff-hunk-declarations")
+                    self.assertEqual(results[filename]["symbols"][0]["name"], name)
+                    self.assertEqual(results[filename]["symbols"][0]["kind"], kind)
 
 
 class ContentSafetyTest(unittest.TestCase):

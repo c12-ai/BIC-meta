@@ -43,6 +43,12 @@ BROWSER_TARGET_RE = re.compile(
     r"\(\s*(['\"])([^'\"]+)\3",
     re.IGNORECASE,
 )
+CDP_FAILURE_RE = re.compile(
+    r"(?:\bif\s*\([^)]*\)\s*\{?[^{}]{0,500}?throw\s+new\s+Error\s*\(|"
+    r"process\.exitCode\s*=\s*[1-9]\d*|"
+    r"process\.exit\s*\(\s*[1-9]\d*\s*\)|assert\.fail\s*\()",
+    re.IGNORECASE | re.DOTALL,
+)
 JS_IMPORT_RE = re.compile(
     r"(?:import\s+(?:type\s+)?(?:[^;]*?\s+from\s+)?|require\s*\()"
     r"['\"]([^'\"]+)['\"]"
@@ -178,6 +184,288 @@ def js_test_body_range(content: str, start: int) -> tuple[int, int]:
 def js_test_body(content: str, start: int) -> str:
     body_start, body_end = js_test_body_range(content, start)
     return content[body_start:body_end]
+
+
+def mask_javascript_noncode(content: str) -> str:
+    """Mask strings/comments while preserving offsets and line boundaries."""
+    return JS_NONCODE_RE.sub(
+        lambda match: "".join("\n" if char == "\n" else " " for char in match.group(0)),
+        content,
+    )
+
+
+def mask_javascript_comments(content: str) -> str:
+    """Mask JS comments while preserving strings, offsets, and newlines."""
+    chars = list(content)
+    index = 0
+    quote: str | None = None
+    while index < len(chars):
+        char = chars[index]
+        next_char = chars[index + 1] if index + 1 < len(chars) else ""
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            while index < len(chars) and chars[index] != "\n":
+                chars[index] = " "
+                index += 1
+            continue
+        if char == "/" and next_char == "*":
+            chars[index] = chars[index + 1] = " "
+            index += 2
+            while index < len(chars):
+                if index + 1 < len(chars) and chars[index] == "*" and chars[index + 1] == "/":
+                    chars[index] = chars[index + 1] = " "
+                    index += 2
+                    break
+                if chars[index] != "\n":
+                    chars[index] = " "
+                index += 1
+            continue
+        index += 1
+    return "".join(chars)
+
+
+def javascript_position_is_code(content: str, position: int) -> bool:
+    """Return whether an offset is outside a quoted JavaScript string."""
+    quote: str | None = None
+    index = 0
+    while index < min(position, len(content)):
+        char = content[index]
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in {"'", '"', "`"}:
+            quote = char
+        index += 1
+    return quote is None
+
+
+def javascript_assertion_snippets(body: str, max_length: int = 2000) -> list[str]:
+    """Extract bounded, balanced assertion calls without requiring a JS runtime."""
+    masked = mask_javascript_noncode(body)
+    starts = list(re.finditer(
+        r"\b(?:expect(?:\.(?:poll|soft))?|assert(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?)\s*\(",
+        masked,
+    ))
+    snippets: list[str] = []
+    for match in starts:
+        open_paren = masked.find("(", match.start(), match.end())
+        if open_paren < 0:
+            continue
+        depth = 0
+        end = min(len(masked), open_paren + max_length)
+        close_paren = None
+        for index in range(open_paren, end):
+            char = masked[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    close_paren = index
+                    break
+        if close_paren is None:
+            continue
+        assertion_name = masked[match.start():open_paren].strip()
+        if assertion_name.startswith("expect"):
+            suffix = masked[close_paren + 1:min(len(masked), close_paren + 501)]
+            matcher = re.match(
+                r"\s*(?:\.\s*(?:not|resolves|rejects)\s*)*"
+                r"\.\s*to[A-Z][A-Za-z0-9_$]*\s*\(",
+                suffix,
+            )
+            if matcher is None:
+                continue
+            matcher_open = close_paren + 1 + suffix.find("(", matcher.start(), matcher.end())
+            matcher_depth = 0
+            matcher_end = None
+            for index in range(matcher_open, min(len(masked), matcher_open + max_length)):
+                if masked[index] == "(":
+                    matcher_depth += 1
+                elif masked[index] == ")":
+                    matcher_depth -= 1
+                    if matcher_depth == 0:
+                        matcher_end = index
+                        break
+            if matcher_end is None:
+                continue
+            snippets.append(body[match.start():matcher_end + 1])
+        else:
+            snippets.append(body[match.start():close_paren + 1])
+    return snippets
+
+
+def javascript_browser_targets(body: str, case_key: str) -> list[dict[str, Any]]:
+    """Return literal browser targets plus a simple result binding when present."""
+    targets: list[dict[str, Any]] = []
+    searchable = mask_javascript_comments(body)
+    matches = [
+        match for match in BROWSER_TARGET_RE.finditer(searchable)
+        if javascript_position_is_code(searchable, match.start())
+    ]
+    for index, match in enumerate(matches):
+        statement_start = max(body.rfind("\n", 0, match.start()), body.rfind(";", 0, match.start())) + 1
+        prefix = body[statement_start:match.start()]
+        binding_match = re.search(
+            r"(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:await\s*)?$",
+            prefix,
+        )
+        targets.append({
+            "id": f"target-{case_key}-{index + 1}",
+            "receiver": match.group(1).lower(),
+            "method": match.group(2).upper(),
+            "target": match.group(4),
+            "result_binding": binding_match.group(1) if binding_match else None,
+            "machine_check_linked": False,
+            "source_start": match.start(),
+            "source_end": match.end(),
+        })
+    return targets
+
+
+def javascript_machine_checks(
+    body: str,
+    targets: list[dict[str, Any]],
+    browser_actions: list[str],
+    uses_cdp: bool,
+) -> list[dict[str, Any]]:
+    """Find machine checks statically linked to a browser target or action.
+
+    Generic assertions are deliberately excluded. A check must consume a
+    request/action result, inspect the page/locator, or enforce a CDP failure
+    condition. This keeps ``expect(true)`` from upgrading an unrelated journey.
+    """
+    checks: list[dict[str, Any]] = []
+    cdp_bindings = {
+        match.group(1)
+        for match in re.finditer(
+            r"(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*"
+            r"(?:await\s*)?[^;\n]*?(?:newCDPSession|connectOverCDP)\s*\(",
+            body,
+        )
+    }
+
+    assertion_search_start = 0
+    for assertion in javascript_assertion_snippets(body):
+        assertion_start = body.find(assertion, assertion_search_start)
+        if assertion_start < 0:
+            assertion_start = body.find(assertion)
+        assertion_start = max(assertion_start, 0)
+        assertion_end = assertion_start + len(assertion)
+        assertion_search_start = assertion_end
+        eligible_targets = [
+            target for target in targets
+            if int(target.get("source_end", 0)) <= assertion_start
+            or (
+                int(target.get("source_start", -1)) >= assertion_start
+                and int(target.get("source_end", 0)) <= assertion_end
+            )
+        ]
+        line = mask_javascript_noncode(assertion).strip()
+        target_ids = {
+            str(target["id"])
+            for target in eligible_targets
+            if target.get("result_binding")
+            and re.search(rf"\b{re.escape(str(target['result_binding']))}\b", line)
+        }
+        direct_target = next(
+            (
+                match for match in BROWSER_TARGET_RE.finditer(mask_javascript_comments(assertion))
+                if javascript_position_is_code(assertion, match.start())
+            ),
+            None,
+        )
+        if direct_target:
+            for target in eligible_targets:
+                if (
+                    target["receiver"] == direct_target.group(1).lower()
+                    and target["method"] == direct_target.group(2).upper()
+                    and target["target"] == direct_target.group(4)
+                ):
+                    target_ids.add(str(target["id"]))
+        dom_check = bool(re.search(
+            r"\b(?:page|locator)\b|\.getBy(?:Role|Text|Label|TestId|Placeholder|Title)\s*\(",
+            line,
+        ))
+        if dom_check:
+            # A page assertion observes the latest navigation state, not every
+            # URL visited earlier in the case. Inline targets were already
+            # linked above through ``direct_target``.
+            preceding_page_targets = [
+                target for target in eligible_targets
+                if target.get("receiver") == "page"
+                and int(target.get("source_end", 0)) <= assertion_start
+            ]
+            if preceding_page_targets:
+                latest_page_target = max(
+                    preceding_page_targets,
+                    key=lambda target: int(target.get("source_end", 0)),
+                )
+                target_ids.add(str(latest_page_target["id"]))
+        cdp_action_check = bool(
+            uses_cdp
+            and any(re.search(rf"\b{re.escape(binding)}\b", line) for binding in cdp_bindings)
+        )
+        if not target_ids and not dom_check and not cdp_action_check:
+            continue
+        kind = (
+            "request-result" if target_ids and any(
+                target["id"] in target_ids and target.get("receiver") == "request"
+                for target in eligible_targets
+            )
+            else "dom-assertion" if dom_check
+            else "cdp-action-result"
+        )
+        checks.append({
+            "kind": kind,
+            "expression": " ".join(assertion.split()),
+            "target_ids": sorted(target_ids),
+            "actions": sorted(set(browser_actions)) if dom_check or cdp_action_check else [],
+            "source_start": assertion_start,
+            "source_end": assertion_end,
+        })
+
+    if uses_cdp:
+        for match in CDP_FAILURE_RE.finditer(mask_javascript_noncode(body)):
+            expression = " ".join(match.group(0).split())
+            checks.append({
+                "kind": "cdp-pass-fail",
+                "expression": expression,
+                "target_ids": [
+                    str(target["id"]) for target in targets
+                    if int(target.get("source_end", 0)) <= match.start()
+                ],
+                "actions": sorted(set(browser_actions)),
+                "source_start": match.start(),
+                "source_end": match.end(),
+            })
+
+    unique: dict[tuple[str, str, tuple[str, ...], tuple[str, ...], int], dict[str, Any]] = {}
+    for check in checks:
+        key = (
+            str(check["kind"]), str(check["expression"]),
+            tuple(check["target_ids"]), tuple(check["actions"]), int(check["source_start"]),
+        )
+        unique[key] = check
+    linked_target_ids = {
+        target_id for check in unique.values() for target_id in check["target_ids"]
+    }
+    for target in targets:
+        target["machine_check_linked"] = target["id"] in linked_target_ids
+    return list(unique.values())
 
 
 def safe_static_path(
@@ -653,48 +941,96 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
         if match.group(1) == "describe" and match.group(2) in {"skip", "todo", "fixme"}
     ]
     test_cases: list[dict[str, Any]] = []
-    for match in test_matches:
-        if match.group(1) not in {"test", "it"}:
-            continue
-        body = js_test_body(content, match.end())
+
+    def browser_case(
+        name: str,
+        body: str,
+        *,
+        case_index: int,
+        disabled: bool,
+    ) -> dict[str, Any]:
         executable_body = JS_NONCODE_RE.sub(" ", body)
         case_identifiers = set(JS_IDENTIFIER_RE.findall(executable_body))
         for alias, original in import_aliases.items():
             if alias in case_identifiers:
                 case_identifiers.add(original)
+        assertion_snippets = javascript_assertion_snippets(body)
         case_assertions = [
-            f"{item.group(1)} in {match.group(3)}"
-            for item in re.finditer(
-                r"\b(expect|assert(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?)\s*\(",
-                executable_body,
-            )
+            f"{snippet.split('(', 1)[0].strip()} in {name}"
+            for snippet in assertion_snippets
         ]
         browser_actions = [item.group(1) for item in PLAYWRIGHT_ACTION_RE.finditer(executable_body)]
         browser_observations = [
             item.group(1) for item in PLAYWRIGHT_OBSERVATION_RE.finditer(executable_body)
         ]
         uses_cdp = bool(CDP_RE.search(executable_body))
-        browser_targets = [
-            {
-                "receiver": item.group(1).lower(),
-                "method": item.group(2).upper(),
-                "target": item.group(4),
-            }
-            for item in BROWSER_TARGET_RE.finditer(body)
-        ]
-        test_cases.append({
-            "name": match.group(3),
+        case_key = re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-").lower() or "scenario"
+        case_key = f"{case_index}-{case_key}"
+        browser_targets = javascript_browser_targets(body, case_key)
+        machine_checks = javascript_machine_checks(
+            body, browser_targets, browser_actions, uses_cdp,
+        )
+        assertion_linked_identifiers: set[str] = set()
+        for assertion in assertion_snippets:
+            assertion_linked_identifiers.update(
+                JS_IDENTIFIER_RE.findall(mask_javascript_noncode(assertion))
+            )
+        assignments: list[tuple[str, str]] = []
+        for raw_line in body.splitlines():
+            assignment = re.search(
+                r"\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$",
+                JS_NONCODE_RE.sub(" ", raw_line),
+            )
+            if assignment:
+                assignments.append((assignment.group(1), assignment.group(2)))
+        changed = True
+        while changed:
+            changed = False
+            for binding, expression in assignments:
+                if binding not in assertion_linked_identifiers:
+                    continue
+                before = len(assertion_linked_identifiers)
+                assertion_linked_identifiers.update(JS_IDENTIFIER_RE.findall(expression))
+                changed = changed or len(assertion_linked_identifiers) != before
+        for alias, original in import_aliases.items():
+            if alias in assertion_linked_identifiers:
+                assertion_linked_identifiers.add(original)
+        if any(check["kind"] == "cdp-pass-fail" for check in machine_checks):
+            case_assertions.append(f"explicit CDP pass/fail condition in {name}")
+        return {
+            "name": name,
             "assertions": case_assertions,
-            "disabled": match.group(2) in {"skip", "todo", "fixme"} or any(
-                start <= match.start() <= end for start, end in disabled_suite_ranges
-            ),
+            "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
+            "assertion_linked_identifiers": sorted(assertion_linked_identifiers),
             "browser_actions": sorted(browser_actions),
             "browser_observations": sorted(browser_observations),
             "uses_cdp": uses_cdp,
             "browser_targets": browser_targets,
-            "has_machine_check": bool(case_assertions),
-        })
+            "machine_checks": machine_checks,
+            "has_machine_check": bool(machine_checks),
+        }
+
+    for case_index, match in enumerate(test_matches, start=1):
+        if match.group(1) not in {"test", "it"}:
+            continue
+        body = js_test_body(content, match.end())
+        test_cases.append(browser_case(
+            match.group(3),
+            body,
+            case_index=case_index,
+            disabled=match.group(2) in {"skip", "todo", "fixme"} or any(
+                start <= match.start() <= end for start, end in disabled_suite_ranges
+            ),
+        ))
+
+    # Standalone CDP diagnostics often export a probe function instead of using
+    # a test runner. Preserve them as one explicit scenario and require a real
+    # failure condition before claiming a machine check.
+    standalone_browser_scenario = not test_cases and bool(CDP_RE.search(executable_code))
+    if standalone_browser_scenario:
+        test_cases.append(browser_case("standalone-cdp", content, case_index=1, disabled=False))
+        scenario_names = ["standalone-cdp"]
     assertions = [item for case in test_cases for item in case["assertions"]]
     disabled = {case["name"] for case in test_cases if case["disabled"]}
     imports = sorted(set(JS_IMPORT_RE.findall(content)))
@@ -712,6 +1048,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
         "disabled_tests": sorted(disabled),
         "test_cases": test_cases,
         "browser_framework": browser_framework,
+        "standalone_browser_scenario": standalone_browser_scenario,
         "uses_cdp": uses_cdp,
         "browser_actions": sorted({
             action for case in test_cases for action in case.get("browser_actions", [])
@@ -725,6 +1062,11 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             {**target, "case_name": case["name"]}
             for case in test_cases
             for target in case.get("browser_targets", [])
+        ],
+        "browser_machine_checks": [
+            {**check, "case_name": case["name"]}
+            for case in test_cases
+            for check in case.get("machine_checks", [])
         ],
         "browser_scenario_has_machine_check": any(
             not case["disabled"] and case.get("has_machine_check")
@@ -747,6 +1089,8 @@ def parse_test_file(path: Path) -> dict[str, Any]:
 
 def classify_test_candidate(path: Path, facts: dict[str, Any]) -> str:
     """Require parsed test cases before a test-like filename becomes evidence."""
+    if facts.get("standalone_browser_scenario"):
+        return "browser-scenario"
     if facts.get("test_cases"):
         if path.suffix != ".py":
             return "test-file"

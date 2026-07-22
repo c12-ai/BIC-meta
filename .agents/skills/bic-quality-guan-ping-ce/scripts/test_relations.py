@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import ast
+import json
+import os
 import posixpath
 import re
 from urllib.parse import urlsplit
@@ -23,6 +25,15 @@ TOKEN_STOPWORDS = {
 NON_SOURCE_TEST_MODULES = {"portal/tests", "agent/tests", "meta/docs", "meta/test-config"}
 DOCUMENTATION_SUFFIXES = {".adoc", ".md", ".mdx", ".rst"}
 DOCUMENTATION_DIRECTORIES = {"docs", "references"}
+JOURNEY_SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
+JOURNEY_SCAN_EXCLUDES = {
+    ".git", ".agents", ".claude", ".trellis", ".venv", "node_modules",
+    "__pycache__", ".pytest_cache", ".pnpm-store", "artifacts", "dist", "build",
+}
+MAX_JOURNEY_EDGES = 2000
+MAX_JOURNEY_PATHS = 40
+MAX_JOURNEY_PATH_DEPTH = 7
+MAX_JOURNEY_OUTPUT_NODES = MAX_JOURNEY_EDGES * 2 + MAX_JOURNEY_PATHS
 
 
 def guidance_applicability(path: str, module_scope: str) -> tuple[bool, str | None]:
@@ -424,15 +435,25 @@ def normalized_target_path(value: str) -> str:
     return path.rstrip("/") or "/"
 
 
+def browser_target_http_method(target: dict[str, Any]) -> str:
+    """Normalize a browser operation to the HTTP method it can evidence."""
+    method = str(target.get("method") or "").upper()
+    if target.get("receiver") == "page" and method == "GOTO":
+        return "GET"
+    return method
+
+
 def relation_record(
     asset: dict[str, Any], reasons: list[str], related_files: Iterable[str],
     related_symbols: Iterable[str], relation_proves_object_path: bool = False,
     related_case_names: Iterable[str] | None = None,
     assertion_linked_symbols: Iterable[str] | None = None,
     assertion_linked_files: Iterable[str] | None = None,
+    related_browser_target_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     facts = asset.get("test_facts", {})
     test_names = facts.get("test_names", [])
+    scenario_names = facts.get("scenario_names", test_names)
     disabled = facts.get("disabled_tests", [])
     related_identifiers = {
         name.rsplit(".", 1)[-1]
@@ -441,6 +462,11 @@ def relation_record(
     }
     test_cases = facts.get("test_cases", [])
     case_names = None if related_case_names is None else set(related_case_names)
+    selected_test_cases = (
+        list(test_names)
+        if case_names is None
+        else [name for name in scenario_names if name in case_names]
+    )
     if case_names is not None:
         has_active_assertion = any(
             case.get("name") in case_names
@@ -486,6 +512,20 @@ def relation_record(
             case for case in test_cases
             if case_names is None or case.get("name") in case_names
         ]
+        target_ids = None if related_browser_target_ids is None else set(related_browser_target_ids)
+        selected_targets = [
+            target
+            for case in browser_cases
+            for target in case.get("browser_targets", [])
+            if target_ids is None or target.get("id") in target_ids
+        ]
+        selected_checks = [
+            check
+            for case in browser_cases
+            if not case.get("disabled")
+            for check in case.get("machine_checks", [])
+            if target_ids is None or bool(set(check.get("target_ids", [])) & target_ids)
+        ]
         browser_evidence = {
             "framework": facts.get("browser_framework"),
             "actions": sorted({
@@ -496,17 +536,16 @@ def relation_record(
                 for case in browser_cases
                 for observation in case.get("browser_observations", [])
             }),
-            "targets": [
-                target
-                for case in browser_cases
-                for target in case.get("browser_targets", [])
-            ],
+            "targets": selected_targets,
+            "machine_checks": selected_checks,
             "uses_cdp": bool(facts.get("uses_cdp")),
-            "has_machine_check": any(
-                not case.get("disabled") and bool(case.get("has_machine_check"))
-                for case in browser_cases
-            ),
+            "has_machine_check": bool(selected_checks),
         }
+        if target_ids is not None:
+            has_active_assertion = bool(browser_evidence["has_machine_check"])
+            if not has_active_assertion:
+                linked_symbols.clear()
+                linked_files.clear()
     return {
         "repo": asset["repo"], "path": asset["path"], "framework": asset.get("framework"),
         "relation_reasons": sorted(set(reasons)),
@@ -516,10 +555,483 @@ def relation_record(
         "assertion_linked_symbols": sorted(linked_symbols),
         "imports": facts.get("imports", []),
         "test_names": test_names,
+        "scenario_names": scenario_names,
+        "selected_test_cases": selected_test_cases,
         "assertions": facts.get("assertions", []),
         "disabled_tests": disabled,
         "has_active_test_with_assertion": has_active_assertion,
         "browser_evidence": browser_evidence,
+    }
+
+
+def journey_source_layer(path: str, symbols: Iterable[dict[str, Any]] = ()) -> str:
+    """Classify only stable frontend layers; keep other files as traversal nodes."""
+    symbol_kinds = {str(item.get("kind") or "") for item in symbols}
+    lowered = f"/{path.lower()}"
+    stem = Path(path).stem.lower()
+    if "api-client" in symbol_kinds or any(token in lowered for token in ("/api/", "/client/", "/clients/")):
+        return "api-client"
+    if "hook" in symbol_kinds or "/hooks/" in lowered or re.match(r"use[A-Z]", Path(path).stem):
+        return "hook"
+    if "store-or-action" in symbol_kinds or any(token in lowered for token in ("/store/", "/stores/")):
+        return "store"
+    if "/pages/" in lowered or "/routes/" in lowered or stem.endswith("page"):
+        return "page"
+    if "component" in symbol_kinds or "/components/" in lowered:
+        return "component"
+    return "frontend-module"
+
+
+def repository_roots_for_journeys(
+    workspace_root: Path,
+    scope: dict[str, Any],
+    changed_symbols: list[dict[str, Any]],
+    discovered_assets: list[dict[str, Any]],
+) -> dict[str, Path]:
+    names = {
+        str(item.get("repo"))
+        for item in [*scope.get("changed_files", []), *changed_symbols, *discovered_assets]
+        if item.get("repo")
+    }
+    roots: dict[str, Path] = {}
+    for name in sorted(names):
+        root = workspace_root if name == "BIC-meta" else workspace_root / name
+        if root.is_dir():
+            roots[name] = root.resolve()
+    return roots
+
+
+def package_aliases(repo_roots: dict[str, Path]) -> dict[str, tuple[str, Path, dict[str, Any]]]:
+    aliases: dict[str, tuple[str, Path, dict[str, Any]]] = {}
+    for repo, root in repo_roots.items():
+        package_file, _ = safe_repository_file(root / "package.json", root)
+        if package_file is None:
+            continue
+        try:
+            payload = json.loads(package_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        name = payload.get("name")
+        if isinstance(name, str) and name.strip():
+            aliases[name.strip()] = (repo, root, payload)
+    return aliases
+
+
+def resolve_package_source(
+    import_value: str,
+    aliases: dict[str, tuple[str, Path, dict[str, Any]]],
+) -> tuple[str, Path] | None:
+    matches = [name for name in aliases if import_value == name or import_value.startswith(f"{name}/")]
+    if not matches:
+        return None
+    package_name = max(matches, key=len)
+    repo, root, package = aliases[package_name]
+    suffix = import_value[len(package_name):].lstrip("/")
+    candidates: list[Path] = []
+    if suffix:
+        candidates.extend([root / suffix, root / "src" / suffix])
+    for field in ("types", "module", "main"):
+        value = package.get(field)
+        if isinstance(value, str):
+            candidates.append(root / value)
+    candidates.extend([root / "src/index", root / "index"])
+    for candidate in candidates:
+        for path in (
+            candidate,
+            *(candidate.with_suffix(extension) for extension in JOURNEY_SOURCE_SUFFIXES),
+            *(candidate / f"index{extension}" for extension in JOURNEY_SOURCE_SUFFIXES),
+        ):
+            safe_path, _ = safe_repository_file(path, root)
+            if safe_path is not None:
+                return repo, safe_path
+    return None
+
+
+def route_literal_evidence(content: str, method: str, route_path: str) -> str | None:
+    quoted_path = rf"(['\"]){re.escape(route_path)}\1"
+    method_pattern = re.compile(
+        rf"\.\s*{re.escape(method.lower())}\s*\(\s*{quoted_path}", re.IGNORECASE,
+    )
+    if method_pattern.search(content):
+        return f"{method.upper()} literal {route_path} in API-client call"
+    fetch_pattern = re.compile(
+        rf"\bfetch\s*\(\s*{quoted_path}\s*,(?:(?!\)\s*;).)*?"
+        rf"\bmethod\s*:\s*(['\"]){re.escape(method.upper())}\2",
+        re.IGNORECASE | re.DOTALL,
+    )
+    if fetch_pattern.search(content):
+        return f"fetch literal {route_path} with method {method.upper()}"
+    return None
+
+
+def frontend_route_literal_evidence(content: str, source_path: str, route_path: str) -> str | None:
+    quoted_path = rf"(['\"]){re.escape(route_path)}\1"
+    if re.search(rf"<Route\b[^>]*\bpath\s*=\s*{quoted_path}", content, re.IGNORECASE):
+        return f"JSX Route path literal {route_path} in {source_path}"
+    if re.search(r"(?:^|/)(?:routes?|router)(?:/|\.|$)", source_path, re.IGNORECASE) and re.search(
+        rf"(?:^|[{{,])\s*path\s*:\s*{quoted_path}", content, re.IGNORECASE | re.MULTILINE,
+    ):
+        return f"route-config path literal {route_path} in {source_path}"
+    return None
+
+
+def build_user_journey_graph(
+    workspace_root: Path,
+    scope: dict[str, Any],
+    changed_symbols: list[dict[str, Any]],
+    discovered_assets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build bounded, auditable static paths from changed boundaries to browsers."""
+    repo_roots = repository_roots_for_journeys(
+        workspace_root, scope, changed_symbols, discovered_assets,
+    )
+    aliases = package_aliases(repo_roots)
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    source_nodes: dict[Path, str] = {}
+    source_contents: dict[Path, str] = {}
+    source_imports: dict[Path, list[str]] = {}
+    scan_counts: dict[str, int] = {}
+    warnings: list[str] = []
+
+    def add_node(node: dict[str, Any]) -> str:
+        nodes.setdefault(str(node["id"]), node)
+        return str(node["id"])
+
+    def add_edge(
+        source: str, target: str, relation: str, evidence: str,
+        *, machine_check: bool = False,
+    ) -> None:
+        if len(edges) >= MAX_JOURNEY_EDGES:
+            if "journey edge limit reached" not in warnings:
+                warnings.append("journey edge limit reached")
+            return
+        key = (source, target, relation, evidence)
+        edges.setdefault(key, {
+            "id": f"edge-{len(edges) + 1}",
+            "from": source,
+            "to": target,
+            "relation": relation,
+            "evidence": evidence,
+            "machine_check": machine_check,
+        })
+
+    changed_by_path = {item["path"]: item for item in changed_symbols}
+    browser_repos = {
+        str(asset.get("repo")) for asset in discovered_assets
+        if asset.get("test_facts", {}).get("browser_framework")
+    }
+    frontend_repos = browser_repos | {
+        str(item.get("repo")) for item in changed_symbols
+        if Path(str(item.get("path", ""))).suffix.lower() in JOURNEY_SOURCE_SUFFIXES
+    }
+    for repo in sorted(frontend_repos):
+        root = repo_roots.get(repo)
+        if root is None:
+            continue
+        count = 0
+        skipped_count = 0
+        for current_root, dirs, files in os.walk(root):
+            current = Path(current_root)
+            dirs[:] = sorted(
+                name for name in dirs
+                if name not in JOURNEY_SCAN_EXCLUDES and not (current / name).is_symlink()
+            )
+            for filename in sorted(files):
+                path = current / filename
+                if path.suffix.lower() not in JOURNEY_SOURCE_SUFFIXES:
+                    continue
+                local_parts = {part.lower() for part in path.relative_to(root).parts}
+                if local_parts & {"test", "tests", "__tests__", "e2e"} or re.search(
+                    r"\.(?:test|spec)\.[^.]+$", filename, re.IGNORECASE,
+                ):
+                    continue
+                safe_path, _ = safe_repository_file(path, root)
+                if safe_path is None:
+                    skipped_count += 1
+                    continue
+                try:
+                    content = safe_path.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    skipped_count += 1
+                    continue
+                count += 1
+                output_path = workspace_path(safe_path, workspace_root)
+                changed = changed_by_path.get(output_path, {})
+                node_id = add_node({
+                    "id": f"source:{repo}:{output_path}",
+                    "repo": repo,
+                    "path": output_path,
+                    "layer": journey_source_layer(output_path, changed.get("symbols", [])),
+                    "symbols": sorted({
+                        str(symbol.get("name")) for symbol in changed.get("symbols", [])
+                        if symbol.get("name")
+                    }),
+                })
+                source_nodes[safe_path] = node_id
+                source_contents[safe_path] = content
+                source_imports[safe_path] = re.findall(
+                    r"(?:import\s+(?:type\s+)?(?:[^;]*?\s+from\s+)?|require\s*\()"
+                    r"['\"]([^'\"]+)['\"]",
+                    content,
+                )
+        scan_counts[repo] = count
+        if skipped_count:
+            warnings.append(f"{repo} skipped {skipped_count} unsafe or unreadable journey source files")
+
+    anchor_ids: list[str] = []
+    shared_anchors: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    route_anchors: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    for changed in changed_symbols:
+        repo = str(changed.get("repo"))
+        path = str(changed.get("path"))
+        shared_repo = "shared" in repo.lower() and "type" in repo.lower()
+        shared_path = bool(re.search(r"(?:^|/)(?:types?|contracts?)(?:/|$)", path, re.IGNORECASE))
+        for symbol in changed.get("symbols", []):
+            layer = None
+            if symbol.get("kind") == "route" and symbol.get("route_path"):
+                layer = "backend-route"
+            elif shared_repo or (shared_path and symbol.get("kind") in {"type", "class", "event-or-constant"}):
+                layer = "shared-contract"
+            if layer is None:
+                continue
+            node_id = add_node({
+                "id": f"changed:{repo}:{path}:{symbol.get('name')}",
+                "repo": repo,
+                "path": path,
+                "layer": layer,
+                "symbols": [symbol.get("name")],
+                "route_method": symbol.get("route_method"),
+                "route_path": symbol.get("route_path"),
+            })
+            anchor_ids.append(node_id)
+            target = (node_id, changed, symbol)
+            (route_anchors if layer == "backend-route" else shared_anchors).append(target)
+
+    for importer, imports in source_imports.items():
+        importer_node = source_nodes[importer]
+        importer_repo = str(nodes[importer_node]["repo"])
+        importer_path = str(nodes[importer_node]["path"])
+        for import_value in imports:
+            resolved = resolve_package_source(import_value, aliases)
+            if resolved is None:
+                local = resolve_imported_source(
+                    workspace_root, import_value, importer_path, importer_repo,
+                )
+                resolved = (importer_repo, local) if local is not None else None
+            if resolved is None or resolved[1] not in source_nodes:
+                continue
+            imported_node = source_nodes[resolved[1]]
+            if imported_node == importer_node:
+                continue
+            add_edge(
+                imported_node, importer_node, "reverse-import",
+                f"{importer_path} imports {import_value} from {workspace_path(resolved[1], workspace_root)}",
+            )
+
+    for anchor_id, _changed, symbol in route_anchors:
+        method = str(symbol.get("route_method") or "GET").upper()
+        route_path = str(symbol.get("route_path"))
+        for source_path, content in source_contents.items():
+            source_node = source_nodes[source_path]
+            if nodes[source_node]["layer"] != "api-client":
+                continue
+            evidence = route_literal_evidence(content, method, route_path)
+            if evidence:
+                add_edge(anchor_id, source_node, "route-client-literal", evidence)
+
+    for anchor_id, changed, symbol in shared_anchors:
+        changed_repo = str(changed.get("repo"))
+        package_names = {
+            name for name, (repo, _root, _package) in aliases.items() if repo == changed_repo
+        }
+        identifier = symbol_identifier(symbol)
+        if not package_names or not identifier:
+            continue
+        for source_path, imports in source_imports.items():
+            matched = sorted({
+                value for value in imports
+                if any(value == name or value.startswith(f"{name}/") for name in package_names)
+                and re.search(rf"\b{re.escape(identifier)}\b", source_contents[source_path])
+            })
+            if matched:
+                add_edge(
+                    anchor_id, source_nodes[source_path], "shared-contract-package-import",
+                    f"{nodes[source_nodes[source_path]]['path']} imports {identifier} via {', '.join(matched)}",
+                )
+
+    for asset in discovered_assets:
+        facts = asset.get("test_facts", {})
+        if not facts.get("browser_framework") or asset.get("asset_kind") not in {"test-file", "browser-scenario"}:
+            continue
+        for case_index, case in enumerate(facts.get("test_cases", []), start=1):
+            case_name = str(case.get("name") or f"scenario-{case_index}")
+            case_key = re.sub(r"[^A-Za-z0-9]+", "-", case_name).strip("-").lower() or "scenario"
+            case_active = not bool(case.get("disabled"))
+            case_checks = list(case.get("machine_checks", [])) if case_active else []
+            scenario_id = add_node({
+                "id": (
+                    f"scenario:{asset.get('repo')}:{asset.get('path')}:"
+                    f"{case_index}:{case_key}"
+                ),
+                "repo": asset.get("repo"),
+                "path": asset.get("path"),
+                "layer": "browser-scenario",
+                "symbols": [case_name],
+                "scenario_name": case_name,
+                "scenario_index": case_index,
+                "framework": facts.get("browser_framework"),
+                "disabled": bool(case.get("disabled")),
+            })
+            for import_value in facts.get("imports", []):
+                resolved = resolve_package_source(import_value, aliases)
+                if resolved is None:
+                    local = resolve_imported_source(
+                        workspace_root, import_value, str(asset.get("path")), str(asset.get("repo")),
+                    )
+                    resolved = (str(asset.get("repo")), local) if local is not None else None
+                if resolved is None or resolved[1] not in source_nodes:
+                    continue
+                add_edge(
+                    source_nodes[resolved[1]], scenario_id, "browser-scenario-import",
+                    f"{asset.get('path')} case {case_name!r} imports {import_value} from {workspace_path(resolved[1], workspace_root)}",
+                    machine_check=any(
+                        check.get("kind") == "dom-assertion" for check in case_checks
+                    ),
+                )
+            for anchor_id, _changed, symbol in route_anchors:
+                method = str(symbol.get("route_method") or "").upper()
+                route_path = normalized_target_path(str(symbol.get("route_path") or ""))
+                for target in case.get("browser_targets", []):
+                    target_method = browser_target_http_method(target)
+                    if normalized_target_path(str(target.get("target") or "")) != route_path:
+                        continue
+                    if method and target_method != method:
+                        continue
+                    add_edge(
+                        anchor_id, scenario_id, "browser-route-target",
+                        f"{asset.get('path')} case {case_name!r} targets {target_method} {symbol.get('route_path')}",
+                        machine_check=bool(case_active and target.get("machine_check_linked")),
+                    )
+            for target in case.get("browser_targets", []):
+                if target.get("receiver") != "page":
+                    continue
+                target_path = normalized_target_path(str(target.get("target") or ""))
+                for source_path, content in source_contents.items():
+                    source_node = source_nodes[source_path]
+                    evidence = frontend_route_literal_evidence(
+                        content, str(nodes[source_node]["path"]), target_path,
+                    )
+                    if evidence:
+                        add_edge(
+                            source_node, scenario_id, "frontend-route-browser-target",
+                            f"{evidence}; {asset.get('path')} case {case_name!r} navigates to {target_path}",
+                            machine_check=bool(case_active and target.get("machine_check_linked")),
+                        )
+
+    adjacency: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for edge in edges.values():
+        adjacency[edge["from"]].append(edge)
+    paths: list[dict[str, Any]] = []
+    partial_paths: list[dict[str, Any]] = []
+    for anchor_id in anchor_ids:
+        pending: list[tuple[str, list[str], list[str]]] = [(anchor_id, [anchor_id], [])]
+        terminal_branches: dict[str, tuple[list[str], list[str], str]] = {}
+        while pending and len(paths) < MAX_JOURNEY_PATHS:
+            current, node_path, edge_path = pending.pop(0)
+            if len(edge_path) >= MAX_JOURNEY_PATH_DEPTH:
+                terminal_branches.setdefault(
+                    current, (node_path, edge_path, "path-depth-limit"),
+                )
+                continue
+            outgoing = [
+                edge for edge in sorted(adjacency.get(current, []), key=lambda item: item["id"])
+                if edge["to"] not in node_path
+            ]
+            if not outgoing:
+                terminal_branches.setdefault(
+                    current,
+                    (
+                        node_path,
+                        edge_path,
+                        "no-static-bridge" if current == anchor_id else "terminal-without-browser-scenario",
+                    ),
+                )
+            for edge in outgoing:
+                target = edge["to"]
+                next_nodes = [*node_path, target]
+                next_edges = [*edge_path, edge["id"]]
+                if nodes[target]["layer"] == "browser-scenario":
+                    paths.append({
+                        "id": f"journey-{len(paths) + 1}",
+                        "anchor": anchor_id,
+                        "scenario": target,
+                        "nodes": next_nodes,
+                        "edges": next_edges,
+                        "machine_check": bool(edge.get("machine_check")),
+                        "relation": (
+                            "machine-checked-static-path"
+                            if edge.get("machine_check")
+                            else "possible-static-path"
+                        ),
+                        "clears_object_gap": False,
+                    })
+                else:
+                    pending.append((target, next_nodes, next_edges))
+        completed_node_ids = {
+            node_id
+            for path in paths if path.get("anchor") == anchor_id
+            for node_id in path.get("nodes", [])[1:-1]
+        }
+        for terminal, (node_path, edge_path, reason) in terminal_branches.items():
+            if terminal in completed_node_ids or len(partial_paths) >= MAX_JOURNEY_PATHS:
+                continue
+            partial_paths.append({
+                "id": f"partial-journey-{len(partial_paths) + 1}",
+                "anchor": anchor_id,
+                "terminal": terminal,
+                "nodes": node_path,
+                "edges": edge_path,
+                "relation": "partial-static-path",
+                "reason": reason,
+                "clears_object_gap": False,
+            })
+        if len(paths) >= MAX_JOURNEY_PATHS:
+            warnings.append("journey path limit reached")
+            break
+
+    return {
+        "schema_version": 1,
+        "limits": {
+            "max_edges": MAX_JOURNEY_EDGES,
+            "max_paths": MAX_JOURNEY_PATHS,
+            "max_path_depth": MAX_JOURNEY_PATH_DEPTH,
+            "max_output_nodes": MAX_JOURNEY_OUTPUT_NODES,
+        },
+        "scan_counts": scan_counts,
+        # Source scanning can inspect more files than the Agent-facing graph
+        # should expose. Only nodes participating in an auditable edge/path are
+        # serialized; the edge/path limits therefore impose this explicit cap.
+        "nodes": sorted(
+            (
+                node for node_id, node in nodes.items()
+                if node_id in {
+                    node_id
+                    for edge in edges.values()
+                    for node_id in (edge["from"], edge["to"])
+                } | {
+                    node_id
+                    for path in [*paths, *partial_paths]
+                    for node_id in path.get("nodes", [])
+                }
+            ),
+            key=lambda item: item["id"],
+        ),
+        "edges": sorted(edges.values(), key=lambda item: int(item["id"].split("-")[-1])),
+        "paths": paths,
+        "partial_paths": partial_paths,
+        "warnings": warnings,
+        "semantics": "Static paths are auditable relation evidence only; they never clear an object-level test gap or prove runtime wiring.",
     }
 
 
@@ -610,6 +1122,20 @@ def analyze_test_relations(
                             )
                             direct_assertion_cases.update(linked_cases)
                             source_linked_cases.update(linked_cases)
+                        source_identifiers = {
+                            identifier for symbol in source["symbols"]
+                            if (identifier := symbol_identifier(symbol))
+                        }
+                        if source_identifiers and asset.get("framework") != "pytest":
+                            source_linked_cases.update(
+                                str(case.get("name"))
+                                for case in facts.get("test_cases", [])
+                                if not case.get("disabled")
+                                and source_identifiers
+                                & set(case.get("assertion_linked_identifiers", []))
+                            )
+                            source_linked_cases.discard("")
+                            direct_assertion_cases.update(source_linked_cases)
                         linked_identifiers = {
                             identifier
                             for case in facts.get("test_cases", [])
@@ -810,6 +1336,7 @@ def analyze_test_relations(
             browser_route_symbols: set[str] = set()
             browser_route_reasons: list[str] = []
             browser_route_cases: set[str] = set()
+            browser_route_target_ids: set[str] = set()
             if not related_files and not asset_has_indirect_relation and facts.get("browser_framework"):
                 for source in module_symbol_items:
                     for symbol in source.get("symbols", []):
@@ -820,14 +1347,15 @@ def analyze_test_relations(
                         for target in facts.get("browser_targets", []):
                             if normalized_target_path(str(target.get("target") or "")) != normalized_target_path(str(route_path)):
                                 continue
-                            receiver = str(target.get("receiver") or "")
-                            target_method = str(target.get("method") or "").upper()
-                            if receiver == "request" and route_method and target_method != route_method:
+                            target_method = browser_target_http_method(target)
+                            if route_method and target_method != route_method:
                                 continue
                             browser_route_files.add(source["path"])
                             browser_route_symbols.add(symbol["name"])
                             if target.get("case_name"):
                                 browser_route_cases.add(str(target["case_name"]))
+                            if target.get("id"):
+                                browser_route_target_ids.add(str(target["id"]))
                             browser_route_reasons.append(
                                 f"browser scenario targets {target_method} {route_path}; route identity matches but runtime wiring is unexecuted"
                             )
@@ -838,6 +1366,7 @@ def analyze_test_relations(
                     browser_route_files,
                     browser_route_symbols,
                     related_case_names=browser_route_cases,
+                    related_browser_target_ids=browser_route_target_ids,
                 ))
 
             if related_files or asset_has_indirect_relation or browser_route_files or asset["repo"] != repo:
@@ -947,7 +1476,11 @@ def analyze_test_relations(
             ],
         })
 
+    journey_graph = build_user_journey_graph(
+        workspace_root, scope, changed_symbols, discovered_assets,
+    )
     return {
         "modules": module_results,
+        "user_journey_graph": journey_graph,
         "analysis_note": "Static correspondence only. Tests were not executed, and assertions do not prove passing behavior or complete coverage.",
     }

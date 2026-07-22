@@ -61,6 +61,8 @@ BIC 质量简报
 - 必跑候选：<direct and indirect candidates>
 - 可选候选：<possible candidates>
 - 浏览器/用户旅程证据：<Playwright/CDP scenarios, actions, observations, machine checks>
+- 完整静态旅程：<completed_user_journey_paths with node_path and edge_path>
+- 未闭合静态旅程：<partial_user_journey_paths with terminal and reason>
 - 环境前置条件：
 - 执行状态：not-run
 
@@ -87,9 +89,23 @@ brief concise:
 - Possible candidates remain visible search clues but never count as proof that
   a changed behavior has an existing test.
 - For Playwright/CDP evidence, distinguish actions and observations from active
-  machine-checkable assertions. Never describe a screenshot-only or click-only
+  target-linked machine checks. A request check must consume that request's
+  result; a page check must inspect the page/locator after the action; standalone
+  CDP requires a conditional failure branch or explicit nonzero/assert-fail
+  outcome. An unrelated `expect(true)`, bare `expect(value)` without a matcher,
+  screenshot, or click is not a machine check. Never describe a screenshot-only or click-only
   scenario as verified. Backend/unit evidence and browser evidence are separate
   layers; neither alone proves the complete user journey.
+- Report `user_journey_graph` as schema version 1. Its bounded `nodes` identify
+  changed backend routes/shared contracts, frontend source layers, and connected
+  browser test cases that participate in an edge or completed/partial path.
+  Disconnected scan-only source and scenario nodes are omitted. Its `edges`
+  preserve exact route literals, package-name
+  imports, reverse imports, frontend route literals, and browser target evidence.
+  `paths` are completed static paths; `partial_paths` retain anchor-only and
+  terminal branches that do not reach a browser scenario. Hop, edge, and path
+  limits are explicit in `limits`. Every path has `clears_object_gap: false`:
+  this graph is auditable relation evidence, never proof of runtime wiring.
 - Report `scan_warnings` when content inspection intentionally skipped a test-like
   symbolic link, outside-repository path, or sensitive path. Do not turn the
   skipped candidate into either positive test evidence or proof of a missing
@@ -132,7 +148,10 @@ brief concise:
   remains available through the standalone inventory/suggest diagnostics.
 - Summarize the emitted `test_execution_manifest` without executing it. State
   its change fingerprint, required/optional candidates, unresolved commands,
-  prerequisites, browser journey evidence, and `not-run` status. It is invalid
+  prerequisites, browser journey evidence, completed and partial journey paths,
+  and `not-run` status. Each manifest path expands both `node_path` and
+  `edge_path`, keeps `execution_status: not-run`, and repeats that it cannot
+  clear an object-level gap. It is invalid
   for execution if the workspace fingerprint changes.
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.

@@ -265,3 +265,19 @@ with explicit machine checks.
 Validation: schema tests, stale-fingerprint fixtures, Skill Creator validation,
 unit tests, agent evals, install verification, mirror comparison, and
 `git diff --check`; then create local commits only.
+
+### 2026-07-22 quality-gap closure
+
+- `test_correspondence.user_journey_graph` schema version 1 now exposes bounded
+  nodes, auditable edges, completed paths, terminal/anchor-only partial paths,
+  scan warnings, and conservative `clears_object_gap: false` semantics.
+- Browser evidence is case-scoped and target-linked. Playwright request results,
+  DOM/page matchers, and explicit CDP fail conditions count; unrelated/bare
+  expectations, disabled cases, screenshots, comments, and quoted examples do
+  not.
+- `test_execution_manifest` expands completed and partial journey node/edge
+  paths and preserves `not-run` status. Selected cases are relation-specific.
+- The runtime regression matrix covers first install/reuse, version change,
+  corrupt marker/executable, concurrent first use, interrupted cleanup,
+  invalid JSON/schema, unchanged Git state, and live Python/JS/JSX/TS/TSX
+  diff-hunk-to-declaration fixtures.

@@ -21,8 +21,12 @@ It is intentionally read-only:
   contract-boundary, and test evidence.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
-- It treats Playwright and CDP scenarios as browser/user-journey evidence and
-  distinguishes actions or screenshots from machine-checkable assertions.
+- It treats each Playwright/CDP case as independent browser/user-journey
+  evidence, links machine checks to request/page/CDP outcomes, and rejects bare
+  or unrelated assertions as positive evidence.
+- It emits a bounded, auditable user-journey graph from changed routes/shared
+  contracts through frontend imports and route literals, preserving both
+  completed paths and dead-end/anchor-only partial paths.
 - It emits a fingerprint-bound, `not-run` Phase 2 execution manifest with
   required/optional candidates, command sources, and environment prerequisites.
 - It outputs one `BIC Quality Brief`.
@@ -166,7 +170,8 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.
 The assessment uses the complete test inventory internally but omits that raw,
 large intermediate from its final JSON. It returns derived test correspondence
 and risk evidence plus `test_execution_manifest`. The manifest is static
-guidance and becomes stale when its workspace change fingerprint no longer
+guidance, includes expanded completed/partial journey paths, never clears an
+object-level test gap, and becomes stale when its workspace change fingerprint no longer
 matches. Use the inventory or suggest diagnostics below only when raw
 test-asset details are required.
 

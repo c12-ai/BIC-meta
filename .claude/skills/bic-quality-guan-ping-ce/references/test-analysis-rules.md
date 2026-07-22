@@ -46,8 +46,13 @@ valid test remains a test asset.
 
 Treat Playwright and CDP as browser evidence, not merely JavaScript tests.
 Record navigation/input actions, DOM/network observations, scenario names,
-disabled state, and machine-checkable assertions separately. A screenshot,
-console trace, wait, click, or successful script completion is not an assertion.
+disabled state, and target-linked machine checks separately. Each test case is
+an independent browser scenario, even when names or URL literals repeat. A
+request-result assertion, page/locator matcher, or explicit CDP failure
+condition may be a machine check. A bare `expect(value)` without a matcher,
+unrelated `expect(true)`, screenshot, console trace, wait, click, or successful
+script completion is not one. Multiline `expect`, `expect.soft`, and
+`expect.poll` retain their matcher and target linkage.
 A standalone CDP script may be a `browser-scenario` search asset even when it is
 not a runner test; without an active assertion it cannot clear a test gap.
 
@@ -105,6 +110,24 @@ when its direct/helper return value flows into an asserted expression. An
 unrelated assertion such as `target(); assert True` retains the relation but
 requires strengthening.
 
+## User-journey graph
+
+Build bounded reverse-import paths from changed backend routes and shared
+contracts through frontend API clients, hooks/stores, components/pages, route
+configuration, and explicit browser scenarios. Package names from contained
+`package.json` files may resolve shared-contract imports across repositories.
+Every edge must retain a concrete import or literal as evidence. Do not infer a
+business journey from repository co-change, filename similarity, or an action
+without an outcome check.
+
+Emit completed `paths` and terminal `partial_paths`, including an anchor-only
+`no-static-bridge` partial when no edge exists. Preserve dead branches even when
+the same anchor has another completed path. The graph never clears an
+object-level gap and never proves that runtime wiring works. The Agent-facing
+node list contains only nodes referenced by an edge or completed/partial path;
+the complete source scan count remains visible without serializing disconnected
+scan-only nodes.
+
 ## Add-test guidance
 
 Keep correspondence facts separate from the need to add tests:
@@ -150,3 +173,6 @@ not pass a free-form hint through a shell.
 The manifest is bound to repository change fingerprints. A separate executor
 must reject a stale fingerprint and obtain distinct authorization for test
 execution and for any state-changing setup or cleanup.
+It also exposes `completed_user_journey_paths` and
+`partial_user_journey_paths`; both expand the exact graph nodes/edges and remain
+static `not-run` evidence with `clears_object_gap: false`.
