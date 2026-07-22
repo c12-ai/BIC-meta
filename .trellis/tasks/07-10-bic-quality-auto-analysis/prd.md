@@ -26,10 +26,10 @@ repository or test directory is added.
 - Retain unmapped changes visibly when no stable structural module exists.
 - Report direct multi-repository changes as a fact derived from changed repos.
 
-- Do not derive risk from paths or duplicate impact labels. A strongly linked,
-  uniquely matched, or explicitly overridden Issue may enable an
-  evidence-backed high/medium/low pre-test Risk Matrix; without a unique Issue,
-  overall risk must remain `unassessed`.
+- Do not derive risk from paths or duplicate impact labels. An authoritative
+  Issue, or a provenance-bearing reference hint explicitly justified as
+  strong-related, may enable an evidence-backed high/medium/low pre-test Risk
+  Matrix; thematic similarity alone must keep overall risk `unassessed`.
 - Discover concrete test files, test directories, framework configuration, and
   command hints automatically for Python and JavaScript/TypeScript repositories.
 - Require both a test-like filename and parsed executable test cases before a
@@ -165,6 +165,20 @@ repository or test directory is added.
   and fact stability across prompt variants.
 
 ## Acceptance Criteria
+
+### 2026-07-22 Issue provenance refinement
+
+- [x] Ordinary open-Issue search matches are labeled thematic and cannot become
+      the requirement source or feed acceptance rows solely through semantic
+      similarity.
+- [x] Explicit/current/source-PR linked or closing Issues remain authoritative;
+      commit/branch references remain provenance-bearing hints.
+- [x] Repeated `--source-pr` accepts repository-qualified PR references and pull
+      URLs for restored multi-repository worktrees without fetching or checkout.
+- [x] Hydrated Issue bodies expose at most ten one-hop, affected-repository
+      references as context without inheriting authority.
+- [x] Only eligible, in-scope acceptance items enter the risk matrix; umbrella
+      Issue items outside this Diff remain contextual.
 
 - [x] Newly added immediate child Git repositories are collected without editing
       a hard-coded repository list.

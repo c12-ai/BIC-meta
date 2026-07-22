@@ -26,11 +26,16 @@ BIC 质量简报
 - 初筛排除：
 - 正文读取：
 - 候选 Issue：
+- 关联等级：<authoritative, strong-related, reference-hint, thematic-candidate, or mentioned-reference>
+- 来源 PR：<explicit source PR provenance, if supplied>
+- PR 变更定义：<source PR title/body summary when no linked Issue exists>
+- 一跳引用：<bounded mentioned references; context only>
 - 候选对应分析：
 - 选择依据：
 - 关联 Issue：
 - 目标：
 - 验收项：
+- 本次 Diff 范围：<in-scope, adjacent, and unchanged/out-of-scope items>
 - 获取 warning：
 
 模块映射
@@ -111,14 +116,18 @@ brief concise:
   skipped candidate into either positive test evidence or proof of a missing
   test. Sensitive paths and credential values must remain redacted.
 - Start `测试前风险矩阵` with the deterministic rows from
-  `assess-risk-matrix.sh`. Add one Issue-alignment row per acceptance item using
-  semantic reading of Issue, Diff, and tests. Missing Diff or test evidence may
-  raise the risk; never lower the deterministic risk floor.
+  `assess-risk-matrix.sh`. Add one Issue-alignment row per eligible, in-scope
+  acceptance item using semantic reading of Issue, Diff, and tests. Keep
+  adjacent and unchanged/out-of-scope items outside the matrix. Missing Diff or
+  test evidence may raise the risk; never lower the deterministic risk floor.
 - Use `unassessed` when Issue context is missing/unresolved or an acceptance item
   cannot be compared with concrete evidence. This is a pre-test matrix, not a
   claim about executed verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
-  Treat an explicit override as authoritative. A unique current-PR
+  Treat an explicit override as authoritative. When the user identifies merged
+  or detached PRs as the source of local changes, pass each with repeated
+  `--source-pr`; linked/closing Issues from those PRs preserve authoritative
+  provenance. A unique current-PR
   linked/closing reference may use the authoritative fast path only when exactly
   one affected GitHub repository exists. With multiple affected repositories,
   scan every repository and keep the current-PR Issue as a repository-local
@@ -140,9 +149,15 @@ brief concise:
   plus categorized reasons. Use `scan-failed` when every attempted scan fails,
   `partial-scan` when only some repositories succeed, and `no-candidates` only
   after successful empty scans. Show why candidates do or do not correspond.
-  Leave risk `unassessed` when more than one candidate remains plausible; do not
-  infer identity from repository membership, a general keyword, or filename
-  similarity alone.
+  Label ordinary search matches `thematic-candidate`; even one unique semantic
+  match remains background context and cannot supply acceptance rows. Label
+  commit/branch references `reference-hint`; promote one to `strong-related`
+  only when its preserved provenance and hydrated body both agree with concrete
+  changed objects. Follow at most ten repository-contained Issue references
+  from hydrated bodies for one hop and label them `mentioned-reference`; they do
+  not inherit authority. Leave risk `unassessed` without authoritative or
+  explicitly justified strong-related provenance; do not infer identity from
+  repository membership, a general keyword, or filename similarity alone.
 - Do not include the raw `test_inventory` in the final `assess` payload or
   brief. Use derived test correspondence and risk evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.

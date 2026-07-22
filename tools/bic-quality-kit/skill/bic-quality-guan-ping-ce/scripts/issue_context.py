@@ -23,6 +23,10 @@ REPO_ISSUE_RE = re.compile(r"^(?P<repo>[^#\s]+/[^#\s]+)#(?P<number>\d+)$")
 ISSUE_URL_RE = re.compile(
     r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/issues/(?P<number>\d+)"
 )
+PR_URL_RE = re.compile(
+    r"https://github\.com/(?P<repo>[^/\s]+/[^/\s]+)/pull/(?P<number>\d+)"
+)
+PR_REF_RE = re.compile(r"^(?P<repo>[^#\s]+/[^#\s]+)#(?P<number>\d+)$")
 ISSUE_TOKEN_RE = re.compile(
     r"https://github\.com/[^/\s]+/[^/\s]+/issues/\d+"
     r"|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+|#\d+"
@@ -37,6 +41,8 @@ GH_METADATA_TIMEOUT_SECONDS = 15
 GH_BODY_TIMEOUT_SECONDS = 10
 GH_TOTAL_TIMEOUT_SECONDS = 60
 ISSUE_HYDRATION_MAX_WORKERS = 3
+ISSUE_REFERENCE_FOLLOW_LIMIT = 10
+SOURCE_PR_LIMIT = 10
 STRONG_CANDIDATE_PRIORITY_MAX = 3
 AUTHORITATIVE_CANDIDATE_PRIORITY_MAX = 1
 SEARCH_STOP_WORDS = {
@@ -155,6 +161,31 @@ def normalize_reference(token: str, default_repo: str | None) -> str | None:
     return None
 
 
+def normalize_pr_reference(token: str) -> str | None:
+    """Normalize an explicit source PR without guessing a repository."""
+    normalized_token = token.rstrip("/")
+    url_match = PR_URL_RE.fullmatch(normalized_token)
+    if url_match:
+        return f"{url_match.group('repo')}#{url_match.group('number')}"
+    match = PR_REF_RE.fullmatch(normalized_token)
+    if match:
+        return f"{match.group('repo')}#{match.group('number')}"
+    return None
+
+
+def candidate_association(candidate: dict[str, Any]) -> str:
+    """Classify provenance separately from semantic topic similarity."""
+    source = str(candidate.get("source") or "")
+    priority = int(candidate.get("priority", 99))
+    if priority <= AUTHORITATIVE_CANDIDATE_PRIORITY_MAX:
+        return "authoritative"
+    if priority <= STRONG_CANDIDATE_PRIORITY_MAX:
+        return "reference-hint"
+    if source == "mentioned-reference":
+        return "mentioned-reference"
+    return "thematic-candidate"
+
+
 def closing_reference_candidates(
     text: str,
     default_repo: str | None,
@@ -191,7 +222,12 @@ def branch_reference_candidates(branch: str | None, repository: str | None) -> l
     ]
 
 
-def pr_reference_candidates(payload: dict[str, Any], repository: str) -> list[dict[str, Any]]:
+def pr_reference_candidates(
+    payload: dict[str, Any],
+    repository: str,
+    source_prefix: str = "current-pr",
+    provenance_pr: str | None = None,
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for item in payload.get("closingIssuesReferences") or []:
         item_repo = None
@@ -202,15 +238,71 @@ def pr_reference_candidates(payload: dict[str, Any], repository: str) -> list[di
         item_repo = item_repo or repository_from_url(item_url) or repository
         number = item.get("number") if isinstance(item, dict) else None
         if item_repo and number:
-            candidates.append({
+            candidate = {
                 "reference": f"{item_repo}#{number}",
-                "source": "current-pr-linked-issue",
+                "source": f"{source_prefix}-linked-issue",
                 "priority": 0,
                 "evidence": payload.get("url") or payload.get("title") or "current PR",
-            })
-    candidates.extend(closing_reference_candidates(
-        str(payload.get("body") or ""), repository, "current-pr-body", 1,
-    ))
+            }
+            if provenance_pr:
+                candidate["provenance_pr"] = provenance_pr
+            candidates.append(candidate)
+    body_candidates = closing_reference_candidates(
+        str(payload.get("body") or ""), repository, f"{source_prefix}-body", 1,
+    )
+    if provenance_pr:
+        for candidate in body_candidates:
+            candidate["provenance_pr"] = provenance_pr
+    candidates.extend(body_candidates)
+    known_references = {candidate["reference"] for candidate in candidates}
+    for match in ISSUE_TOKEN_RE.finditer(str(payload.get("body") or "")):
+        reference = normalize_reference(match.group(0), repository)
+        if not reference or reference in known_references:
+            continue
+        candidate = {
+            "reference": reference,
+            "source": f"{source_prefix}-mentioned-issue",
+            "priority": 2,
+            "evidence": payload.get("url") or payload.get("title") or "PR body",
+        }
+        if provenance_pr:
+            candidate["provenance_pr"] = provenance_pr
+        candidates.append(candidate)
+        known_references.add(reference)
+    return candidates
+
+
+def mentioned_reference_candidates(
+    body: str,
+    default_repo: str | None,
+    parent_reference: str,
+    affected_repositories: set[str],
+) -> list[dict[str, Any]]:
+    """Extract one-hop references as context, never as requirement provenance."""
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in ISSUE_TOKEN_RE.finditer(body):
+        reference = normalize_reference(match.group(0), default_repo)
+        if (
+            not reference
+            or reference == parent_reference
+            or reference in seen
+            or reference_repository(reference) not in affected_repositories
+        ):
+            continue
+        seen.add(reference)
+        candidates.append({
+            "reference": reference,
+            "source": "mentioned-reference",
+            "priority": 5,
+            "evidence": f"mentioned by {parent_reference}",
+            "repository": reference_repository(reference),
+            "parent_reference": parent_reference,
+            "association": "mentioned-reference",
+            "acceptance_items_eligible": False,
+        })
+        if len(candidates) >= ISSUE_REFERENCE_FOLLOW_LIMIT:
+            break
     return candidates
 
 
@@ -365,6 +457,73 @@ def current_pr_payload(
     return payload if isinstance(payload, dict) else None
 
 
+def resolve_source_pr(
+    reference: str,
+    cwd: Path,
+    deadline: float | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve an explicitly supplied PR as immutable change provenance."""
+    normalized = normalize_pr_reference(reference)
+    if not normalized:
+        return None, (
+            f"Invalid --source-pr {reference!r}; use owner/repo#number or a GitHub pull URL"
+        )
+    match = PR_REF_RE.fullmatch(normalized)
+    assert match is not None
+    if not shutil.which("gh"):
+        return None, "GitHub CLI `gh` is not available; source PR was not resolved"
+    timeout = bounded_github_timeout(GH_METADATA_TIMEOUT_SECONDS, deadline)
+    if timeout is None:
+        return None, f"Source PR lookup skipped after total GitHub analysis deadline for {normalized}"
+    try:
+        proc = subprocess.run(
+            [
+                "gh", "pr", "view", match.group("number"),
+                "--repo", match.group("repo"),
+                "--json",
+                "number,title,body,url,state,headRefName,baseRefName,closingIssuesReferences",
+            ],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return None, (
+            f"Source PR lookup reached the total GitHub analysis deadline for {normalized}"
+            if github_deadline_exceeded(deadline)
+            else f"Source PR lookup timed out after {GH_METADATA_TIMEOUT_SECONDS} seconds for {normalized}"
+        )
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or "GitHub CLI could not resolve the source PR"
+        return None, f"Could not resolve source PR {normalized}: {detail}"
+    try:
+        payload = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"Could not resolve source PR {normalized}: invalid JSON: {exc}"
+    if not isinstance(payload, dict):
+        return None, f"Could not resolve source PR {normalized}: non-object payload"
+    body = str(payload.get("body") or "")
+    mentioned_prs = []
+    for match in PR_URL_RE.finditer(body):
+        mentioned_pr = normalize_pr_reference(match.group(0))
+        if mentioned_pr and mentioned_pr != normalized and mentioned_pr not in mentioned_prs:
+            mentioned_prs.append(mentioned_pr)
+        if len(mentioned_prs) >= ISSUE_REFERENCE_FOLLOW_LIMIT:
+            break
+    return {
+        **payload,
+        "body": body,
+        "acceptance_items": extract_acceptance_items(body),
+        "mentioned_prs": mentioned_prs,
+        "reference": normalized,
+        "repository": match.group("repo"),
+        "provenance": "explicit-source-pr",
+    }, None
+
+
 def list_repository_issues(
     repository: str,
     cwd: Path,
@@ -419,6 +578,7 @@ def commit_messages(repo: Path, merge_base: str | None) -> str:
 
 def normalize_issue(payload: dict[str, Any], reference: str, source: str) -> dict[str, Any]:
     body = str(payload.get("body") or "")
+    acceptance_items = extract_acceptance_items(body)
     url = str(payload.get("url") or "") or None
     state = payload.get("state")
     item_type = "pull-request" if (url and "/pull/" in url) or state == "MERGED" else "issue"
@@ -435,12 +595,15 @@ def normalize_issue(payload: dict[str, Any], reference: str, source: str) -> dic
         "state": state,
         "url": url,
         "labels": normalize_labels(payload.get("labels")),
-        "acceptance_items": extract_acceptance_items(body),
+        "acceptance_items": acceptance_items,
         "discovery_mode": "explicit",
         "selection_reason": source,
         "candidates": [],
         "repository_issue_counts": {},
         "analysis_status": "explicit-selected",
+        "association": "authoritative",
+        "acceptance_items_eligible": True,
+        "acceptance_scope_review": "required" if acceptance_items else "not-applicable",
         "warnings": ["Reference resolved to a pull request, not an Issue"]
         if item_type == "pull-request" else [],
     }
@@ -466,6 +629,9 @@ def unresolved(reference: str | None, source: str | None, warning: str | None = 
         "candidates": [],
         "repository_issue_counts": {},
         "analysis_status": "not-started",
+        "association": "unresolved",
+        "acceptance_items_eligible": False,
+        "acceptance_scope_review": "not-eligible",
         "warnings": [warning] if warning else [],
     }
 
@@ -688,7 +854,9 @@ def batch_resolve_github_issues(
 
 
 def collect_issue_snapshot(
-    repositories: list[dict[str, Any]], deadline: float | None = None,
+    repositories: list[dict[str, Any]],
+    deadline: float | None = None,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Collect one bounded, read-only metadata snapshot for affected repositories."""
     strong_candidates: list[dict[str, Any]] = []
@@ -698,6 +866,36 @@ def collect_issue_snapshot(
     scan_warnings: list[str] = []
     affected_repositories: list[str] = []
     affected_repo_records: list[tuple[str, Path]] = []
+    source_prs: list[dict[str, Any]] = []
+
+    requested_source_pr_refs = source_pr_refs or []
+    bounded_source_pr_refs: list[str] = []
+    for reference in requested_source_pr_refs:
+        if reference not in bounded_source_pr_refs:
+            bounded_source_pr_refs.append(reference)
+        if len(bounded_source_pr_refs) >= SOURCE_PR_LIMIT:
+            break
+    if len(set(requested_source_pr_refs)) > SOURCE_PR_LIMIT:
+        scan_warnings.append(
+            f"Source PR inputs exceeded the limit of {SOURCE_PR_LIMIT}; later references were not read"
+        )
+    source_pr_repositories: set[str] = set()
+    for reference in bounded_source_pr_refs:
+        payload, warning = resolve_source_pr(reference, Path.cwd(), deadline)
+        if warning:
+            scan_warnings.append(warning)
+            continue
+        assert payload is not None
+        source_prs.append(payload)
+        source_pr_repositories.add(str(payload["repository"]))
+        strong_candidates.extend(
+            pr_reference_candidates(
+                payload,
+                str(payload["repository"]),
+                source_prefix="source-pr",
+                provenance_pr=str(payload["reference"]),
+            )
+        )
     for repo_info in repositories:
         if not repo_info.get("change_count"):
             continue
@@ -710,7 +908,11 @@ def collect_issue_snapshot(
             continue
         affected_repositories.append(repository)
         affected_repo_records.append((repository, repo))
-        pr_payload = current_pr_payload(repo, scan_warnings, deadline)
+        pr_payload = (
+            None
+            if repository in source_pr_repositories
+            else current_pr_payload(repo, scan_warnings, deadline)
+        )
         if pr_payload:
             strong_candidates.extend(pr_reference_candidates(pr_payload, repository))
         strong_candidates.extend(closing_reference_candidates(
@@ -721,6 +923,27 @@ def collect_issue_snapshot(
         ))
         strong_candidates.extend(branch_reference_candidates(repo_info.get("branch"), repository))
 
+    affected_repository_set = sorted(set(affected_repositories))
+    unrelated_source_prs = [
+        item for item in source_prs
+        if item.get("repository") not in set(affected_repository_set)
+    ]
+    if unrelated_source_prs:
+        unrelated_references = ", ".join(str(item["reference"]) for item in unrelated_source_prs)
+        scan_warnings.append(
+            f"Ignored source PR provenance outside affected repositories: {unrelated_references}"
+        )
+        source_prs = [
+            item for item in source_prs
+            if item.get("repository") in set(affected_repository_set)
+        ]
+        strong_candidates = [
+            item for item in strong_candidates
+            if item.get("provenance_pr") not in {
+                str(source_pr["reference"]) for source_pr in unrelated_source_prs
+            }
+        ]
+
     authoritative_candidates = [
         item for item in strong_candidates
         if item.get("priority", 99) <= AUTHORITATIVE_CANDIDATE_PRIORITY_MAX
@@ -728,7 +951,6 @@ def collect_issue_snapshot(
     authoritative_references = sorted({
         item["reference"] for item in authoritative_candidates
     })
-    affected_repository_set = sorted(set(affected_repositories))
     authoritative_scope_complete = len(affected_repository_set) == 1
     pr_lookup_incomplete = any(
         warning.startswith("Current PR lookup") for warning in scan_warnings
@@ -774,6 +996,11 @@ def collect_issue_snapshot(
         "repository_scans": repository_scans,
         "authoritative_fast_path_reference": authoritative_fast_path_reference,
         "authoritative_scope_complete": authoritative_scope_complete,
+        "source_prs": source_prs,
+        "source_pr_limit": SOURCE_PR_LIMIT,
+        "source_pr_requested_count": len(requested_source_pr_refs),
+        "source_pr_attempted_count": len(bounded_source_pr_refs),
+        "source_pr_resolved_count": len(source_prs),
         "deadline_exceeded": github_deadline_exceeded(deadline),
         "warnings": scan_warnings,
     }
@@ -852,6 +1079,7 @@ def shortlist_issue_candidates(
         has_search_signal = bool(module_matches or object_matches or path_matches or matching_labels)
         if not has_search_signal and item.get("priority", 99) > STRONG_CANDIDATE_PRIORITY_MAX:
             reasons.append("repository-fallback")
+        association = candidate_association(item)
         item.update({
             "repository_match": repository_match,
             "module_matches": module_matches,
@@ -859,6 +1087,13 @@ def shortlist_issue_candidates(
             "path_matches": path_matches,
             "matching_labels": matching_labels,
             "has_search_signal": has_search_signal,
+            "association": association,
+            "acceptance_items_eligible": association == "authoritative",
+            "acceptance_scope_review": (
+                "required"
+                if association == "authoritative"
+                else "not-eligible"
+            ),
             "shortlist_reasons": [reason for reason in reasons if reason],
         })
         enriched.append(item)
@@ -1048,6 +1283,10 @@ def hydrate_issue_candidates(
             "acceptance_items": resolved.get("acceptance_items", []) if resolved.get("resolved") else [],
             "hydration_warnings": resolved.get("warnings", []),
         })
+        if item.get("acceptance_items_eligible"):
+            item["acceptance_scope_review"] = (
+                "required" if item["acceptance_items"] else "not-applicable"
+            )
         if resolved.get("resolved"):
             succeeded += 1
             for key in ("repository", "item_type", "number", "title", "state", "url", "labels"):
@@ -1068,6 +1307,58 @@ def hydrate_issue_candidates(
         "fallback_request_count": fallback_request_count,
         "deadline_exceeded": github_deadline_exceeded(deadline),
         "warnings": warnings,
+    }
+
+
+def hydrate_mentioned_references(
+    candidates: list[dict[str, Any]],
+    affected_repositories: set[str],
+    workspace_root: Path,
+    deadline: float | None,
+) -> dict[str, Any]:
+    """Follow a bounded one-hop reference set without promoting its authority."""
+    mentions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    primary_references = {str(candidate["reference"]) for candidate in candidates}
+    reported_references: set[str] = set()
+    parents_by_reference: dict[str, list[str]] = {}
+    for candidate in candidates:
+        if candidate.get("hydration_status") != "succeeded":
+            continue
+        parent_reference = str(candidate["reference"])
+        extracted = mentioned_reference_candidates(
+            str(candidate.get("body") or ""),
+            str(candidate.get("repository") or reference_repository(parent_reference) or "") or None,
+            parent_reference,
+            affected_repositories,
+        )
+        reported_for_candidate: list[str] = []
+        for item in extracted:
+            reference = item["reference"]
+            if reference not in reported_references:
+                if len(reported_references) >= ISSUE_REFERENCE_FOLLOW_LIMIT:
+                    continue
+                reported_references.add(reference)
+            reported_for_candidate.append(reference)
+            parents_by_reference.setdefault(reference, []).append(parent_reference)
+            if (
+                reference in primary_references
+                or reference in seen
+                or len(mentions) >= ISSUE_REFERENCE_FOLLOW_LIMIT
+            ):
+                continue
+            seen.add(reference)
+            mentions.append(item)
+        candidate["mentioned_references"] = reported_for_candidate
+
+    hydration = hydrate_issue_candidates(mentions, workspace_root, deadline)
+    for item in hydration["candidates"]:
+        item["association"] = "mentioned-reference"
+        item["acceptance_items_eligible"] = False
+        item["mentioned_by"] = sorted(set(parents_by_reference.get(item["reference"], [])))
+    return {
+        **hydration,
+        "limit": ISSUE_REFERENCE_FOLLOW_LIMIT,
     }
 
 
@@ -1129,7 +1420,10 @@ def finalized_auto_issue_context(
             **snapshot,
             "strong_candidates": [
                 candidate for candidate in reference_candidates
-                if candidate["reference"] == fast_path_reference
+                if (
+                    candidate["reference"] == fast_path_reference
+                    or str(candidate.get("source") or "").endswith("-mentioned-issue")
+                )
             ],
             "repository_candidates": [],
         }
@@ -1138,6 +1432,12 @@ def finalized_auto_issue_context(
     )
     hydration = hydrate_issue_candidates(
         shortlist["candidates"], workspace_root, deadline,
+    )
+    mentioned_hydration = hydrate_mentioned_references(
+        hydration["candidates"],
+        set(snapshot.get("affected_repositories", [])),
+        workspace_root,
+        deadline,
     )
     scan_status, repository_scans = issue_scan_status(snapshot)
     hydrated_by_reference = {
@@ -1221,6 +1521,12 @@ def finalized_auto_issue_context(
             "discovery_mode": "auto",
             "selection_reason": selected["source"],
             "analysis_status": "strong-link-selected" if resolved else "resolution-failed",
+            "association": "authoritative" if resolved else "unresolved",
+            "acceptance_items_eligible": resolved,
+            "acceptance_scope_review": (
+                candidate.get("acceptance_scope_review", "required")
+                if resolved and candidate else "not-eligible"
+            ),
         })
         base_warnings = []
 
@@ -1230,6 +1536,27 @@ def finalized_auto_issue_context(
             f"{shortlist['strong_candidate_overflow_count']}; provide --issue to resolve the ambiguity"
         )
     result["candidates"] = hydration["candidates"]
+    result["mentioned_references"] = mentioned_hydration["candidates"]
+    authoritative_alignments = [
+        candidate for candidate in hydration["candidates"]
+        if candidate.get("association") == "authoritative"
+        and candidate.get("hydration_status") == "succeeded"
+    ]
+    result["authoritative_alignments"] = authoritative_alignments
+    if result.get("resolved"):
+        result["association_status"] = "authoritative"
+    elif authoritative_alignments:
+        result["association_status"] = "repository-authoritative"
+    elif any(
+        candidate.get("association") == "reference-hint"
+        for candidate in hydration["candidates"]
+    ):
+        result["association_status"] = "reference-hints"
+    elif hydration["candidates"]:
+        result["association_status"] = "thematic-only"
+    else:
+        result["association_status"] = "unresolved"
+    result["source_prs"] = snapshot.get("source_prs", [])
     result["repository_issue_counts"] = snapshot.get("repository_issue_counts", {})
     result["issue_scan"] = {
         "scan_status": scan_status,
@@ -1262,6 +1589,14 @@ def finalized_auto_issue_context(
         "strong_candidate_count": shortlist["strong_candidate_count"],
         "authoritative_candidate_count": len(authoritative_candidates),
         "reference_hint_count": len(reference_hints),
+        "source_pr_requested_count": snapshot.get("source_pr_requested_count", 0),
+        "source_pr_attempted_count": snapshot.get("source_pr_attempted_count", 0),
+        "source_pr_resolved_count": snapshot.get("source_pr_resolved_count", 0),
+        "source_pr_limit": snapshot.get("source_pr_limit", SOURCE_PR_LIMIT),
+        "mentioned_reference_limit": mentioned_hydration["limit"],
+        "mentioned_reference_attempted_count": mentioned_hydration["attempted_count"],
+        "mentioned_reference_succeeded_count": mentioned_hydration["succeeded_count"],
+        "mentioned_reference_failed_count": mentioned_hydration["failed_count"],
         "strong_candidate_overflow_count": shortlist["strong_candidate_overflow_count"],
         "strong_overflow_references": shortlist["strong_overflow_references"],
     }
@@ -1270,6 +1605,7 @@ def finalized_auto_issue_context(
         *base_warnings,
         *snapshot.get("warnings", []),
         *hydration["warnings"],
+        *mentioned_hydration["warnings"],
     ]
     return result
 
@@ -1279,9 +1615,10 @@ def auto_discover_issue(
     repositories: list[dict[str, Any]],
     modules_by_repository: dict[str, list[dict[str, Any]]] | None = None,
     changed_objects: list[dict[str, Any]] | None = None,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     deadline = github_deadline()
-    snapshot = collect_issue_snapshot(repositories, deadline)
+    snapshot = collect_issue_snapshot(repositories, deadline, source_pr_refs)
     return finalized_auto_issue_context(
         workspace_root, snapshot, modules_by_repository, changed_objects, deadline,
     )
@@ -1294,6 +1631,7 @@ def collect_issue_context(
     repositories: list[dict[str, Any]] | None = None,
     modules_by_repository: dict[str, list[dict[str, Any]]] | None = None,
     changed_objects: list[dict[str, Any]] | None = None,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     if issue_ref and issue_file:
         return unresolved(issue_ref, None, "--issue and --issue-file are mutually exclusive")
@@ -1311,5 +1649,6 @@ def collect_issue_context(
             repositories or [],
             modules_by_repository,
             changed_objects,
+            source_pr_refs,
         )
     return resolve_github_issue(issue_ref, workspace_root, github_deadline())

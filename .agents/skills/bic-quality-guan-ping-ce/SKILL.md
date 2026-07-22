@@ -27,7 +27,9 @@ Do:
 - After locating affected repositories, scan their open Issues and analyze them
   against changed modules and objects. Treat explicit/current-PR links as
   authoritative, keep commit/branch references as search hints that still need
-  semantic confirmation, and accept an explicit Issue as an override.
+  semantic confirmation, and accept an explicit Issue as an override. Keep an
+  ordinary keyword/module match as a thematic candidate; it is not the change's
+  requirement source and its acceptance items are not risk inputs.
 - Identify the changed repository for every file, map its module when supported,
   and preserve unmapped files without inventing semantics.
 - Explain which existing tests directly, indirectly, or possibly correspond to
@@ -78,6 +80,15 @@ If the user asks to execute tests, state that this skill only provides read-only
      this workflow. Never execute the wrapper with `--help`, solely to discover
      options, or as a preflight. If the user supplied a local Issue file, include
      `--issue-file <path>` in the one assessment call.
+   - If the user supplied one or more PR URLs or `owner/repo#number` values as
+     the provenance of the local Diff, pass each as a repeated
+     `--source-pr <reference>`. This is especially important for restored
+     worktrees whose current branch/HEAD no longer retains the merged PR link.
+     Do not combine `--source-pr` with an explicit `--issue` or `--issue-file`.
+     Treat a resolved source PR as authoritative change provenance. If it has no
+     linked/closing Issue, summarize its title/body as the change definition but
+     state that Issue alignment remains unresolved; do not relabel a thematic
+     open Issue as authoritative to fill that gap.
    - Treat the other wrappers as standalone diagnostics; do not run all wrappers
      sequentially for one final brief because each diagnostic invocation may
      perform its own live metadata collection.
@@ -107,7 +118,14 @@ If the user asks to execute tests, state that this skill only provides read-only
      resolve workspace Issue alignment or suppress another repository's scan.
      Treat commit and branch references as protected shortlist hints that require
      semantic agreement with the Diff. Repository membership or keyword overlap
-     alone cannot select an Issue. Follow the bounded scanning, shortlist,
+     alone cannot select an Issue. Classify Issue evidence as:
+     `authoritative` for an explicit override or PR linked/closing Issue,
+     `reference-hint` for commit/branch provenance that still needs semantic
+     confirmation, `thematic-candidate` for an ordinary search match, and
+     `mentioned-reference` for a bounded one-hop body reference. A thematic
+     candidate can explain background context but can never be promoted to the
+     requirement source solely because it is the only semantically similar open
+     Issue. Follow the bounded scanning, shortlist,
      hydration, timeout, ambiguity, and failure-state rules in
      `references/risk-model.md`. When the user supplies an Issue number, URL, or
      `owner/repo#number`, pass it as `--issue` to override discovery. A bare
@@ -116,7 +134,10 @@ If the user asks to execute tests, state that this skill only provides read-only
      JSON/Markdown Issue or deterministic fixture. All GitHub access is read-only
      through the local `gh` CLI. Complete 1B only after every affected repository
      has an explicit scan state; never translate `scan-failed` or `partial-scan`
-     into proof that no open Issue exists.
+     into proof that no open Issue exists. Follow at most ten repository-contained
+     Issue references from hydrated candidate bodies for one hop, report them as
+     context, and never inherit authority or acceptance eligibility from the
+     parent candidate.
    - **1C. Freeze the snapshot and scan state.** Preserve the returned `context`,
      `scope`, `issue_context`, `test_correspondence`, and `risk_assessment`, plus
      all comparison, scan, hydration, deadline, and query warnings. Use these
@@ -189,15 +210,19 @@ If the user asks to execute tests, state that this skill only provides read-only
    missing-test items; risk levels belong only in the Risk Matrix.
 7. Treat `risk_assessment` from the frozen assessment snapshot as the
    deterministic risk floor; do not run the wrapper again. Compare every Issue
-   acceptance item semantically with concrete Diff and test evidence, add an
-   Issue-alignment row for each item, and only raise the floor when evidence is
-   missing. If repository scanning yields exactly one semantically supported
-   candidate, use its already hydrated full body from the frozen assessment
-   snapshot for final alignment. Never perform a second Issue body lookup. If no
-   candidate or multiple candidates remain plausible, keep the overall result
-   `unassessed`. Never lower the risk floor or infer alignment from keyword
-   overlap alone. This matrix describes pre-test verification risk, not residual
-   risk.
+   acceptance item with concrete Diff and test evidence only when
+   `acceptance_items_eligible` is true. Before adding rows, classify each eligible
+   item as `in-scope`, `adjacent`, or `unchanged/out-of-scope` for this Diff.
+   Add risk rows only for `in-scope` items; report the other items as context so
+   an umbrella Issue cannot inflate this change's risk matrix. An ordinary
+   `thematic-candidate`, even when unique and semantically similar, remains
+   background context and keeps workspace Issue alignment and overall risk
+   `unassessed`. A `reference-hint` may become `strong-related` only when its
+   preserved commit/branch/PR provenance and hydrated body both agree with
+   concrete changed objects; then state the promotion evidence explicitly.
+   Never perform a second Issue body lookup. Never lower the risk floor or infer
+   alignment from keyword overlap alone. This matrix describes pre-test
+   verification risk, not residual risk.
 8. Preserve `test_execution_manifest` from the frozen snapshot. It contains
    affected repository heads/bases and change fingerprints, required direct and
    indirect candidates, optional possible candidates, selected cases, command

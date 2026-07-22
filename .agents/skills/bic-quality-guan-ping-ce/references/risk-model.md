@@ -18,8 +18,23 @@ Use only concrete evidence from:
 
 Do not use a path, label, filename, or keyword match by itself to assign risk.
 Do not choose among equally authoritative Issue candidates; keep the overall result
-`unassessed` until the association is strongly linked or uniquely supported by
-semantic Diff/module evidence.
+`unassessed` until the association is authoritative or a provenance-bearing
+reference hint is explicitly justified as strong-related.
+
+Keep provenance and topical similarity separate:
+
+- `authoritative`: explicit Issue override, local Issue file, or a linked/closing
+  Issue from the current PR or an explicitly supplied `--source-pr`.
+- `reference-hint`: commit/branch reference. It may become `strong-related` only
+  after its preserved provenance and full body both match concrete Diff objects.
+- `thematic-candidate`: ordinary open-Issue search match. It is background
+  context even when it is the only similar candidate.
+- `mentioned-reference`: bounded one-hop reference from a hydrated body. It does
+  not inherit the parent candidate's authority.
+
+Only `authoritative` and explicitly justified `strong-related` Issues may supply
+acceptance items to the risk matrix. Never turn a thematic candidate into the
+requirement source because its vocabulary resembles the Diff.
 
 ## Affected-repository Issue analysis
 
@@ -44,9 +59,16 @@ every shortlisted candidate. Do not select a smaller body subset from metadata.
 Use one GraphQL batch for multiple bodies, a bounded fallback for unresolved
 candidates, and one shared 60-second deadline for the complete GitHub phase.
 Require repository identity plus a concrete match between the Issue goal or
-acceptance item and a changed module, file, or object. If exactly one candidate
-meets that standard, use it for final Issue alignment. If none or several remain,
-show the candidates and keep the overall result `unassessed`.
+acceptance item and a changed module, file, or object when explaining thematic
+context. Even if exactly one ordinary candidate meets that standard, keep it
+thematic and leave workspace Issue alignment `unassessed`. Follow at most ten
+repository-contained Issue references from hydrated bodies for one hop; show
+them as `mentioned-reference` context without inheriting authority. If source PR
+provenance is known, pass each PR with repeated `--source-pr` so linked/closing
+Issues retain their real association after a merged PR is restored as worktree
+changes. A resolved source PR remains authoritative change provenance even when
+it closes no Issue: use its body to define the Diff's intended change, but keep
+Issue alignment unassessed and do not substitute a thematic Issue.
 
 Treat `scan-failed` and `partial-scan` as unavailable or incomplete Issue
 evidence, never as proof that no open Issue exists. Keep overall risk
@@ -64,7 +86,13 @@ not lower it.
 
 ## Issue alignment rows
 
-Add one row per Issue acceptance item:
+First classify every eligible acceptance item as `in-scope`, `adjacent`, or
+`unchanged/out-of-scope` by comparing it with concrete changed objects. Add one
+row per `in-scope` acceptance item. Keep adjacent and unchanged/out-of-scope
+items visible as Issue context, but do not let an umbrella Issue inflate the
+risk matrix.
+
+For each in-scope row:
 
 - `high`: no concrete Diff evidence implements the item, or a required
   cross-repository consumer/contract/test is missing.
@@ -80,9 +108,10 @@ hint only. Do not lower risk because an Issue checkbox is already checked.
 
 ## Overall risk
 
-Use the highest row after Issue alignment. If no Issue was authoritatively linked or
-uniquely selected by semantic affected-repository analysis, overall risk is
-`unassessed`, even when deterministic Diff/test rows are available. State
+Use the highest row after Issue alignment. If no Issue was authoritatively linked
+or explicitly promoted from a provenance-bearing reference hint to
+`strong-related`, overall risk is `unassessed`, even when deterministic Diff/test
+rows are available. State
 explicitly that tests were not executed. The current analyzer returns one
 workspace-level risk assessment. Do not infer business streams or allocate
 workspace test counts and risk rows among guessed streams.

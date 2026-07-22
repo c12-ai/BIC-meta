@@ -43,6 +43,10 @@ def assess_pretest_risk(
     issue: dict[str, Any],
     model: dict[str, Any],
 ) -> dict[str, Any]:
+    acceptance_eligible = bool(
+        issue.get("acceptance_items_eligible", issue.get("resolved"))
+    )
+    acceptance_items = issue.get("acceptance_items", []) if acceptance_eligible else []
     modules = module_names(scope)
     affected_repositories = scope.get("affected_repositories", [])
     module_results = correspondence.get("modules", [])
@@ -75,7 +79,7 @@ def assess_pretest_risk(
     if issue.get("title"):
         item_label = "PR" if issue.get("item_type") == "pull-request" else "Issue"
         issue_evidence.append(f"{item_label}: {issue['title']}")
-    issue_evidence.extend(item["text"] for item in issue.get("acceptance_items", []))
+    issue_evidence.extend(item["text"] for item in acceptance_items)
     issue_summary = issue_evidence[:1]
 
     rows: list[dict[str, Any]] = []
@@ -84,7 +88,13 @@ def assess_pretest_risk(
             "issue-clarity", "unassessed",
             "No resolved Issue context is available; Issue-to-Diff alignment cannot be judged.",
         ))
-    elif not issue.get("acceptance_items"):
+    elif not acceptance_eligible:
+        rows.append(row(
+            "issue-clarity", "unassessed",
+            "The available Issue is contextual only and is not eligible to define this change's acceptance scope.",
+            issue_evidence=issue_evidence,
+        ))
+    elif not acceptance_items:
         rows.append(row(
             "issue-clarity", "medium",
             "The Issue is available but has no explicit acceptance checklist or acceptance section.",
@@ -208,14 +218,14 @@ def assess_pretest_risk(
 
     ranked = [item["risk_level"] for item in rows if item["risk_level"] in RANK]
     risk_floor = max(ranked, key=RANK.get) if ranked else "low"
-    overall = risk_floor if issue.get("resolved") else "unassessed"
+    overall = risk_floor if issue.get("resolved") and acceptance_eligible else "unassessed"
     return {
         "assessment_stage": "pre-test",
         "overall_risk": overall,
         "risk_floor": risk_floor,
         "risk_matrix": rows,
-        "requires_semantic_issue_alignment": bool(issue.get("resolved")),
-        "issue_acceptance_items": issue.get("acceptance_items", []),
+        "requires_semantic_issue_alignment": bool(issue.get("resolved") and acceptance_eligible),
+        "issue_acceptance_items": acceptance_items,
         "assessment_note": (
             "This is a pre-test risk assessment. Compare every Issue acceptance item semantically "
             "with Diff and test evidence; that review may raise, but must not lower, the risk floor."

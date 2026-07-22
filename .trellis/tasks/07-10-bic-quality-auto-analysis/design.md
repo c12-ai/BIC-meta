@@ -227,8 +227,9 @@ test-correspondence, and missing-test sections. `mapping_source` remains raw
 diagnostic metadata, and no general next-step recommendation is emitted.
 The brief also includes affected-repository Issue candidates and a pre-test Risk
 Matrix. Deterministic rows establish a risk floor; semantic
-Issue-to-Diff-to-test alignment may raise but not lower it. Missing or
-non-unique Issue context makes overall risk `unassessed`.
+Issue-to-Diff-to-test alignment may raise but not lower it. Missing,
+non-authoritative, or ambiguous Issue provenance makes overall risk
+`unassessed`; a unique thematic match is still non-authoritative.
 
 ## Rollback
 

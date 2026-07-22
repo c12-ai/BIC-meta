@@ -1,5 +1,18 @@
 # Implementation Plan
 
+## 12. Issue Provenance Refinement
+
+- Add repeatable `--source-pr` resolution and retain resolved PR provenance in
+  the immutable Issue snapshot.
+- Label candidates as authoritative, reference hints, thematic candidates, or
+  one-hop mentioned references; keep acceptance eligibility explicit.
+- Follow a bounded affected-repository reference set from hydrated bodies
+  without promoting those references.
+- Update the Skill/risk/deliverable contract so thematic Issues cannot define
+  requirements and umbrella acceptance items are scope-filtered.
+- Add regression tests, synchronize both discovery mirrors, run the complete
+  quality-kit verification chain, and commit locally only.
+
 
 ## 1. Repository and Diff Collection
 

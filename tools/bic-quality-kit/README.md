@@ -125,9 +125,27 @@ items fall back to at most three concurrent lookups. All GitHub calls have
 bounded timeouts and the complete GitHub analysis has a 60-second deadline. It
 preserves shortlist order and reports exclusion,
 hydration, and scan-status data; `scan-failed` and `partial-scan` remain distinct
-from a successful empty scan. Ambiguous or incomplete candidates keep overall
+from a successful empty scan. Ordinary matches remain `thematic-candidate`
+context even when only one looks similar; they cannot define the requirement or
+supply risk-matrix acceptance rows. Commit/branch references remain
+`reference-hint` evidence, and bounded one-hop body references remain
+`mentioned-reference` context. Ambiguous or incomplete provenance keeps overall
 risk `unassessed`. An explicit reference is translated to `--issue` and
 overrides discovery.
+
+When local changes were restored from merged or detached PRs, preserve their
+provenance explicitly:
+
+```text
+用 BIC quality 只看 worktree；来源 PR 是 portal#98 和 service#166
+```
+
+The Skill translates repository-qualified values to repeated `--source-pr`
+arguments. Linked/closing Issues from a resolved source PR are authoritative;
+ordinary Issues mentioned by its body are still reference context. When the PR
+closes no Issue, its title/body remains authoritative change provenance while
+Issue alignment stays unresolved; the Skill does not substitute a thematic open
+Issue.
 
 The analyzer currently returns one workspace-level Issue context, test
 correspondence, and risk assessment. Repository count is reported only as a
@@ -165,6 +183,10 @@ module, test, Issue, and risk stages share one live Issue snapshot:
 ```bash
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh \
+  --worktree-only \
+  --source-pr c12-ai/BIC-agent-portal#98 \
+  --source-pr c12-ai/BIC-agent-service#166
 ```
 
 The assessment uses the complete test inventory internally but omits that raw,
@@ -197,7 +219,9 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/suggest-test-scope.
 ```
 
 All wrappers accept `--base-ref <local-ref>` or `--worktree-only`; Issue-aware
-commands also accept `--issue <number-or-url-or-owner/repo#number>`. By default,
+commands also accept `--issue <number-or-url-or-owner/repo#number>` or repeated
+`--source-pr <owner/repo#number-or-pull-url>`. Source PRs cannot be combined
+with the explicit Issue/Issue-file overrides. By default,
 each repository selects the first locally available CI base, `origin/main`,
 `main`, `origin/master`, or `master`, then combines
 `merge-base(base, HEAD)..HEAD` with unstaged, staged, and untracked changes.

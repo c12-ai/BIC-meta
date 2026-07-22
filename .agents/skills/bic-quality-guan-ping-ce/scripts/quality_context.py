@@ -373,6 +373,7 @@ def collect_context(
     issue_ref: str | None = None,
     issue_file: str | None = None,
     collect_issues: bool = True,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     discovered = discover_repositories()
     child_paths = {repo["relative_path"] for repo in discovered if repo["relative_path"] != "."}
@@ -400,6 +401,7 @@ def collect_context(
     if collect_issues:
         context["issue_context"] = collect_issue_context(
             WORKSPACE_ROOT, issue_ref, issue_file, repositories,
+            source_pr_refs=source_pr_refs,
         )
     return context
 
@@ -563,9 +565,12 @@ def suggest_scope(
     worktree_only: bool = False,
     issue_ref: str | None = None,
     issue_file: str | None = None,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     context = collect_context(
-        base_ref, worktree_only, issue_ref, issue_file, collect_issues=False,
+        base_ref, worktree_only, issue_ref, issue_file,
+        collect_issues=False,
+        source_pr_refs=source_pr_refs,
     )
     scope = map_modules(context)
     tests = inspect_tests(context)
@@ -577,6 +582,7 @@ def suggest_scope(
         context["repositories"],
         scope["modules_by_repository"],
         symbols,
+        source_pr_refs,
     )
     return {
         "workspace_root": str(WORKSPACE_ROOT),
@@ -592,8 +598,11 @@ def assess_quality(
     worktree_only: bool = False,
     issue_ref: str | None = None,
     issue_file: str | None = None,
+    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    payload = suggest_scope(base_ref, worktree_only, issue_ref, issue_file)
+    payload = suggest_scope(
+        base_ref, worktree_only, issue_ref, issue_file, source_pr_refs,
+    )
     payload["risk_assessment"] = assess_pretest_risk(
         payload["context"],
         payload["scope"],
@@ -619,22 +628,46 @@ def main() -> int:
     parser.add_argument("--worktree-only", action="store_true", help="Skip committed branch comparison.")
     parser.add_argument("--issue", help="Read this GitHub issue number, URL, or owner/repo#number with the local gh CLI.")
     parser.add_argument("--issue-file", help="Read issue context from a local JSON or Markdown file.")
+    parser.add_argument(
+        "--source-pr",
+        action="append",
+        default=[],
+        help=(
+            "Use owner/repo#number or a GitHub pull URL as explicit change provenance; "
+            "repeat for cross-repository changes."
+        ),
+    )
     args = parser.parse_args()
     if args.base_ref and args.worktree_only:
         parser.error("--base-ref and --worktree-only are mutually exclusive")
     if args.issue and args.issue_file:
         parser.error("--issue and --issue-file are mutually exclusive")
+    if args.source_pr and (args.issue or args.issue_file):
+        parser.error("--source-pr cannot be combined with --issue or --issue-file")
 
     if args.command == "collect":
-        payload = collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file)
+        payload = collect_context(
+            args.base_ref, args.worktree_only, args.issue, args.issue_file,
+            source_pr_refs=args.source_pr,
+        )
     elif args.command == "impact":
-        payload = map_modules(collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file))
+        payload = map_modules(collect_context(
+            args.base_ref, args.worktree_only, args.issue, args.issue_file,
+            source_pr_refs=args.source_pr,
+        ))
     elif args.command == "inventory":
-        payload = inspect_tests(collect_context(args.base_ref, args.worktree_only, args.issue, args.issue_file))
+        payload = inspect_tests(collect_context(
+            args.base_ref, args.worktree_only, args.issue, args.issue_file,
+            source_pr_refs=args.source_pr,
+        ))
     elif args.command == "suggest":
-        payload = suggest_scope(args.base_ref, args.worktree_only, args.issue, args.issue_file)
+        payload = suggest_scope(
+            args.base_ref, args.worktree_only, args.issue, args.issue_file, args.source_pr,
+        )
     else:
-        payload = assess_quality(args.base_ref, args.worktree_only, args.issue, args.issue_file)
+        payload = assess_quality(
+            args.base_ref, args.worktree_only, args.issue, args.issue_file, args.source_pr,
+        )
     json.dump(sanitize_for_output(payload), sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
