@@ -181,7 +181,7 @@ repository or test directory is added.
 - [ ] Risk output reports `technical_risk`, `requirement_alignment`, and
       `assessment_completeness`; no Issue leaves technical risk intact and only
       requirement alignment unassessed.
-- [ ] Issue discovery searches bounded open and closed Issue metadata around
+- [x] Issue discovery searches bounded open and closed Issue metadata around
       current-PR or local commit activity, validates top candidates against
       timeline evidence, and reads only bounded comments as untrusted data.
 - [ ] Every eligible acceptance item is classified as direct, indirect,

@@ -116,13 +116,16 @@ repository-local candidate rather than resolving workspace Issue alignment.
 Diff-commit references and
 an `issue-123` branch-name pattern are protected hints that still need semantic
 confirmation. Without an authoritative link, the Skill scans at most 100
-metadata records per affected repository, compares English/Chinese/mixed titles
+combined open/closed metadata records per affected repository (closed records
+are limited to a current-PR/local-commit activity window), compares English/Chinese/mixed titles
 and labels with changed modules, objects, and paths, shortlists at most 10
 ordinary candidates, keeps at most one no-signal fallback per affected
 repository, and reads every shortlisted body before semantic
 alignment. Multiple bodies use one read-only GraphQL batch; unresolved batch
 items fall back to at most three concurrent lookups. All GitHub calls have
 bounded timeouts and the complete GitHub analysis has a 60-second deadline. It
+also reads bounded timeline events and truncated, untrusted comments for only
+the top three candidates; these signals never grant Issue authority. It
 preserves shortlist order and reports exclusion,
 hydration, and scan-status data; `scan-failed` and `partial-scan` remain distinct
 from a successful empty scan. Ordinary matches remain `thematic-candidate`

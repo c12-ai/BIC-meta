@@ -82,6 +82,15 @@ proximity alone. Only the final shortlist may receive bounded timeline and
 comment hydration. Historical PR URLs supplied in conversation are background
 context and are not analyzer inputs.
 
+When an activity window exists, the per-repository metadata budget is split
+between 60 open and 40 closed Issues. The closed query is restricted to the
+padded current-PR/local-commit window. Activity proximity participates in
+recall ordering but never changes association authority. After full-body
+hydration, only the top three candidates receive up to twenty timeline events
+and five comments; comment bodies are truncated to 1000 characters and marked
+as untrusted data. Timeline corroboration is reported with an explicit
+`authority_effect: none` contract.
+
 Module mapping and changed-object extraction run before candidate reduction.
 `shortlist_issue_candidates` merges duplicate references, protects explicit and
 strong association evidence, applies deterministic repository/module/object/

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -32,12 +32,19 @@ BRANCH_ISSUE_RE = re.compile(r"(?:^|[/_-])issues?[-_/]?(?P<number>\d+)(?:$|[/_-]
 CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 CJK_SEQUENCE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 ISSUE_METADATA_SCAN_LIMIT = 100
+ISSUE_OPEN_METADATA_SCAN_LIMIT = 60
+ISSUE_CLOSED_METADATA_SCAN_LIMIT = 40
 ISSUE_SHORTLIST_LIMIT = 10
 GH_METADATA_TIMEOUT_SECONDS = 15
 GH_BODY_TIMEOUT_SECONDS = 10
 GH_TOTAL_TIMEOUT_SECONDS = 60
 ISSUE_HYDRATION_MAX_WORKERS = 3
 ISSUE_REFERENCE_FOLLOW_LIMIT = 10
+ISSUE_ACTIVITY_HYDRATION_LIMIT = 3
+ISSUE_TIMELINE_LIMIT = 20
+ISSUE_COMMENT_LIMIT = 5
+ISSUE_COMMENT_BODY_LIMIT = 1000
+ISSUE_ACTIVITY_WINDOW_PADDING_DAYS = 30
 STRONG_CANDIDATE_PRIORITY_MAX = 3
 AUTHORITATIVE_CANDIDATE_PRIORITY_MAX = 1
 SEARCH_STOP_WORDS = {
@@ -281,25 +288,41 @@ def mentioned_reference_candidates(
 
 
 def repository_issue_candidates(
-    payloads: list[dict[str, Any]], repository: str,
+    payloads: list[dict[str, Any]],
+    repository: str,
+    activity_window: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for payload in payloads:
         number = payload.get("number")
         if not number:
             continue
+        state = str(payload.get("state") or "OPEN").upper()
+        activity_timestamp = (
+            payload.get("closedAt") or payload.get("updatedAt") or payload.get("createdAt")
+        )
+        activity_value = updated_timestamp(activity_timestamp)
+        window_start = updated_timestamp(activity_window.get("search_start")) if activity_window else 0
+        window_end = updated_timestamp(activity_window.get("search_end")) if activity_window else 0
+        temporal_match = bool(
+            activity_window and activity_value and window_start <= activity_value <= window_end + 86400
+        )
         candidates.append({
             "reference": f"{repository}#{number}",
-            "source": "affected-repository-open-issue",
+            "source": f"affected-repository-{state.lower()}-issue",
             "priority": 4,
-            "evidence": f"open Issue in affected repository {repository}",
+            "evidence": f"{state.lower()} Issue in affected repository {repository}",
             "repository": repository,
             "number": number,
             "title": str(payload.get("title") or "").strip() or None,
             "url": payload.get("url"),
-            "state": payload.get("state"),
+            "state": state,
             "labels": normalize_labels(payload.get("labels")),
+            "created_at": payload.get("createdAt"),
             "updated_at": payload.get("updatedAt"),
+            "closed_at": payload.get("closedAt"),
+            "activity_timestamp": activity_timestamp,
+            "activity_window_match": temporal_match,
         })
     return candidates
 
@@ -408,7 +431,8 @@ def current_pr_payload(
         proc = subprocess.run(
             [
                 "gh", "pr", "view", "--json",
-                "number,title,body,url,state,headRefName,baseRefName,closingIssuesReferences",
+                "number,title,body,url,state,headRefName,baseRefName,createdAt,updatedAt,"
+                "closedAt,mergedAt,closingIssuesReferences",
             ],
             cwd=repo, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             check=False, timeout=timeout,
@@ -436,40 +460,45 @@ def list_repository_issues(
     cwd: Path,
     limit: int = ISSUE_METADATA_SCAN_LIMIT,
     deadline: float | None = None,
+    state: str = "open",
+    search_query: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     if not shutil.which("gh"):
         return [], "GitHub CLI `gh` is not available; affected repository Issues were not scanned"
     timeout = bounded_github_timeout(GH_METADATA_TIMEOUT_SECONDS, deadline)
     if timeout is None:
-        return [], f"Could not scan open Issues for {repository}: total GitHub analysis deadline exceeded"
+        return [], f"Could not scan {state} Issues for {repository}: total GitHub analysis deadline exceeded"
+    command = [
+        "gh", "issue", "list", "--repo", repository,
+        "--state", state, "--limit", str(limit),
+        "--json", "number,title,url,state,labels,createdAt,updatedAt,closedAt",
+    ]
+    if search_query:
+        command.extend(["--search", search_query])
     try:
         proc = subprocess.run(
-            [
-                "gh", "issue", "list", "--repo", repository,
-                "--state", "open", "--limit", str(limit),
-                "--json", "number,title,url,state,labels,updatedAt",
-            ],
+            command,
             cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             check=False, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         if github_deadline_exceeded(deadline):
             return [], (
-                f"Could not scan open Issues for {repository}: total GitHub analysis deadline exceeded"
+                f"Could not scan {state} Issues for {repository}: total GitHub analysis deadline exceeded"
             )
         return [], (
-            f"Could not scan open Issues for {repository}: timed out after "
+            f"Could not scan {state} Issues for {repository}: timed out after "
             f"{GH_METADATA_TIMEOUT_SECONDS} seconds"
         )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or "GitHub CLI could not list Issues"
-        return [], f"Could not scan open Issues for {repository}: {detail}"
+        return [], f"Could not scan {state} Issues for {repository}: {detail}"
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
-        return [], f"Could not scan open Issues for {repository}: invalid JSON: {exc}"
+        return [], f"Could not scan {state} Issues for {repository}: invalid JSON: {exc}"
     if not isinstance(payload, list):
-        return [], f"Could not scan open Issues for {repository}: GitHub CLI returned a non-list payload"
+        return [], f"Could not scan {state} Issues for {repository}: GitHub CLI returned a non-list payload"
     return [item for item in payload if isinstance(item, dict)], None
 
 
@@ -481,6 +510,52 @@ def commit_messages(repo: Path, merge_base: str | None) -> str:
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     return proc.stdout if proc.returncode == 0 else ""
+
+
+def commit_activity_timestamps(repo: Path, merge_base: str | None) -> list[str]:
+    if not merge_base:
+        return []
+    proc = subprocess.run(
+        ["git", "log", "--format=%cI", f"{merge_base}..HEAD"], cwd=repo,
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()] if proc.returncode == 0 else []
+
+
+def repository_activity_window(
+    repo: Path,
+    merge_base: str | None,
+    pr_payload: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Build a bounded search window from the current PR and local commits."""
+    timestamp_sources: list[tuple[str, str]] = []
+    if pr_payload:
+        for field in ("createdAt", "updatedAt", "closedAt", "mergedAt"):
+            if pr_payload.get(field):
+                timestamp_sources.append((f"current-pr:{field}", str(pr_payload[field])))
+    timestamp_sources.extend(
+        ("local-commit", value)
+        for value in commit_activity_timestamps(repo, merge_base)
+    )
+    parsed = [
+        (source, datetime.fromisoformat(value.replace("Z", "+00:00")))
+        for source, value in timestamp_sources
+        if updated_timestamp(value)
+    ]
+    if not parsed:
+        return None
+    earliest = min(value for _source, value in parsed)
+    latest = max(value for _source, value in parsed)
+    search_start = earliest - timedelta(days=ISSUE_ACTIVITY_WINDOW_PADDING_DAYS)
+    search_end = latest + timedelta(days=ISSUE_ACTIVITY_WINDOW_PADDING_DAYS)
+    return {
+        "start": earliest.isoformat(),
+        "end": latest.isoformat(),
+        "search_start": search_start.date().isoformat(),
+        "search_end": search_end.date().isoformat(),
+        "padding_days": ISSUE_ACTIVITY_WINDOW_PADDING_DAYS,
+        "sources": sorted({source for source, _value in parsed}),
+    }
 
 
 def normalize_issue(payload: dict[str, Any], reference: str, source: str) -> dict[str, Any]:
@@ -771,7 +846,9 @@ def collect_issue_snapshot(
     repository_scans: dict[str, dict[str, Any]] = {}
     scan_warnings: list[str] = []
     affected_repositories: list[str] = []
-    affected_repo_records: list[tuple[str, Path]] = []
+    affected_repo_records: list[tuple[str, Path, dict[str, Any] | None]] = []
+    activity_windows: dict[str, dict[str, Any]] = {}
+    current_pr_urls: list[str] = []
     for repo_info in repositories:
         if not repo_info.get("change_count"):
             continue
@@ -783,10 +860,17 @@ def collect_issue_snapshot(
             )
             continue
         affected_repositories.append(repository)
-        affected_repo_records.append((repository, repo))
         pr_payload = current_pr_payload(repo, scan_warnings, deadline)
         if pr_payload:
             strong_candidates.extend(pr_reference_candidates(pr_payload, repository))
+            if pr_payload.get("url"):
+                current_pr_urls.append(str(pr_payload["url"]))
+        activity_window = repository_activity_window(
+            repo, repo_info.get("merge_base"), pr_payload,
+        )
+        if activity_window:
+            activity_windows[repository] = activity_window
+        affected_repo_records.append((repository, repo, activity_window))
         strong_candidates.extend(closing_reference_candidates(
             commit_messages(repo, repo_info.get("merge_base")),
             repository,
@@ -818,26 +902,55 @@ def collect_issue_snapshot(
     )
 
     if authoritative_fast_path_reference:
-        for repository, _repo in affected_repo_records:
+        for repository, _repo, _activity_window in affected_repo_records:
             repository_scans[repository] = {
                 "status": "skipped-authoritative",
                 "scanned_count": 0,
                 "warning": None,
             }
     else:
-        for repository, repo in affected_repo_records:
-            issues, warning = list_repository_issues(
-                repository, repo, limit=ISSUE_METADATA_SCAN_LIMIT, deadline=deadline,
+        for repository, repo, activity_window in affected_repo_records:
+            open_limit = (
+                ISSUE_OPEN_METADATA_SCAN_LIMIT if activity_window else ISSUE_METADATA_SCAN_LIMIT
             )
-            if warning:
-                scan_warnings.append(warning)
+            open_issues, open_warning = list_repository_issues(
+                repository, repo, limit=open_limit, deadline=deadline, state="open",
+            )
+            closed_issues: list[dict[str, Any]] = []
+            closed_warning = None
+            if activity_window:
+                closed_query = (
+                    f"closed:{activity_window['search_start']}..{activity_window['search_end']}"
+                )
+                closed_issues, closed_warning = list_repository_issues(
+                    repository,
+                    repo,
+                    limit=ISSUE_CLOSED_METADATA_SCAN_LIMIT,
+                    deadline=deadline,
+                    state="closed",
+                    search_query=closed_query,
+                )
+            warnings = [item for item in (open_warning, closed_warning) if item]
+            scan_warnings.extend(warnings)
+            if warnings and len(warnings) == (2 if activity_window else 1):
+                scan_status = "failed"
+            elif warnings:
+                scan_status = "partial"
+            else:
+                scan_status = "succeeded"
+            issues = [*open_issues, *closed_issues]
             repository_scans[repository] = {
-                "status": "failed" if warning else "succeeded",
+                "status": scan_status,
                 "scanned_count": len(issues),
-                "warning": warning,
+                "open_scanned_count": len(open_issues),
+                "closed_scanned_count": len(closed_issues),
+                "activity_window": activity_window,
+                "warning": "; ".join(warnings) if warnings else None,
             }
             repository_issue_counts[repository] = len(issues)
-            repository_candidates.extend(repository_issue_candidates(issues, repository))
+            repository_candidates.extend(
+                repository_issue_candidates(issues, repository, activity_window)
+            )
 
     return {
         "metadata_limit_per_repository": ISSUE_METADATA_SCAN_LIMIT,
@@ -846,6 +959,8 @@ def collect_issue_snapshot(
         "repository_candidates": repository_candidates,
         "repository_issue_counts": repository_issue_counts,
         "repository_scans": repository_scans,
+        "activity_windows": activity_windows,
+        "current_pr_urls": sorted(set(current_pr_urls)),
         "authoritative_fast_path_reference": authoritative_fast_path_reference,
         "authoritative_scope_complete": authoritative_scope_complete,
         "deadline_exceeded": github_deadline_exceeded(deadline),
@@ -923,7 +1038,11 @@ def shortlist_issue_candidates(
             reasons.append(f"path-match:{','.join(path_matches)}")
         if matching_labels:
             reasons.append(f"label-match:{','.join(matching_labels)}")
-        has_search_signal = bool(module_matches or object_matches or path_matches or matching_labels)
+        temporal_match = bool(item.get("activity_window_match"))
+        if temporal_match:
+            reasons.append("activity-window-match")
+        has_semantic_signal = bool(module_matches or object_matches or path_matches or matching_labels)
+        has_search_signal = has_semantic_signal or temporal_match
         if not has_search_signal and item.get("priority", 99) > STRONG_CANDIDATE_PRIORITY_MAX:
             reasons.append("repository-fallback")
         association = candidate_association(item)
@@ -933,6 +1052,7 @@ def shortlist_issue_candidates(
             "object_matches": object_matches,
             "path_matches": path_matches,
             "matching_labels": matching_labels,
+            "has_semantic_signal": has_semantic_signal,
             "has_search_signal": has_search_signal,
             "association": association,
             "acceptance_items_eligible": association == "authoritative",
@@ -953,6 +1073,8 @@ def shortlist_issue_candidates(
             -len(item.get("path_matches", [])),
             -len(item.get("module_matches", [])),
             -len(item.get("matching_labels", [])),
+            0 if item.get("activity_window_match") else 1,
+            0 if str(item.get("state") or "").upper() == "OPEN" else 1,
             -updated_timestamp(item.get("updated_at")),
             item["reference"],
         )
@@ -1157,6 +1279,151 @@ def hydrate_issue_candidates(
     }
 
 
+def read_github_issue_activity(
+    reference: str,
+    cwd: Path,
+    deadline: float | None,
+) -> dict[str, Any]:
+    """Read bounded timeline and comment evidence for one shortlisted Issue."""
+    match = REPO_ISSUE_RE.fullmatch(reference)
+    if match is None or not shutil.which("gh"):
+        return {
+            "status": "not-read",
+            "timeline": [],
+            "comments": [],
+            "warnings": ["Issue activity lookup requires gh and a repository-qualified reference"],
+        }
+
+    def request(endpoint: str, limit: int, label: str) -> tuple[list[dict[str, Any]], str | None]:
+        timeout = bounded_github_timeout(GH_METADATA_TIMEOUT_SECONDS, deadline)
+        if timeout is None:
+            return [], f"{label} lookup skipped after total GitHub analysis deadline"
+        try:
+            proc = subprocess.run(
+                [
+                    "gh", "api", "--method", "GET", endpoint,
+                    "-f", f"per_page={limit}",
+                    "-H", "Accept: application/vnd.github+json",
+                ],
+                cwd=cwd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return [], f"{label} lookup timed out"
+        if proc.returncode != 0:
+            return [], proc.stderr.strip() or f"{label} lookup failed"
+        try:
+            payload = json.loads(proc.stdout)
+        except json.JSONDecodeError as exc:
+            return [], f"{label} lookup returned invalid JSON: {exc}"
+        if not isinstance(payload, list):
+            return [], f"{label} lookup returned a non-list payload"
+        return [item for item in payload if isinstance(item, dict)][:limit], None
+
+    repo = match.group("repo")
+    number = match.group("number")
+    timeline_payload, timeline_warning = request(
+        f"repos/{repo}/issues/{number}/timeline", ISSUE_TIMELINE_LIMIT, "Issue timeline",
+    )
+    comment_payload, comment_warning = request(
+        f"repos/{repo}/issues/{number}/comments", ISSUE_COMMENT_LIMIT, "Issue comments",
+    )
+    timeline = []
+    for item in timeline_payload:
+        source_payload = item.get("source") if isinstance(item.get("source"), dict) else {}
+        source_issue = (
+            source_payload.get("issue")
+            if isinstance(source_payload.get("issue"), dict) else {}
+        )
+        timeline.append({
+            "event": item.get("event"),
+            "created_at": item.get("created_at"),
+            "actor": (item.get("actor") or {}).get("login")
+            if isinstance(item.get("actor"), dict) else None,
+            "source_url": source_issue.get("html_url"),
+            "commit_id": item.get("commit_id"),
+        })
+    comments = []
+    for item in comment_payload:
+        body = str(item.get("body") or "")
+        comments.append({
+            "author": (item.get("user") or {}).get("login")
+            if isinstance(item.get("user"), dict) else None,
+            "created_at": item.get("created_at"),
+            "url": item.get("html_url"),
+            "body": body[:ISSUE_COMMENT_BODY_LIMIT],
+            "body_truncated": len(body) > ISSUE_COMMENT_BODY_LIMIT,
+            "trust": "untrusted-data",
+        })
+    warnings = [item for item in (timeline_warning, comment_warning) if item]
+    status = "succeeded" if not warnings else "partial" if timeline or comments else "failed"
+    return {
+        "status": status,
+        "timeline": timeline,
+        "comments": comments,
+        "warnings": warnings,
+    }
+
+
+def hydrate_shortlist_activity(
+    candidates: list[dict[str, Any]],
+    workspace_root: Path,
+    deadline: float | None,
+    current_pr_urls: list[str],
+) -> dict[str, Any]:
+    """Hydrate only top Issue candidates; activity evidence never grants authority."""
+    warnings: list[str] = []
+    attempted = 0
+    succeeded = 0
+    current_pr_url_set = set(current_pr_urls)
+    for index, candidate in enumerate(candidates):
+        if index >= ISSUE_ACTIVITY_HYDRATION_LIMIT:
+            candidate["activity_evidence_status"] = "not-read-outside-limit"
+            continue
+        if candidate.get("hydration_status") == "failed":
+            candidate["activity_evidence_status"] = "not-read-body-hydration-failed"
+            continue
+        attempted += 1
+        evidence = read_github_issue_activity(
+            str(candidate["reference"]), workspace_root, deadline,
+        )
+        candidate["activity_evidence_status"] = evidence["status"]
+        candidate["timeline_evidence"] = evidence["timeline"]
+        candidate["comment_evidence"] = evidence["comments"]
+        source_urls = {
+            str(item.get("source_url"))
+            for item in evidence["timeline"]
+            if item.get("source_url")
+        }
+        candidate["timeline_validation"] = {
+            "corroborates_current_pr": bool(source_urls & current_pr_url_set),
+            "authority_effect": "none",
+            "interpretation": (
+                "Timeline and comments corroborate or challenge a candidate, but never make a thematic candidate authoritative."
+            ),
+        }
+        if evidence["status"] == "succeeded":
+            succeeded += 1
+        warnings.extend(
+            f"Could not fully hydrate activity for {candidate['reference']}: {warning}"
+            for warning in evidence["warnings"]
+        )
+    return {
+        "limit": ISSUE_ACTIVITY_HYDRATION_LIMIT,
+        "attempted_count": attempted,
+        "succeeded_count": succeeded,
+        "failed_or_partial_count": attempted - succeeded,
+        "timeline_limit_per_issue": ISSUE_TIMELINE_LIMIT,
+        "comment_limit_per_issue": ISSUE_COMMENT_LIMIT,
+        "comment_body_limit": ISSUE_COMMENT_BODY_LIMIT,
+        "warnings": warnings,
+    }
+
+
 def hydrate_mentioned_references(
     candidates: list[dict[str, Any]],
     affected_repositories: set[str],
@@ -1225,7 +1492,7 @@ def issue_scan_status(snapshot: dict[str, Any]) -> tuple[str, dict[str, dict[str
         return "skipped-authoritative", scans
     if statuses == {"failed"}:
         return "failed", scans
-    if "failed" in statuses:
+    if "failed" in statuses or "partial" in statuses:
         return "partial", scans
     return "succeeded", scans
 
@@ -1279,6 +1546,12 @@ def finalized_auto_issue_context(
     )
     hydration = hydrate_issue_candidates(
         shortlist["candidates"], workspace_root, deadline,
+    )
+    activity_hydration = hydrate_shortlist_activity(
+        hydration["candidates"],
+        workspace_root,
+        deadline,
+        snapshot.get("current_pr_urls", []),
     )
     mentioned_hydration = hydrate_mentioned_references(
         hydration["candidates"],
@@ -1337,7 +1610,7 @@ def finalized_auto_issue_context(
             discovery_mode = "affected-repository-scan"
             analysis_status = "scan-not-run"
         else:
-            warning = "No open Issue was found for the affected repositories"
+            warning = "No open or activity-window closed Issue was found for the affected repositories"
             discovery_mode = "affected-repository-scan"
             analysis_status = "no-candidates"
         result = unresolved(None, "auto-discovery", warning)
@@ -1435,6 +1708,14 @@ def finalized_auto_issue_context(
         "strong_candidate_count": shortlist["strong_candidate_count"],
         "authoritative_candidate_count": len(authoritative_candidates),
         "reference_hint_count": len(reference_hints),
+        "activity_windows": snapshot.get("activity_windows", {}),
+        "activity_hydration_limit": activity_hydration["limit"],
+        "activity_hydration_attempted_count": activity_hydration["attempted_count"],
+        "activity_hydration_succeeded_count": activity_hydration["succeeded_count"],
+        "activity_hydration_failed_or_partial_count": activity_hydration["failed_or_partial_count"],
+        "timeline_limit_per_issue": activity_hydration["timeline_limit_per_issue"],
+        "comment_limit_per_issue": activity_hydration["comment_limit_per_issue"],
+        "comment_body_limit": activity_hydration["comment_body_limit"],
         "mentioned_reference_limit": mentioned_hydration["limit"],
         "mentioned_reference_attempted_count": mentioned_hydration["attempted_count"],
         "mentioned_reference_succeeded_count": mentioned_hydration["succeeded_count"],
@@ -1447,6 +1728,7 @@ def finalized_auto_issue_context(
         *base_warnings,
         *snapshot.get("warnings", []),
         *hydration["warnings"],
+        *activity_hydration["warnings"],
         *mentioned_hydration["warnings"],
     ]
     return result
