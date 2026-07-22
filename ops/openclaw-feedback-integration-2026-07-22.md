@@ -40,6 +40,36 @@ sidecar 不可用时仅反馈功能失败，不影响 Portal 其他页面。
 - 悬浮球报告索引、受理通知和完成通知只属于环境变量 `FEISHU_FEEDBACK_OWNER` 指定的负责人。
 - 不同成员可以持续保留各自私聊上下文，但不能读取或继承其他成员的对话和个人记忆。
 
+## BIC 项目诊断 skill
+
+sidecar 仓库内置并且只启用 `bic-project-diagnostics`。该 skill 由本仓库 revision
+`cd92db19ad0a` 下的根 PRD/README、wiki 与 agent 指南、架构/重构/状态语义备忘录、验证
+runbook，以及历史 briefs/tasks/prompts 中的回归证据提炼而成；BIC 业务仓库里的其他 skill
+和代理约束不会被加载。
+
+它要求报告按以下链路查找首个证据分歧：
+
+```text
+Portal 展示
+  -> 前端 store / SSE
+  -> Agent durable state
+  -> Lab / Nexus 权威状态
+  -> ChemEngine / Mars / 结果
+```
+
+核心方法包括：
+
+- 本次运行证据优先于当前配置和文档；历史任务书、旧端口和过去事故只可作为假设。
+- `trial.status`、`trial.phase`、易失的 `progress/steps`、`experiments.stage` 和
+  `plans.status` 必须按不同语义层对账，不能互相代替。
+- 诊断必须分开记录事实、推断和未知，并提供可复现步骤与二元 PASS/FAIL 验收。
+- 截图只证明捕获时的展示；单个日志没有命中不证明请求未发生；端口存活不等于业务就绪。
+
+为保持组织成员的最小权限，普通飞书私聊不会获得本机文件读取能力。悬浮球后台任务由
+sidecar 直接注入受信 skill 正文、反馈清单和脱敏日志，截图则通过图像工具读取；因此完整
+诊断上下文不依赖放宽会话权限。项目规则发生变化时，应在 sidecar 仓库同步更新该 skill，
+并记录新的 BIC-meta 来源 revision。
+
 ## 数据与密钥
 
 - 真实截图、后端日志、报告目录、飞书文档索引、每日记忆和本地运行日志均被 Git 忽略。
