@@ -3,11 +3,12 @@
 # GitHub App: the shared bot identity AI agents use for PRs, issues and other
 # gh writes (shows up as c12-apex-dev[bot], cannot approve its own PRs).
 #
-# One-time setup per machine (full story: docs/agents/github-bot.md):
-#   mkdir -p ~/.config/bic-v2/gh-app
-#   <fetch private-key.pem from the team vault> -> ~/.config/bic-v2/gh-app/private-key.pem
-#   chmod 600 ~/.config/bic-v2/gh-app/private-key.pem
-# Nothing else: APP_ID is baked below and the installation id is auto-discovered.
+# The private key is read from 1Password at mint time (`op read`) and never
+# touches disk. One-time setup per machine (full story: docs/agents/github-bot.md):
+#   brew install 1password-cli && op signin      # team 1Password account
+# Nothing else: APP_ID and the op:// item path are baked below and the
+# installation id is auto-discovered. BIC_GH_APP_KEY=<pem path> overrides the
+# key source for CI-less boxes and tests.
 #
 # Usage:
 #   gh-app-token.sh                  print a valid token (mints, or reuses cache)
@@ -21,7 +22,8 @@
 set -euo pipefail
 
 APP_ID="${BIC_GH_APP_ID:-4362356}"          # c12-apex-dev (org c12-ai)
-KEY_FILE="${BIC_GH_APP_KEY:-$HOME/.config/bic-v2/gh-app/private-key.pem}"
+OP_URI="${BIC_GH_APP_OP_URI:-op://BIC/c12-apex-dev/private-key.pem}"
+KEY_FILE="${BIC_GH_APP_KEY:-}"              # optional local-file override (tests, CI-less boxes)
 CACHE_FILE="$HOME/.cache/bic-v2/gh-app-token.json"
 API="https://api.github.com"
 
@@ -44,18 +46,28 @@ cached_token() {
   printf '%s' "$tok"
 }
 
+# ── key source: 1Password by default, local file only as explicit override ───
+read_key() {
+  if [ -n "$KEY_FILE" ]; then
+    [ -f "$KEY_FILE" ] || die "BIC_GH_APP_KEY points at a missing file: $KEY_FILE"
+    cat "$KEY_FILE"; return
+  fi
+  command -v op >/dev/null \
+    || die "1Password CLI missing — brew install 1password-cli && op signin (see docs/agents/github-bot.md)"
+  op read "$OP_URI" 2>/dev/null \
+    || die "op read $OP_URI failed — signed in to the team account? item exists? (override via BIC_GH_APP_OP_URI)"
+}
+
 # ── mint: JWT (RS256) -> discover installation -> installation token ─────────
 mint() {
-  [ -f "$KEY_FILE" ] || die "private key missing: $KEY_FILE
-  -> fetch it from the team vault (see docs/agents/github-bot.md), chmod 600"
-
-  local now header payload unsigned sig jwt
+  local key_pem now header payload unsigned sig jwt
+  key_pem="$(read_key)"
   now="$(date +%s)"
   header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
   payload="$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
   unsigned="${header}.${payload}"
-  sig="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$KEY_FILE" 2>/dev/null | b64url)" \
-    || die "signing failed — is $KEY_FILE a valid RSA private key?"
+  sig="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign <(printf '%s\n' "$key_pem") 2>/dev/null | b64url)" \
+    || die "signing failed — is the key a valid RSA private key?"
   jwt="${unsigned}.${sig}"
 
   # Discover this app's installation on the org (no INSTALLATION_ID to configure).

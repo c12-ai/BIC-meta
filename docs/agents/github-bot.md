@@ -1,9 +1,9 @@
 # GitHub Bot 身份：c12-apex-dev
 
 AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 GitHub App
-**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥放团队密码库，
-每人一次性领到本机固定路径；之后 agent 用 `scripts/gh-app/gh-app-token.sh` 铸
-1 小时短期 token，全程无感。bot 不能 approve 自己的 PR，"人工 admin merge" 这道闸
+**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥只存 1Password，
+铸 token 时 `op read` 运行时读取、**不落盘**；agent 用 `scripts/gh-app/gh-app-token.sh`
+铸 1 小时短期 token，全程无感。bot 不能 approve 自己的 PR，"人工 admin merge" 这道闸
 不受影响。
 
 - App: https://github.com/organizations/c12-ai/settings/apps/c12-apex-dev
@@ -13,12 +13,9 @@ AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 G
 
 ## 同事一次性接入（2 分钟）
 
-1. 从团队密码库取 `c12-apex-dev` 的 private key（.pem）：
+1. 装 1Password CLI 并登录团队账号：
    ```bash
-   mkdir -p ~/.config/bic-v2/gh-app
-   # 把密码库里的 pem 存为：
-   #   ~/.config/bic-v2/gh-app/private-key.pem
-   chmod 600 ~/.config/bic-v2/gh-app/private-key.pem
+   brew install 1password-cli && op signin
    ```
 2. 验证：
    ```bash
@@ -26,7 +23,9 @@ AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 G
    # OK  identity: c12-apex-dev[bot] ...
    ```
 
-完成。个人的 `gh auth` / ssh key / git 配置一概不动。
+完成。pem 不下载、不落盘；个人的 `gh auth` / ssh key / git 配置一概不动。
+（密钥条目路径默认 `op://BIC/c12-apex-dev/private-key.pem`，可用
+`BIC_GH_APP_OP_URI` 覆盖。）
 
 ## Agent 怎么用（无感的关键）
 
@@ -70,14 +69,3 @@ git config --global 'credential.https://github.com/c12-ai.helper' \
 
 （org 级 secret/variable 配一次，全 org workflow 可用。）
 
-## 安全口径
-
-- **唯一秘密是 pem**：只存密码库 + 本机 600 文件；永不进 git、不进聊天记录。
-- **轮换**：App 设置页 Generate private key 生成新 key 后旧 key 立即作废——
-  泄露时先轮换再排查；同事重新从密码库领新 pem 即可。
-- **一键撤销**：org 里 uninstall App，所有 token 立即失效。
-- **权限收窄（建议，待办）**：当前 App 勾了 `administration:write`、
-  `packages:write`、`merge_queues:write` 等 PR/issue bot 用不上的权限。建议收到：
-  Contents RW · Pull requests RW · Issues RW · Metadata R · Checks R ·
-  Statuses RW · Workflows RW（agent 会改 `.github/workflows/` 才需要）。
-- token 有效期 1 小时，本机缓存文件 `~/.cache/bic-v2/gh-app-token.json`（600）。
