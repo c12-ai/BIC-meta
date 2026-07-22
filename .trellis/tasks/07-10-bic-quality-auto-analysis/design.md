@@ -30,12 +30,18 @@ file-size, file-count, and cumulative-read budgets unchanged.
 
 ## Analysis Pipeline
 
-The pipeline is organized into a Diff-driven sequence: workspace discovery,
-change-set collection, affected-repository Issue candidate collection, module
-inference, changed-object extraction, semantic Issue analysis, test-asset
-inspection, test-correspondence analysis, and pre-test risk assessment.
-Every stage emits structured JSON with evidence so later stages do not need to
-re-scan or invent facts.
+The pipeline has two one-way evidence lanes. The technical lane performs
+workspace discovery, change collection, module inference, changed-object and
+journey extraction, test-asset inspection, and technical test correspondence
+without consuming Issue context. The requirement lane consumes that immutable
+technical context only to locate Issues and extract requirement
+evidence. It cannot return exclusion filters to the technical lane.
+
+A final scope-fusion stage takes the union of technical test candidates and
+requirement-driven additions, records Issue-to-Diff divergence, aligns eligible
+acceptance items with objects/routes/journeys/tests, and derives the pre-test
+risk assessment. Every stage emits structured JSON with evidence so later
+stages do not need to re-scan or invent facts.
 
 ## Repository Discovery
 
@@ -69,7 +75,12 @@ one authoritative current-PR reference activates a fast path only when exactly
 one affected GitHub repository exists. With multiple affected repositories,
 every repository is scanned and the current-PR Issue remains repository-local;
 it cannot resolve workspace Issue alignment. The snapshot otherwise lists at
-most 100 open-Issue metadata records per corresponding GitHub repository.
+most 100 open-Issue metadata records per corresponding GitHub repository and
+may include bounded closed-Issue metadata around current-PR or local commit
+activity. Closed candidates receive no authority from time or semantic
+proximity alone. Only the final shortlist may receive bounded timeline and
+comment hydration. Historical PR URLs supplied in conversation are background
+context and are not analyzer inputs.
 
 Module mapping and changed-object extraction run before candidate reduction.
 `shortlist_issue_candidates` merges duplicate references, protects explicit and
@@ -226,10 +237,27 @@ The default brief restores separate module mapping, direct/indirect/possible
 test-correspondence, and missing-test sections. `mapping_source` remains raw
 diagnostic metadata, and no general next-step recommendation is emitted.
 The brief also includes affected-repository Issue candidates and a pre-test Risk
-Matrix. Deterministic rows establish a risk floor; semantic
+Matrix. Deterministic technical rows establish a risk floor; semantic
 Issue-to-Diff-to-test alignment may raise but not lower it. Missing,
-non-authoritative, or ambiguous Issue provenance makes overall risk
-`unassessed`; a unique thematic match is still non-authoritative.
+non-authoritative, or ambiguous Issue provenance makes requirement alignment
+`unassessed` and assessment completeness partial while preserving the known
+technical risk. A unique thematic match is still non-authoritative.
+
+## Scope Fusion
+
+`technical_scope` is immutable after Diff/object/journey/test analysis.
+`requirement_scope` may contribute source provenance, eligible acceptance
+items, and additional test candidates. `effective_scope` is their union. A
+machine-checkable invariant records technical candidate identities before and
+after fusion and fails validation if any disappear.
+
+Each eligible acceptance item is classified as `in-scope-direct`,
+`in-scope-indirect`, `claimed-but-unmatched`, `explicitly-out-of-scope`, or
+`unresolved`. Matching is evidence-bearing and conservative: exact changed
+objects/routes/paths are direct, bounded static relationships are indirect,
+explicit source text may establish out-of-scope, and absence of evidence alone
+does not. Claimed-but-unmatched items raise completeness risk rather than being
+misreported as test-only gaps.
 
 ## Rollback
 

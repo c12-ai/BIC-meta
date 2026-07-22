@@ -16,9 +16,9 @@ It is intentionally read-only:
   test helpers that launch a local Python entrypoint, without executing either;
   unrelated assertions and imports used only by sibling command branches do not
   clear a test gap.
-- After the Diff identifies affected repositories, it scans their open GitHub
-  Issues and generates an evidence-backed pre-test Risk Matrix from Issue, Diff,
-  contract-boundary, and test evidence.
+- It freezes a Diff/AST/test-derived technical scope before Issue analysis, then
+  uses Issue context additively and generates a pre-test Risk Matrix with
+  separate technical risk and requirement alignment.
 - It explains which tests appear to correspond, which should be strengthened,
   and which changed behaviors have no matching test.
 - It treats each Playwright/CDP case as independent browser/user-journey
@@ -129,23 +129,14 @@ from a successful empty scan. Ordinary matches remain `thematic-candidate`
 context even when only one looks similar; they cannot define the requirement or
 supply risk-matrix acceptance rows. Commit/branch references remain
 `reference-hint` evidence, and bounded one-hop body references remain
-`mentioned-reference` context. Ambiguous or incomplete provenance keeps overall
-risk `unassessed`. An explicit reference is translated to `--issue` and
-overrides discovery.
+`mentioned-reference` context. Ambiguous or incomplete provenance keeps
+requirement alignment `unassessed` without erasing technical risk. An explicit
+reference is translated to `--issue` and overrides discovery.
 
-When local changes were restored from merged or detached PRs, preserve their
-provenance explicitly:
-
-```text
-用 BIC quality 只看 worktree；来源 PR 是 portal#98 和 service#166
-```
-
-The Skill translates repository-qualified values to repeated `--source-pr`
-arguments. Linked/closing Issues from a resolved source PR are authoritative;
-ordinary Issues mentioned by its body are still reference context. When the PR
-closes no Issue, its title/body remains authoritative change provenance while
-Issue alignment stays unresolved; the Skill does not substitute a thematic open
-Issue.
+PR URLs supplied in conversation are background context, not analyzer inputs.
+The Skill evaluates only code changes present in the current workspace snapshot.
+It auto-detects a current PR when available; use `--issue` or `--issue-file` when
+an explicit requirement source is needed.
 
 The analyzer currently returns one workspace-level Issue context, test
 correspondence, and risk assessment. Repository count is reported only as a
@@ -183,10 +174,7 @@ module, test, Issue, and risk stages share one live Issue snapshot:
 ```bash
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh
 tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --issue <override>
-tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh \
-  --worktree-only \
-  --source-pr c12-ai/BIC-agent-portal#98 \
-  --source-pr c12-ai/BIC-agent-service#166
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.sh --worktree-only
 ```
 
 The assessment uses the complete test inventory internally but omits that raw,
@@ -219,9 +207,8 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/suggest-test-scope.
 ```
 
 All wrappers accept `--base-ref <local-ref>` or `--worktree-only`; Issue-aware
-commands also accept `--issue <number-or-url-or-owner/repo#number>` or repeated
-`--source-pr <owner/repo#number-or-pull-url>`. Source PRs cannot be combined
-with the explicit Issue/Issue-file overrides. By default,
+commands also accept `--issue <number-or-url-or-owner/repo#number>` or
+`--issue-file <path>`. By default,
 each repository selects the first locally available CI base, `origin/main`,
 `main`, `origin/master`, or `master`, then combines
 `merge-base(base, HEAD)..HEAD` with unstaged, staged, and untracked changes.

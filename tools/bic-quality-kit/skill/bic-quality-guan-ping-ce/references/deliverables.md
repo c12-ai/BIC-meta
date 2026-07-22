@@ -27,8 +27,6 @@ BIC 质量简报
 - 正文读取：
 - 候选 Issue：
 - 关联等级：<authoritative, strong-related, reference-hint, thematic-candidate, or mentioned-reference>
-- 来源 PR：<explicit source PR provenance, if supplied>
-- PR 变更定义：<source PR title/body summary when no linked Issue exists>
 - 一跳引用：<bounded mentioned references; context only>
 - 候选对应分析：
 - 选择依据：
@@ -53,7 +51,10 @@ BIC 质量简报
 | 风险项 | Issue 依据 | Diff 依据 | 测试依据 | 等级 | 判断 |
 |---|---|---|---|---|---|
 | <dimension or acceptance item> | <issue fact> | <changed file/object> | <test fact or missing evidence> | high/medium/low/unassessed | <reason> |
-- 整体风险：
+- 技术风险：
+- 需求对齐：<aligned, partial, conflict, pending-review, insufficient-definition, or unassessed>
+- 评估完整度：<technical scope, requirement scope, and test execution status>
+- 整体已知风险：<must not be lower than technical risk>
 - 评估阶段：真正测试前（pre-test）
 
 测试缺口
@@ -120,14 +121,15 @@ brief concise:
   acceptance item using semantic reading of Issue, Diff, and tests. Keep
   adjacent and unchanged/out-of-scope items outside the matrix. Missing Diff or
   test evidence may raise the risk; never lower the deterministic risk floor.
-- Use `unassessed` when Issue context is missing/unresolved or an acceptance item
-  cannot be compared with concrete evidence. This is a pre-test matrix, not a
-  claim about executed verification or residual release risk.
+- Use `unassessed` for requirement alignment when Issue context is
+  missing/unresolved or an acceptance item cannot be compared with concrete
+  evidence. Preserve the technical risk derived from Diff/test facts. This is a
+  pre-test matrix, not a claim about executed verification or residual release
+  risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
-  Treat an explicit override as authoritative. When the user identifies merged
-  or detached PRs as the source of local changes, pass each with repeated
-  `--source-pr`; linked/closing Issues from those PRs preserve authoritative
-  provenance. A unique current-PR
+  Treat an explicit Issue override as authoritative. Auto-detect the current PR
+  when available, but do not treat historical PR URLs supplied in conversation
+  as analyzer inputs. A unique current-PR
   linked/closing reference may use the authoritative fast path only when exactly
   one affected GitHub repository exists. With multiple affected repositories,
   scan every repository and keep the current-PR Issue as a repository-local
@@ -155,9 +157,10 @@ brief concise:
   only when its preserved provenance and hydrated body both agree with concrete
   changed objects. Follow at most ten repository-contained Issue references
   from hydrated bodies for one hop and label them `mentioned-reference`; they do
-  not inherit authority. Leave risk `unassessed` without authoritative or
-  explicitly justified strong-related provenance; do not infer identity from
-  repository membership, a general keyword, or filename similarity alone.
+  not inherit authority. Leave requirement alignment `unassessed` without
+  authoritative or explicitly justified strong-related provenance; do not
+  infer identity from repository membership, a general keyword, or filename
+  similarity alone, and do not erase technical risk.
 - Do not include the raw `test_inventory` in the final `assess` payload or
   brief. Use derived test correspondence and risk evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.

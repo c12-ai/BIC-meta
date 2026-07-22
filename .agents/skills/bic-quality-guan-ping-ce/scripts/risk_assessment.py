@@ -216,18 +216,41 @@ def assess_pretest_risk(
         diff_evidence=[f"file-level changed objects: {len(file_level)}"],
     ))
 
-    ranked = [item["risk_level"] for item in rows if item["risk_level"] in RANK]
-    risk_floor = max(ranked, key=RANK.get) if ranked else "low"
-    overall = risk_floor if issue.get("resolved") and acceptance_eligible else "unassessed"
+    technical_rows = [item for item in rows if item["dimension"] != "issue-clarity"]
+    ranked = [
+        item["risk_level"]
+        for item in technical_rows
+        if item["risk_level"] in RANK
+    ]
+    technical_risk = max(ranked, key=RANK.get) if ranked else "low"
+    if not issue.get("resolved") or not acceptance_eligible:
+        requirement_alignment = "unassessed"
+    elif acceptance_items:
+        requirement_alignment = "pending-review"
+    else:
+        requirement_alignment = "insufficient-definition"
+    requirement_scope_status = (
+        "available" if requirement_alignment != "unassessed" else "unassessed"
+    )
     return {
         "assessment_stage": "pre-test",
-        "overall_risk": overall,
-        "risk_floor": risk_floor,
+        "overall_risk": technical_risk,
+        "technical_risk": technical_risk,
+        "risk_floor": technical_risk,
+        "requirement_alignment": requirement_alignment,
+        "assessment_completeness": {
+            "overall": "partial" if requirement_scope_status == "unassessed" else "complete-for-pretest",
+            "technical_scope": "assessed",
+            "requirement_scope": requirement_scope_status,
+            "test_execution": "not-run",
+        },
         "risk_matrix": rows,
         "requires_semantic_issue_alignment": bool(issue.get("resolved") and acceptance_eligible),
         "issue_acceptance_items": acceptance_items,
         "assessment_note": (
-            "This is a pre-test risk assessment. Compare every Issue acceptance item semantically "
-            "with Diff and test evidence; that review may raise, but must not lower, the risk floor."
+            "This is a pre-test risk assessment. Technical risk remains available when requirement "
+            "alignment is unavailable. Compare every eligible Issue acceptance item semantically "
+            "with Diff and test evidence; requirement evidence may raise, but must not lower, the "
+            "technical risk floor."
         ),
     }

@@ -38,8 +38,8 @@ Do:
   browser actions and observations separate from machine-checkable assertions;
   screenshots or clicks alone do not establish a passing user journey.
 - Identify tests to add or strengthen by static source inspection.
-- Generate an evidence-backed pre-test Risk Matrix from Issue, Diff, module,
-  contract-boundary, and test evidence.
+- Generate an evidence-backed pre-test Risk Matrix that preserves technical
+  risk independently from requirement alignment.
 - Output one structured `BIC 质量简报`.
 - Emit a fingerprint-bound `test_execution_manifest` for a separately
   authorized Phase 2. It remains `not-run`; Phase 1 never executes its commands.
@@ -74,21 +74,17 @@ If the user asks to execute tests, state that this skill only provides read-only
      entry for a normal end-to-end Quality review. Do not assume `scripts/`
      exists under the workspace root. Keep the complete JSON result as the
      conceptual assessment snapshot for this run; this name does not add a JSON
-     field. Substeps 1A, 1B, and 1C only interpret that same result. Do not rerun
+     field. Substeps 1A through 1D only interpret that same result. Do not rerun
      the wrapper or repeat GitHub discovery between them.
    - Before that single call, derive all arguments from the user request and
      this workflow. Never execute the wrapper with `--help`, solely to discover
      options, or as a preflight. If the user supplied a local Issue file, include
      `--issue-file <path>` in the one assessment call.
-   - If the user supplied one or more PR URLs or `owner/repo#number` values as
-     the provenance of the local Diff, pass each as a repeated
-     `--source-pr <reference>`. This is especially important for restored
-     worktrees whose current branch/HEAD no longer retains the merged PR link.
-     Do not combine `--source-pr` with an explicit `--issue` or `--issue-file`.
-     Treat a resolved source PR as authoritative change provenance. If it has no
-     linked/closing Issue, summarize its title/body as the change definition but
-     state that Issue alignment remains unresolved; do not relabel a thematic
-     open Issue as authoritative to fill that gap.
+   - PR URLs supplied as background context are not analyzer arguments. The
+     analyzer evaluates the current workspace Diff, auto-detects the current PR
+     when available, and accepts only `--issue` or `--issue-file` as explicit
+     requirement overrides. Do not imply that a historical PR was analyzed
+     unless its code changes are actually present in the workspace snapshot.
    - Treat the other wrappers as standalone diagnostics; do not run all wrappers
      sequentially for one final brief because each diagnostic invocation may
      perform its own live metadata collection.
@@ -110,7 +106,15 @@ If the user asks to execute tests, state that this skill only provides read-only
      Build canonical zero-context hunks from the selected local comparison base
      to the current state and hash each repository's complete local change
      content for stale-manifest detection without emitting source contents.
-   - **1B. Discover and shortlist Issues.** Start only from repositories fixed by
+   - **1B. Freeze the technical scope.** Before reading Issue context, derive
+     modules, changed objects/routes, user-journey paths, static test relations,
+     and technical add/strengthen guidance. Preserve the returned
+     `technical_scope` identity index. Issue context may later add or re-rank
+     attention, but it must not remove repositories, files, objects, journeys,
+     test candidates, or technical recommendations. Require
+     `scope_fusion.invariants.issue_cannot_reduce_technical_scope` to remain
+     true and treat any removed technical candidate as an analyzer failure.
+   - **1C. Discover and shortlist Issues.** Start only from repositories fixed by
      1A with `change_count > 0`. A unique current-PR linked/closing Issue may use
      the authoritative fast path only when exactly one affected GitHub repository
      exists. With multiple affected repositories, scan every repository; keep a
@@ -132,18 +136,19 @@ If the user asks to execute tests, state that this skill only provides read-only
      number resolves in `BIC-meta`; use a repository-qualified reference for
      child Issues. Use `--issue-file` only for an explicitly supplied local
      JSON/Markdown Issue or deterministic fixture. All GitHub access is read-only
-     through the local `gh` CLI. Complete 1B only after every affected repository
+     through the local `gh` CLI. Complete 1C only after every affected repository
      has an explicit scan state; never translate `scan-failed` or `partial-scan`
      into proof that no open Issue exists. Follow at most ten repository-contained
      Issue references from hydrated candidate bodies for one hop, report them as
      context, and never inherit authority or acceptance eligibility from the
      parent candidate.
-   - **1C. Freeze the snapshot and scan state.** Preserve the returned `context`,
-     `scope`, `issue_context`, `test_correspondence`, and `risk_assessment`, plus
+   - **1D. Freeze the fused snapshot and scan state.** Preserve the returned
+     `context`, `scope`, `technical_scope`, `requirement_scope`, `scope_fusion`,
+     `issue_context`, `test_correspondence`, and `risk_assessment`, plus
      all comparison, scan, hydration, deadline, and query warnings. Use these
      same values through steps 3–7. A later standalone diagnostic may expose raw
      details when explicitly needed, but it must not replace or silently merge
-     live metadata into the snapshot used for the final brief. Complete 1C only
+     live metadata into the snapshot used for the final brief. Complete 1D only
      when one snapshot is the traceable source for the remaining workflow.
 2. Read references only as needed, but always read `references/deliverables.md`
    before writing the final brief:
@@ -208,16 +213,19 @@ If the user asks to execute tests, state that this skill only provides read-only
    not proof of coverage. Do not attach confidence, risk, priority,
    evidence-type, or coverage-percentage labels to individual test relations or
    missing-test items; risk levels belong only in the Risk Matrix.
-7. Treat `risk_assessment` from the frozen assessment snapshot as the
-   deterministic risk floor; do not run the wrapper again. Compare every Issue
+7. Treat `risk_assessment.technical_risk` from the frozen assessment snapshot as
+   the deterministic risk floor; do not run the wrapper again. Keep
+   `requirement_alignment` separate. Missing, thematic, or ambiguous Issue
+   context makes requirement alignment `unassessed` and assessment completeness
+   partial, but it cannot erase or lower technical risk. Compare every Issue
    acceptance item with concrete Diff and test evidence only when
    `acceptance_items_eligible` is true. Before adding rows, classify each eligible
    item as `in-scope`, `adjacent`, or `unchanged/out-of-scope` for this Diff.
    Add risk rows only for `in-scope` items; report the other items as context so
    an umbrella Issue cannot inflate this change's risk matrix. An ordinary
    `thematic-candidate`, even when unique and semantically similar, remains
-   background context and keeps workspace Issue alignment and overall risk
-   `unassessed`. A `reference-hint` may become `strong-related` only when its
+   background context and keeps workspace Issue alignment `unassessed`. A
+   `reference-hint` may become `strong-related` only when its
    preserved commit/branch/PR provenance and hydrated body both agree with
    concrete changed objects; then state the promotion evidence explicitly.
    Never perform a second Issue body lookup. Never lower the risk floor or infer
@@ -250,5 +258,6 @@ shared chain or per-stream risk. State the selected base once. State once at the
 end that tests were not executed and static correspondence does not prove
 pass/fail. The Phase 2 manifest is a handoff contract, not a recommendation or
 execution result. Do not add a next-step recommendation field beyond the
-missing-test guidance defined by the template. If Issue context is absent or unresolved,
-state that workspace Issue alignment and overall risk are unassessed.
+missing-test guidance defined by the template. If Issue context is absent or
+unresolved, state that workspace Issue alignment is unassessed, technical risk
+remains the known pre-test risk, and assessment completeness is partial.

@@ -26,10 +26,11 @@ repository or test directory is added.
 - Retain unmapped changes visibly when no stable structural module exists.
 - Report direct multi-repository changes as a fact derived from changed repos.
 
-- Do not derive risk from paths or duplicate impact labels. An authoritative
-  Issue, or a provenance-bearing reference hint explicitly justified as
-  strong-related, may enable an evidence-backed high/medium/low pre-test Risk
-  Matrix; thematic similarity alone must keep overall risk `unassessed`.
+- Do not derive risk from paths or duplicate impact labels. Always derive a
+  technical pre-test risk from Diff, changed objects, boundaries, journeys, and
+  static test evidence. Report requirement alignment separately: missing or
+  non-authoritative Issue context makes requirement alignment `unassessed`, but
+  must not erase or lower the technical risk.
 - Discover concrete test files, test directories, framework configuration, and
   command hints automatically for Python and JavaScript/TypeScript repositories.
 - Require both a test-like filename and parsed executable test cases before a
@@ -44,7 +45,9 @@ repository or test directory is added.
   events, and types. Fall back to changed-file facts when a language cannot be
   parsed safely.
 - After the Diff identifies affected repositories, scan open GitHub Issues in
-  each affected repository. Preserve current-PR links, PR/commit closing text,
+  each affected repository. Also search bounded closed-Issue metadata around
+  current-PR or local commit activity when timestamps are available. Preserve
+  current-PR links, PR/commit closing text,
   and a strong branch-name pattern as higher-priority association evidence.
   Explicit overrides are authoritative. A current-PR linked/closing reference
   may resolve automatically only when one affected GitHub repository exists;
@@ -140,10 +143,12 @@ repository or test directory is added.
 - Keep `mapping_source` in raw JSON for diagnostics but omit it from the default
   brief. Keep direct/indirect/possible relation sections visible, and do not add
   a general next-step recommendation field.
-- Generate a pre-test Risk Matrix from Issue clarity, Diff breadth,
-  contract/state boundaries, changed-object attribution, and test evidence.
-  Require semantic Issue-acceptance alignment in the final brief; missing Issue
-  context must produce `unassessed`, not a guessed low risk.
+- Generate a pre-test Risk Matrix from Diff breadth, contract/state boundaries,
+  changed-object attribution, user journeys, test evidence, Issue clarity, and
+  scope divergence. Keep `technical_risk`, `requirement_alignment`, and
+  `assessment_completeness` distinct. Missing Issue context must make only the
+  requirement dimension `unassessed`, never turn known technical risk into a
+  guessed low risk or erase it.
 - Commit synchronized Codex and Claude discovery mirrors so a new clone can
   use the Skill without running an installer. Keep `tools/bic-quality-kit/skill`
   as the only editable source of truth and fail verification when either mirror
@@ -166,15 +171,39 @@ repository or test directory is added.
 
 ## Acceptance Criteria
 
+### 2026-07-22 dual-scope quality workflow
+
+- [ ] Technical repositories, files, changed objects, journeys, and test
+      candidates are computed before Issue context and cannot be removed or
+      downgraded by an explicit or discovered Issue.
+- [ ] Requirement context may add or re-rank test candidates but the final set
+      is a union whose technical-candidate membership never decreases.
+- [ ] Risk output reports `technical_risk`, `requirement_alignment`, and
+      `assessment_completeness`; no Issue leaves technical risk intact and only
+      requirement alignment unassessed.
+- [ ] Issue discovery searches bounded open and closed Issue metadata around
+      current-PR or local commit activity, validates top candidates against
+      timeline evidence, and reads only bounded comments as untrusted data.
+- [ ] Every eligible acceptance item is classified as direct, indirect,
+      claimed-but-unmatched, explicitly out-of-scope, or unresolved with
+      auditable Diff/object/test evidence.
+- [ ] Scope fusion reports narrow-Issue/broad-Diff and broad-Issue/narrow-Diff
+      divergence as risk instead of using either side to hide the other.
+- [ ] Suggested tests are separated into requirement-acceptance, technical
+      regression, and exploratory-risk groups while retaining pytest,
+      frontend unit/component, Playwright, and CDP evidence.
+- [ ] Regression fixtures prove that supplying a narrow, incorrect, or absent
+      Issue cannot reduce technical scope, candidate tests, or risk floor.
+
 ### 2026-07-22 Issue provenance refinement
 
 - [x] Ordinary open-Issue search matches are labeled thematic and cannot become
       the requirement source or feed acceptance rows solely through semantic
       similarity.
-- [x] Explicit/current/source-PR linked or closing Issues remain authoritative;
+- [x] Explicit/current-PR linked or closing Issues remain authoritative;
       commit/branch references remain provenance-bearing hints.
-- [x] Repeated `--source-pr` accepts repository-qualified PR references and pull
-      URLs for restored multi-repository worktrees without fetching or checkout.
+- [x] Historical PR URLs are not analyzer inputs; only the current workspace
+      Diff, auto-detected current PR, and explicit Issue overrides define scope.
 - [x] Hydrated Issue bodies expose at most ten one-hop, affected-repository
       references as context without inheriting authority.
 - [x] Only eligible, in-scope acceptance items enter the risk matrix; umbrella

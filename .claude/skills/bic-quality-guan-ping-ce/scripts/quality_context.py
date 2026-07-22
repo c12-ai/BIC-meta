@@ -27,6 +27,11 @@ from diff_hunks import attach_canonical_hunks
 from execution_manifest import build_execution_manifest
 from issue_context import collect_issue_context
 from risk_assessment import assess_pretest_risk
+from scope_fusion import (
+    build_requirement_scope,
+    build_technical_scope,
+    initialize_scope_fusion,
+)
 from test_assets import discover_test_assets as discover_assets
 from test_relations import analyze_test_relations
 from content_safety import safe_repository_file, sanitize_for_output
@@ -373,7 +378,6 @@ def collect_context(
     issue_ref: str | None = None,
     issue_file: str | None = None,
     collect_issues: bool = True,
-    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     discovered = discover_repositories()
     child_paths = {repo["relative_path"] for repo in discovered if repo["relative_path"] != "."}
@@ -401,7 +405,6 @@ def collect_context(
     if collect_issues:
         context["issue_context"] = collect_issue_context(
             WORKSPACE_ROOT, issue_ref, issue_file, repositories,
-            source_pr_refs=source_pr_refs,
         )
     return context
 
@@ -565,16 +568,16 @@ def suggest_scope(
     worktree_only: bool = False,
     issue_ref: str | None = None,
     issue_file: str | None = None,
-    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     context = collect_context(
         base_ref, worktree_only, issue_ref, issue_file,
         collect_issues=False,
-        source_pr_refs=source_pr_refs,
     )
     scope = map_modules(context)
     tests = inspect_tests(context)
     symbols = changed_source_symbols(context, tests)
+    correspondence = recommend_tests(context, scope, tests, symbols)
+    technical_scope = build_technical_scope(context, scope, correspondence)
     context["issue_context"] = collect_issue_context(
         WORKSPACE_ROOT,
         issue_ref,
@@ -582,14 +585,18 @@ def suggest_scope(
         context["repositories"],
         scope["modules_by_repository"],
         symbols,
-        source_pr_refs,
     )
+    requirement_scope = build_requirement_scope(context["issue_context"])
+    scope_fusion = initialize_scope_fusion(technical_scope, requirement_scope)
     return {
         "workspace_root": str(WORKSPACE_ROOT),
         "context": context,
         "scope": scope,
+        "technical_scope": technical_scope,
+        "requirement_scope": requirement_scope,
+        "scope_fusion": scope_fusion,
         "test_inventory": tests,
-        "test_correspondence": recommend_tests(context, scope, tests, symbols),
+        "test_correspondence": correspondence,
     }
 
 
@@ -598,10 +605,9 @@ def assess_quality(
     worktree_only: bool = False,
     issue_ref: str | None = None,
     issue_file: str | None = None,
-    source_pr_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     payload = suggest_scope(
-        base_ref, worktree_only, issue_ref, issue_file, source_pr_refs,
+        base_ref, worktree_only, issue_ref, issue_file,
     )
     payload["risk_assessment"] = assess_pretest_risk(
         payload["context"],
@@ -628,45 +634,30 @@ def main() -> int:
     parser.add_argument("--worktree-only", action="store_true", help="Skip committed branch comparison.")
     parser.add_argument("--issue", help="Read this GitHub issue number, URL, or owner/repo#number with the local gh CLI.")
     parser.add_argument("--issue-file", help="Read issue context from a local JSON or Markdown file.")
-    parser.add_argument(
-        "--source-pr",
-        action="append",
-        default=[],
-        help=(
-            "Use owner/repo#number or a GitHub pull URL as explicit change provenance; "
-            "repeat for cross-repository changes."
-        ),
-    )
     args = parser.parse_args()
     if args.base_ref and args.worktree_only:
         parser.error("--base-ref and --worktree-only are mutually exclusive")
     if args.issue and args.issue_file:
         parser.error("--issue and --issue-file are mutually exclusive")
-    if args.source_pr and (args.issue or args.issue_file):
-        parser.error("--source-pr cannot be combined with --issue or --issue-file")
-
     if args.command == "collect":
         payload = collect_context(
             args.base_ref, args.worktree_only, args.issue, args.issue_file,
-            source_pr_refs=args.source_pr,
         )
     elif args.command == "impact":
         payload = map_modules(collect_context(
             args.base_ref, args.worktree_only, args.issue, args.issue_file,
-            source_pr_refs=args.source_pr,
         ))
     elif args.command == "inventory":
         payload = inspect_tests(collect_context(
             args.base_ref, args.worktree_only, args.issue, args.issue_file,
-            source_pr_refs=args.source_pr,
         ))
     elif args.command == "suggest":
         payload = suggest_scope(
-            args.base_ref, args.worktree_only, args.issue, args.issue_file, args.source_pr,
+            args.base_ref, args.worktree_only, args.issue, args.issue_file,
         )
     else:
         payload = assess_quality(
-            args.base_ref, args.worktree_only, args.issue, args.issue_file, args.source_pr,
+            args.base_ref, args.worktree_only, args.issue, args.issue_file,
         )
     json.dump(sanitize_for_output(payload), sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")

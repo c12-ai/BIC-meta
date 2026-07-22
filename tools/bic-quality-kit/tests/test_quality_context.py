@@ -631,9 +631,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         step_one = step_one.split("2. Read references only as needed", 1)[0]
 
         diff_step = step_one.index("**1A. Collect Diff and comparison context.**")
-        issue_step = step_one.index("**1B. Discover and shortlist Issues.**")
-        freeze_step = step_one.index("**1C. Freeze the snapshot and scan state.**")
-        self.assertLess(diff_step, issue_step)
+        technical_step = step_one.index("**1B. Freeze the technical scope.**")
+        issue_step = step_one.index("**1C. Discover and shortlist Issues.**")
+        freeze_step = step_one.index("**1D. Freeze the fused snapshot and scan state.**")
+        self.assertLess(diff_step, technical_step)
+        self.assertLess(technical_step, issue_step)
         self.assertLess(issue_step, freeze_step)
 
         self.assertIn("Resolve the directory containing this loaded `SKILL.md`", step_one)
@@ -654,19 +656,37 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("From the frozen assessment snapshot", skill)
         self.assertIn("Do not recollect Issue metadata", skill)
         self.assertIn(
-            "Treat `risk_assessment` from the frozen assessment snapshot",
+            "Treat `risk_assessment.technical_risk` from the frozen assessment snapshot",
             skill,
         )
         self.assertIn("`thematic-candidate`, even when unique", skill)
         self.assertIn("`acceptance_items_eligible` is true", skill)
-        self.assertIn("`--source-pr <reference>`", step_one)
+        self.assertNotIn("--source-pr", skill)
+        self.assertIn("issue_cannot_reduce_technical_scope", step_one)
+        self.assertIn("`technical_scope`", step_one)
         self.assertIn("Never perform a second Issue body lookup", skill)
         self.assertNotIn("candidate, read it fully", skill)
 
     def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
         without_issue = self.analyze("assess")
         self.assertFalse(without_issue["context"]["issue_context"]["resolved"])
-        self.assertEqual(without_issue["risk_assessment"]["overall_risk"], "unassessed")
+        self.assertEqual(
+            without_issue["risk_assessment"]["overall_risk"],
+            without_issue["risk_assessment"]["technical_risk"],
+        )
+        self.assertEqual(
+            without_issue["risk_assessment"]["requirement_alignment"],
+            "unassessed",
+        )
+        self.assertEqual(
+            without_issue["risk_assessment"]["assessment_completeness"],
+            {
+                "overall": "partial",
+                "technical_scope": "assessed",
+                "requirement_scope": "unassessed",
+                "test_execution": "not-run",
+            },
+        )
 
         assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
         issue = assessed["context"]["issue_context"]
@@ -680,6 +700,19 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(len(issue["acceptance_items"]), 2)
         self.assertEqual(risk["assessment_stage"], "pre-test")
         self.assertEqual(risk["overall_risk"], "high")
+        self.assertEqual(risk["technical_risk"], "high")
+        self.assertEqual(risk["requirement_alignment"], "pending-review")
+        self.assertEqual(
+            assessed["technical_scope"],
+            without_issue["technical_scope"],
+        )
+        self.assertTrue(
+            assessed["scope_fusion"]["invariants"]["issue_cannot_reduce_technical_scope"]
+        )
+        self.assertEqual(
+            assessed["scope_fusion"]["technical_test_candidate_ids"],
+            without_issue["scope_fusion"]["technical_test_candidate_ids"],
+        )
         dimensions = {item["dimension"] for item in risk["risk_matrix"]}
         self.assertEqual(
             dimensions,
@@ -988,104 +1021,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         )
         self.assertEqual(hydrate_mock.call_args.args[0], [])
 
-    def test_explicit_source_pr_supplies_authoritative_issue_provenance(self) -> None:
-        repository = "c12-ai/BIC-agent-portal"
-        issue_reference = f"{repository}#15"
-        pr_reference = f"{repository}#98"
-        repositories = [{
-            "name": "BIC-agent-portal",
-            "path": str(self.root),
-            "branch": "codex/retest-pr-98",
-            "merge_base": None,
-            "change_count": 12,
-        }]
-        source_pr = {
-            "reference": pr_reference,
-            "repository": repository,
-            "number": 98,
-            "title": "Improve assistant feedback controls",
-            "body": "Closes #15",
-            "url": f"https://github.com/{repository}/pull/98",
-            "state": "MERGED",
-            "closingIssuesReferences": [{
-                "number": 15,
-                "url": f"https://github.com/{repository}/issues/15",
-                "repository": {"nameWithOwner": repository},
-            }],
-            "provenance": "explicit-source-pr",
-        }
-        resolved_issue = ISSUE_MODULE.normalize_issue(
-            {
-                "number": 15,
-                "title": "Assistant Message Feedback Controls",
-                "body": "## Acceptance Criteria\n- [ ] Persist feedback",
-                "url": f"https://github.com/{repository}/issues/15",
-                "state": "OPEN",
-                "labels": [],
-            },
-            issue_reference,
-            "github-cli",
-        )
-
-        with (
-            mock.patch.object(ISSUE_MODULE, "resolve_source_pr", return_value=(source_pr, None)),
-            mock.patch.object(ISSUE_MODULE, "github_repository", return_value=repository),
-            mock.patch.object(ISSUE_MODULE, "current_pr_payload") as current_pr_mock,
-            mock.patch.object(ISSUE_MODULE, "commit_messages", return_value=""),
-            mock.patch.object(ISSUE_MODULE, "list_repository_issues") as list_mock,
-            mock.patch.object(ISSUE_MODULE, "resolve_github_issue", return_value=resolved_issue),
-        ):
-            result = ISSUE_MODULE.auto_discover_issue(
-                self.root, repositories, source_pr_refs=[pr_reference],
-            )
-
-        current_pr_mock.assert_not_called()
-        list_mock.assert_not_called()
-        self.assertTrue(result["resolved"])
-        self.assertEqual(result["reference"], issue_reference)
-        self.assertEqual(result["selection_reason"], "source-pr-linked-issue")
-        self.assertEqual(result["association_status"], "authoritative")
-        self.assertTrue(result["acceptance_items_eligible"])
-        self.assertEqual(result["source_prs"][0]["reference"], pr_reference)
-        self.assertEqual(result["issue_scan"]["source_pr_requested_count"], 1)
-        self.assertEqual(result["issue_scan"]["source_pr_attempted_count"], 1)
-        self.assertEqual(result["issue_scan"]["source_pr_resolved_count"], 1)
-
-    def test_source_pr_inputs_are_deduplicated_and_bounded(self) -> None:
-        references = [f"c12-ai/BIC-agent-portal#{number}" for number in range(1, 12)]
-
-        def resolved_source_pr(reference: str, *_args: object) -> tuple[dict, None]:
-            return ({
-                "reference": reference,
-                "repository": "c12-ai/BIC-agent-portal",
-                "number": int(reference.rsplit("#", 1)[1]),
-                "title": "Fixture PR",
-                "body": "",
-                "url": reference,
-                "state": "MERGED",
-                "closingIssuesReferences": [],
-                "provenance": "explicit-source-pr",
-            }, None)
-
-        with mock.patch.object(
-            ISSUE_MODULE, "resolve_source_pr", side_effect=resolved_source_pr,
-        ) as resolve_mock:
-            snapshot = ISSUE_MODULE.collect_issue_snapshot(
-                [], source_pr_refs=[references[0], *references],
-            )
-
-        self.assertEqual(resolve_mock.call_count, ISSUE_MODULE.SOURCE_PR_LIMIT)
-        self.assertEqual(snapshot["source_pr_requested_count"], 12)
-        self.assertEqual(snapshot["source_pr_attempted_count"], ISSUE_MODULE.SOURCE_PR_LIMIT)
-        self.assertTrue(any("exceeded the limit" in item for item in snapshot["warnings"]))
-
-    def test_cli_rejects_source_pr_with_explicit_issue_override(self) -> None:
+    def test_cli_rejects_removed_source_pr_option(self) -> None:
         env = os.environ.copy()
         env["BIC_WORKSPACE_ROOT"] = str(self.root)
         proc = subprocess.run(
             [
                 "python3", str(ANALYZER), "assess",
-                "--issue-file", str(self.issue_file),
                 "--source-pr", "c12-ai/BIC-agent-portal#98",
             ],
             cwd=self.root,
@@ -1096,10 +1037,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             check=False,
         )
         self.assertEqual(proc.returncode, 2)
-        self.assertIn(
-            "--source-pr cannot be combined with --issue or --issue-file",
-            proc.stderr,
-        )
+        self.assertIn("unrecognized arguments: --source-pr", proc.stderr)
 
     def test_issue_search_terms_support_chinese_and_mixed_titles(self) -> None:
         repository = "c12-ai/BIC-agent-service"
@@ -1321,14 +1259,6 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("timed out", warning)
 
     def test_all_github_lookups_have_bounded_timeouts(self) -> None:
-        self.assertEqual(
-            ISSUE_MODULE.normalize_pr_reference(
-                "https://github.com/c12-ai/BIC-agent-portal/pull/98"
-            ),
-            "c12-ai/BIC-agent-portal#98",
-        )
-        self.assertIsNone(ISSUE_MODULE.normalize_pr_reference("98"))
-
         with (
             mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
             mock.patch.object(
@@ -1342,54 +1272,6 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIsNone(payload)
         self.assertTrue(any("timed out" in warning for warning in warnings))
         self.assertEqual(pr_run.call_args.kwargs["timeout"], ISSUE_MODULE.GH_METADATA_TIMEOUT_SECONDS)
-
-        with (
-            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
-            mock.patch.object(
-                ISSUE_MODULE.subprocess,
-                "run",
-                side_effect=subprocess.TimeoutExpired(["gh", "pr", "view"], 15),
-            ) as source_pr_run,
-        ):
-            source_pr, warning = ISSUE_MODULE.resolve_source_pr(
-                "c12-ai/BIC-agent-portal#98", self.root,
-            )
-        self.assertIsNone(source_pr)
-        self.assertIn("timed out", warning)
-        self.assertEqual(
-            source_pr_run.call_args.kwargs["timeout"],
-            ISSUE_MODULE.GH_METADATA_TIMEOUT_SECONDS,
-        )
-
-        source_pr_success = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=json.dumps({
-                "number": 98,
-                "title": "Improve feedback controls",
-                "body": "Backend: https://github.com/c12-ai/BIC-agent-service/pull/166",
-                "url": "https://github.com/c12-ai/BIC-agent-portal/pull/98",
-                "state": "MERGED",
-                "closingIssuesReferences": [],
-            }),
-            stderr="",
-        )
-        with (
-            mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),
-            mock.patch.object(
-                ISSUE_MODULE.subprocess, "run", return_value=source_pr_success,
-            ) as source_pr_success_run,
-        ):
-            source_pr, warning = ISSUE_MODULE.resolve_source_pr(
-                "https://github.com/c12-ai/BIC-agent-portal/pull/98/", self.root,
-            )
-        self.assertIsNone(warning)
-        self.assertEqual(source_pr["reference"], "c12-ai/BIC-agent-portal#98")
-        self.assertEqual(source_pr["mentioned_prs"], ["c12-ai/BIC-agent-service#166"])
-        self.assertEqual(
-            source_pr_success_run.call_args.args[0][:6],
-            ["gh", "pr", "view", "98", "--repo", "c12-ai/BIC-agent-portal"],
-        )
 
         with (
             mock.patch.object(ISSUE_MODULE.shutil, "which", return_value="/usr/bin/gh"),

@@ -17,14 +17,15 @@ Use only concrete evidence from:
   including Playwright/CDP browser evidence kept separate from backend/unit tests.
 
 Do not use a path, label, filename, or keyword match by itself to assign risk.
-Do not choose among equally authoritative Issue candidates; keep the overall result
-`unassessed` until the association is authoritative or a provenance-bearing
-reference hint is explicitly justified as strong-related.
+Do not choose among equally authoritative Issue candidates. Keep requirement
+alignment `unassessed` until the association is authoritative or a
+provenance-bearing reference hint is explicitly justified as strong-related;
+preserve the independently derived technical risk.
 
 Keep provenance and topical similarity separate:
 
 - `authoritative`: explicit Issue override, local Issue file, or a linked/closing
-  Issue from the current PR or an explicitly supplied `--source-pr`.
+  Issue from the auto-detected current PR.
 - `reference-hint`: commit/branch reference. It may become `strong-related` only
   after its preserved provenance and full body both match concrete Diff objects.
 - `thematic-candidate`: ordinary open-Issue search match. It is background
@@ -63,16 +64,16 @@ acceptance item and a changed module, file, or object when explaining thematic
 context. Even if exactly one ordinary candidate meets that standard, keep it
 thematic and leave workspace Issue alignment `unassessed`. Follow at most ten
 repository-contained Issue references from hydrated bodies for one hop; show
-them as `mentioned-reference` context without inheriting authority. If source PR
-provenance is known, pass each PR with repeated `--source-pr` so linked/closing
-Issues retain their real association after a merged PR is restored as worktree
-changes. A resolved source PR remains authoritative change provenance even when
-it closes no Issue: use its body to define the Diff's intended change, but keep
-Issue alignment unassessed and do not substitute a thematic Issue.
+them as `mentioned-reference` context without inheriting authority. Historical
+PR URLs are background context only: do not claim their Issue linkage as
+workspace provenance unless the analyzer auto-detects that PR from the current
+checkout. Keep Issue alignment unassessed rather than substituting a thematic
+Issue.
 
 Treat `scan-failed` and `partial-scan` as unavailable or incomplete Issue
-evidence, never as proof that no open Issue exists. Keep overall risk
-`unassessed` unless a separately preserved authoritative reference resolves and aligns.
+evidence, never as proof that no open Issue exists. Keep requirement alignment
+`unassessed` unless a separately preserved authoritative reference resolves and
+aligns; do not discard technical risk.
 
 ## Deterministic floor
 
@@ -106,12 +107,13 @@ For each in-scope row:
 Every row must cite Issue, Diff, and test evidence. Keyword overlap is a search
 hint only. Do not lower risk because an Issue checkbox is already checked.
 
-## Overall risk
+## Technical risk and requirement alignment
 
-Use the highest row after Issue alignment. If no Issue was authoritatively linked
-or explicitly promoted from a provenance-bearing reference hint to
-`strong-related`, overall risk is `unassessed`, even when deterministic Diff/test
-rows are available. State
-explicitly that tests were not executed. The current analyzer returns one
+Use the highest deterministic technical row as `technical_risk` and the known
+pre-test `overall_risk`. Issue alignment may raise this result later but cannot
+lower it. If no Issue was authoritatively linked or explicitly promoted from a
+provenance-bearing reference hint to `strong-related`, set
+`requirement_alignment` to `unassessed` and assessment completeness to partial.
+State explicitly that tests were not executed. The current analyzer returns one
 workspace-level risk assessment. Do not infer business streams or allocate
 workspace test counts and risk rows among guessed streams.
