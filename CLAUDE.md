@@ -123,6 +123,10 @@ Load only the SOP that matches the current work.
 
 GitHub issues in `c12-ai/BIC-meta`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
+### GitHub bot identity
+
+身份按"谁驱动"分（裁定）：**交互式会话**（开发者在场指挥，包括让 agent 写码/发 PR）一律用开发者自己的 `gh` 身份，什么都不用切；**完全自主的会话**（定时任务、批量流水线、无人值守 dispatch）的 GitHub 写操作先切 bot：`export GH_TOKEN=$(scripts/gh-app/gh-app-token.sh)`（署名 `c12-apex-dev[bot]`，token 1h 自动缓存）。读操作任意身份。接入与细节：`docs/agents/github-bot.md`。
+
 ### Triage labels
 
 两根轴（定档 2026-07-16）：**分诊轴** `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`（engineering skills 读它）；**生命周期轴** `stage:已析根因` → `stage:已实现待复测` → `stage:已验证`（S1/S2/S3 用）。`stage:待调查` / `stage:待裁定` / `stage:待修复` 已退役删除。See `docs/agents/triage-labels.md`.
