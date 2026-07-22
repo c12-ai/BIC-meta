@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/research/lab-service.md", "reason": "Lab-service write/read/validation paths with file:line — lane 1 executes exactly this map"}
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/research/portal.md", "reason": "Portal component/state/API map, testid breakage list — lane 2 source of truth"}
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/research/agent-service-eln.md", "reason": "ELN pipeline map + Option-A sourcing rationale — lane 3 source of truth"}
+{"file": ".trellis/spec/BIC-lab-service/backend/index.md", "reason": "Lab-service layer conventions before editing schemas/services/repos"}
+{"file": ".trellis/spec/BIC-agent-portal/frontend/index.md", "reason": "Portal conventions before editing panel/grid/adapter"}
+{"file": ".trellis/spec/BIC-agent-service/backend/index.md", "reason": "Agent-service conventions before editing eln/ and form_payloads"}
+{"file": "Production-PRD.md", "reason": "Rules 7–10 + acceptance criteria being revised in lane 4; read before rewriting"}

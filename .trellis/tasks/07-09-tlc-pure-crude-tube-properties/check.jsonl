@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/prd.md", "reason": "Acceptance criteria checklist — verify each line, no silent skips"}
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/design.md", "reason": "Decisions D2.x/D3.x/§4–6 — check implementation matches, esp. dispatch payload unchanged and no shared-types edits"}
+{"file": ".trellis/tasks/07-09-tlc-pure-crude-tube-properties/research/portal.md", "reason": "§Q6 Playwright breakage list — confirm every listed spec risk was addressed"}
+{"file": "Production-PRD.md", "reason": "Rule-10 compliance: PRD revision must land in the same change set as the contract change"}

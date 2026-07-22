@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-10-tlc-rack-tubebox-and-tank-solvent-reuse/design.md", "reason": "Authoritative op-seam design (D1-D5); check the planner branches against §R2.6 and the non-reuse regression requirement"}
+{"file": ".trellis/tasks/07-10-tlc-rack-tubebox-and-tank-solvent-reuse/prd.md", "reason": "Acceptance criteria checklist — every box must be verifiable, D2/D3 non-goals enforced"}
+{"file": ".trellis/spec/BIC-lab-service/backend/quality-guidelines.md", "reason": "Lab-service quality bar for the planner/service/seed changes"}
+{"file": ".trellis/spec/BIC-lab-service/backend/tlc-placement.md", "reason": "Placement contract the changes must stay consistent with (and which Phase D updates)"}
