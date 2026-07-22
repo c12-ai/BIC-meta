@@ -1,10 +1,12 @@
 # GitHub Bot 身份：c12-apex-dev
 
 AI agent 做 GitHub 写操作（提 PR、建/评 issue 等）统一用 org 级 GitHub App
-**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥**只存在铸造机
-aws-test 上**，笔记本零秘密：本地无钥匙时 `scripts/gh-app/gh-app-token.sh` 把自身
-通过 ssh 管道到铸造机执行，只回传 1 小时 token（本地缓存 55 分钟复用）。bot 不能
-approve 自己的 PR，"人工 admin merge" 这道闸不受影响。
+**c12-apex-dev**（署名 `c12-apex-dev[bot]`），不再借用个人账号。私钥只存在铸造机
+aws-test 的专用账户 **`ghmint`** 名下，其 ssh 公钥全部钉了 forced command：
+`ssh bic-mint` 只会铸出 1 小时 token，拿不到 shell、读不到私钥——**铸币权 ≠ 读钥权**，
+能碰私钥的只有箱管理员（sudo）。本地 `scripts/gh-app/gh-app-token.sh` 无钥匙时即走
+这条 ssh，token 本地缓存 55 分钟复用。bot 不能 approve 自己的 PR，"人工 admin merge"
+这道闸不受影响。
 
 - App: https://github.com/organizations/c12-ai/settings/apps/c12-apex-dev
   （app id `4362356`，bot uid `307868801`）
@@ -13,16 +15,27 @@ approve 自己的 PR，"人工 admin merge" 这道闸不受影响。
 
 ## 同事一次性接入
 
-前提只有一个：`ssh aws-test` 可用（就是部署用的那套 ssh config + 团队 key + IP 白名单，
-多数人已具备）。验证：
+不需要团队部署 key，与部署权限完全解耦：
 
-```bash
-scripts/gh-app/gh-app-token.sh --check
-# OK  identity: c12-apex-dev[bot] ...
-```
+1. 把自己的个人公钥（`~/.ssh/id_ed25519.pub`）发给管理员，加进铸造机 `ghmint` 的
+   `authorized_keys`（forced-command 前缀见 `ops/` 施工记录；离职收权 = 删这一行）。
+2. `~/.ssh/config` 加：
+   ```
+   Host bic-mint
+     HostName ec2-43-192-79-141.cn-northwest-1.compute.amazonaws.com.cn
+     User ghmint
+     IdentityFile ~/.ssh/id_ed25519
+     IdentitiesOnly yes
+   ```
+   （公网 IP 需在 office-ips 白名单内，同部署一致。）
+3. 验证：
+   ```bash
+   scripts/gh-app/gh-app-token.sh --check
+   # OK  identity: c12-apex-dev[bot] ...
+   ```
 
-完成。本机不落任何秘密；个人的 `gh auth` / ssh key / git 配置一概不动。
-（铸造机可用 `BIC_GH_APP_SSH` 覆盖；管理员/测试可用 `BIC_GH_APP_KEY=<pem>` 走本地钥匙。）
+完成。本机不落任何秘密；个人的 `gh auth` / git 配置一概不动。
+（铸造机别名可用 `BIC_GH_APP_SSH` 覆盖；管理员/测试可用 `BIC_GH_APP_KEY=<pem>` 走本地钥匙。）
 
 ## Agent 怎么用（无感的关键）
 

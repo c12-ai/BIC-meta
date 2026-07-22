@@ -3,13 +3,16 @@
 # GitHub App: the shared bot identity AI agents use for PRs, issues and other
 # gh writes (shows up as c12-apex-dev[bot], cannot approve its own PRs).
 #
-# The private key lives ONLY on the mint host (aws-test) — laptops hold no
-# secret at all. With no local key configured, this script pipes ITSELF over
-# ssh to the mint host and runs there against the box's pem, returning just
-# the 1-hour token (single source of truth, nothing to deploy on the box).
-# Teammate prerequisite: working `ssh aws-test` (same access as deploys).
+# The private key lives ONLY on the mint host (aws-test), under the dedicated
+# `ghmint` account whose ssh identities are pinned to a forced command: any
+# `ssh ghmint@...` mints a fresh 1-hour token and can do nothing else — no
+# shell, no reading the pem. Mint access is therefore NOT key access; only the
+# box admin (sudo) can reach the pem. With no local key configured, this
+# script just runs `ssh bic-mint` and caches the returned token.
+# Teammate prerequisite: an ssh config `Host bic-mint` entry + their personal
+# public key added to ghmint's authorized_keys (see docs/agents/github-bot.md).
 # BIC_GH_APP_KEY=<pem path> forces a local-file key source (admin/tests);
-# BIC_GH_APP_SSH / BIC_GH_APP_REMOTE_KEY override the mint host / box pem path.
+# BIC_GH_APP_SSH overrides the mint host alias.
 #
 # Usage:
 #   gh-app-token.sh                  print a valid token (mints, or reuses cache)
@@ -23,8 +26,7 @@
 set -euo pipefail
 
 APP_ID="${BIC_GH_APP_ID:-4362356}"          # c12-apex-dev (org c12-ai)
-SSH_HOST="${BIC_GH_APP_SSH:-aws-test}"      # mint host holding the pem
-REMOTE_KEY="${BIC_GH_APP_REMOTE_KEY:-\$HOME/.config/bic-v2/gh-app/private-key.pem}"
+SSH_HOST="${BIC_GH_APP_SSH:-bic-mint}"      # ssh alias for ghmint@<mint host>
 KEY_FILE="${BIC_GH_APP_KEY:-}"              # local-file key source (admin/tests) — skips ssh
 CACHE_FILE="$HOME/.cache/bic-v2/gh-app-token.json"
 API="https://api.github.com"
@@ -54,15 +56,13 @@ cache_write() { # <token> [installation_id]
       "$1" "$(( $(date +%s) + 3600 ))" "${2:-0}" > "$CACHE_FILE" )
 }
 
-# ── remote mint: pipe THIS script to the mint host, run against the box pem ──
-# BIC_GH_APP_NO_CACHE=1 on the remote leg forces a fresh mint there, so the
-# token we cache locally really has a full hour on it.
+# ── remote mint: the ghmint forced command mints a fresh token and prints it ─
+# (the server always mints fresh, so the token we cache locally really has a
+# full hour on it; whatever command we request is ignored by the forcing)
 mint_remote() {
   local tok
-  tok="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" \
-      "BIC_GH_APP_KEY=$REMOTE_KEY BIC_GH_APP_NO_CACHE=1 bash -s -- --print" \
-      < "${BASH_SOURCE[0]}")" \
-    || die "remote mint via ssh $SSH_HOST failed — box reachable? pem at $REMOTE_KEY on the box? (see docs/agents/github-bot.md)"
+  tok="$(ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_HOST" 2>/dev/null)" \
+    || die "remote mint via ssh $SSH_HOST failed — Host bic-mint configured? your public key added to ghmint? (see docs/agents/github-bot.md)"
   [ -n "$tok" ] || die "remote mint on $SSH_HOST returned an empty token"
   cache_write "$tok"
   printf '%s' "$tok"
