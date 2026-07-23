@@ -10,7 +10,7 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Project-owned skills (prd, env-up, s1-triage, s2-investigate, pr-stack, gh-stack). Other synced personal/plugin skills are local noise.
+# Project-owned skills. Other synced personal/plugin skills are local noise.
 /.claude/skills/*
 !/.claude/skills/prd/
 !/.claude/skills/prd/SKILL.md
@@ -18,6 +18,8 @@ CLAUDE.local.md
 !/.claude/skills/pr-stack/SKILL.md
 !/.claude/skills/gh-stack/
 !/.claude/skills/gh-stack/SKILL.md
+!/.claude/skills/bic-quality-guan-ping-ce/
+!/.claude/skills/bic-quality-guan-ping-ce/**
 !/.claude/skills/env-up/
 !/.claude/skills/env-up/SKILL.md
 !/.claude/skills/s1-triage/
@@ -26,6 +28,13 @@ CLAUDE.local.md
 !/.claude/skills/s2-investigate/SKILL.md
 /.agents/skills/*
 !/.agents/skills/prd
+!/.agents/skills/bic-quality-guan-ping-ce/
+!/.agents/skills/bic-quality-guan-ping-ce/**
+
+# Generated Python bytecode remains local even inside tracked Skill mirrors.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
 
 # Child repositories are cloned into this workspace but remain independently
 # managed Git repositories. The root meta repo tracks only workspace docs,

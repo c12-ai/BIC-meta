@@ -1,0 +1,98 @@
+[
+  {
+    "id": "portal-tests",
+    "name": "Portal Tests",
+    "module_scope": "portal/tests",
+    "paths": ["BIC-agent-portal/tests/**", "BIC-agent-portal/**/*.spec.*", "BIC-agent-portal/**/*.test.*"]
+  },
+  {
+    "id": "portal-api-client",
+    "name": "Portal API Client",
+    "module_scope": "portal/api-client",
+    "paths": ["BIC-agent-portal/src/**/client/**", "BIC-agent-portal/src/**/*client*", "BIC-agent-portal/src/**/queries/**", "BIC-agent-portal/src/**/api/**"]
+  },
+  {
+    "id": "portal-ui",
+    "name": "Portal UI",
+    "module_scope": "portal/ui",
+    "paths": ["BIC-agent-portal/src/**", "BIC-agent-portal/app/**"]
+  },
+  {
+    "id": "agent-tests",
+    "name": "Agent Tests",
+    "module_scope": "agent/tests",
+    "paths": ["BIC-agent-service/tests/**"]
+  },
+  {
+    "id": "agent-sse",
+    "name": "Agent SSE / Streaming",
+    "module_scope": "agent/sse",
+    "paths": ["BIC-agent-service/app/**/*sse*", "BIC-agent-service/app/**/stream/**", "BIC-agent-service/app/**/streaming/**", "BIC-agent-service/app/**/events/**"]
+  },
+  {
+    "id": "agent-runtime",
+    "name": "Agent Runtime",
+    "module_scope": "agent/runtime",
+    "paths": ["BIC-agent-service/app/runtime/**", "BIC-agent-service/app/**/graphs/**"]
+  },
+  {
+    "id": "agent-api",
+    "name": "Agent API",
+    "module_scope": "agent/api",
+    "paths": ["BIC-agent-service/app/api/**", "BIC-agent-service/app/routes/**", "BIC-agent-service/app/main.py"]
+  },
+  {
+    "id": "agent-session",
+    "name": "Agent Session",
+    "module_scope": "agent/session",
+    "paths": ["BIC-agent-service/app/session/**"]
+  },
+  {
+    "id": "agent-database",
+    "name": "Agent Database",
+    "module_scope": "agent/database",
+    "paths": ["BIC-agent-service/alembic/**", "BIC-agent-service/app/data/**", "BIC-agent-service/app/repositories/**", "BIC-agent-service/app/**/models/**", "BIC-agent-service/app/**/repositories/**"]
+  },
+  {
+    "id": "lab-orchestration",
+    "name": "Lab Orchestration",
+    "module_scope": "lab/orchestration",
+    "paths": ["BIC-lab-service/app/**/orchestration/**", "BIC-lab-service/app/**/tasks/**", "BIC-lab-service/app/**/workflow/**", "BIC-lab-service/app/services/task_service.py", "BIC-lab-service/app/**/*orchestrat*"]
+  },
+  {
+    "id": "lab-mq",
+    "name": "Lab MQ",
+    "module_scope": "lab/mq",
+    "paths": ["BIC-lab-service/app/**/mq/**", "BIC-lab-service/app/**/rabbit*/**", "BIC-lab-service/app/**/message*/**", "BIC-lab-service/app/**/*mq*", "BIC-lab-service/app/**/*rabbit*", "BIC-lab-service/app/**/*consumer*", "BIC-lab-service/app/**/*producer*"]
+  },
+  {
+    "id": "lab-database",
+    "name": "Lab Database",
+    "module_scope": "lab/database",
+    "paths": ["BIC-lab-service/alembic/**", "BIC-lab-service/app/**/models/**", "BIC-lab-service/app/**/repositories/**", "BIC-lab-service/app/repositories/**", "BIC-lab-service/app/**/*repository*"]
+  },
+  {
+    "id": "shared-contracts",
+    "name": "Shared Types / Contracts",
+    "module_scope": "shared/contracts",
+    "paths": ["BIC-shared-types/**", "**/contracts/**", "**/contract/**", "**/api/**/dto/**", "**/api/**/schemas/**"]
+  },
+  {
+    "id": "meta-tooling",
+    "name": "Meta Quality / Developer Tooling",
+    "module_scope": "meta/tooling",
+    "paths": ["tools/**", "scripts/**"]
+  },
+  {
+    "id": "meta-docs",
+    "name": "Meta Documentation",
+    "module_scope": "meta/docs",
+    "paths": ["*.md", "docs/**", ".trellis/**", ".claude/**", ".agents/**"]
+  },
+  {
+    "id": "meta-test-config",
+    "name": "Test / Build Configuration",
+    "module_scope": "meta/test-config",
+    "paths": ["Makefile", "**/Makefile", "pyproject.toml", "**/pyproject.toml", "package.json", "**/package.json", "pnpm-lock.yaml", "**/pnpm-lock.yaml", "uv.lock", "**/uv.lock", "pytest.ini", "**/pytest.ini", "playwright.config.*", "**/playwright.config.*", "tsconfig*.json", "**/tsconfig*.json", ".github/**", "**/.github/**"]
+  }
+]

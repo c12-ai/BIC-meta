@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "forbidden_commands": [
+    "pytest",
+    "unittest",
+    "pnpm test",
+    "npm test",
+    "make dev",
+    "git fetch",
+    "git checkout",
+    "git switch",
+    "docker",
+    "curl post",
+    "kill"
+  ],
+  "cases": [
+    {
+      "id": "resolved-issue-cn",
+      "fixture": "resolved_issue",
+      "suites": ["smoke", "full"],
+      "modes": ["with_skill", "no_skill"],
+      "stability_group": "resolved-issue",
+      "prompt": "帮我看下当前项目改动的质量风险，Issue 上下文在 issue.json。只做只读分析，不执行测试。",
+      "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
+      "facts": [
+        {"id": "repository", "any": ["BIC-agent-service"]},
+        {"id": "module", "any": ["agent/sse", "Agent SSE"]},
+        {"id": "issue", "any": ["#42", "Issue 42", "issue 42"]},
+        {"id": "changed-object", "any": ["disconnect"]},
+        {"id": "test-file", "any": ["tests/unit/test_sse.py"]},
+        {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
+      ]
+    },
+    {
+      "id": "resolved-issue-cn-variant",
+      "fixture": "resolved_issue",
+      "suites": ["full"],
+      "modes": ["with_skill", "no_skill"],
+      "stability_group": "resolved-issue",
+      "prompt": "请针对工作区现有 Diff 做一次关评测，结合 issue.json 说明受影响模块、测试对应和测试前风险；不要运行任何测试。",
+      "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
+      "facts": [
+        {"id": "repository", "any": ["BIC-agent-service"]},
+        {"id": "module", "any": ["agent/sse", "Agent SSE"]},
+        {"id": "issue", "any": ["#42", "Issue 42", "issue 42"]},
+        {"id": "changed-object", "any": ["disconnect"]},
+        {"id": "test-file", "any": ["tests/unit/test_sse.py"]},
+        {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
+      ]
+    },
+    {
+      "id": "resolved-issue-en",
+      "fixture": "resolved_issue",
+      "suites": ["full"],
+      "modes": ["with_skill", "no_skill"],
+      "stability_group": "resolved-issue",
+      "prompt": "Review the current workspace diff for affected modules, related tests, and pre-test risk. Use issue.json as the supplied Issue context and do not run tests.",
+      "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
+      "facts": [
+        {"id": "repository", "any": ["BIC-agent-service"]},
+        {"id": "module", "any": ["agent/sse", "Agent SSE"]},
+        {"id": "issue", "any": ["#42", "Issue 42", "issue 42"]},
+        {"id": "changed-object", "any": ["disconnect"]},
+        {"id": "test-file", "any": ["tests/unit/test_sse.py"]},
+        {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
+      ]
+    },
+    {
+      "id": "issue-scan-failed",
+      "fixture": "scan_failed",
+      "suites": ["smoke", "full"],
+      "modes": ["with_skill", "no_skill"],
+      "prompt": "帮我评估当前改动的测试前风险和缺测情况，只读分析，不要执行测试。",
+      "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
+      "facts": [
+        {"id": "repository", "any": ["BIC-agent-service"]},
+        {"id": "module", "any": ["agent/sse", "Agent SSE"]},
+        {"id": "changed-object", "any": ["disconnect"]},
+        {"id": "test-file", "any": ["tests/unit/test_sse.py"]},
+        {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
+      ],
+      "forbidden_output": ["需求与问题单", "Requirements and Issue"]
+    },
+    {
+      "id": "multi-repo-unrelated",
+      "fixture": "multi_repo_unrelated",
+      "suites": ["full"],
+      "modes": ["with_skill", "no_skill"],
+      "prompt": "分析当前多个仓库的改动风险。Issue 上下文在 issue.json，只读分析且不要执行测试。",
+      "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
+      "facts": [
+        {"id": "agent-repository", "any": ["BIC-agent-service"]},
+        {"id": "meta-repository", "any": ["BIC-meta"]},
+        {
+          "id": "no-shared-chain",
+          "all_of_any": [
+            ["不能证明", "无法证明", "不足以证明", "不足以说明", "未确认", "unresolved", "not establish", "does not establish"],
+            ["业务链", "业务流", "business chain", "business stream"]
+          ]
+        },
+        {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
+      ],
+      "forbidden_output": ["已确认跨仓业务链", "confirmed cross-repository business chain"]
+    },
+    {
+      "id": "non-trigger-test-command",
+      "fixture": "resolved_issue",
+      "suites": ["smoke", "full"],
+      "modes": ["with_skill"],
+      "prompt": "告诉我这个 fixture 可以用什么命令运行单元测试，但不要实际执行。",
+      "expected_assess_calls": {"with_skill": 0},
+      "facts": []
+    },
+    {
+      "id": "non-trigger-file-explanation",
+      "fixture": "resolved_issue",
+      "suites": ["full"],
+      "modes": ["with_skill"],
+      "prompt": "简单解释 BIC-agent-service/app/api/routers/sse.py 这个文件现在做什么，不需要做质量评审。",
+      "expected_assess_calls": {"with_skill": 0},
+      "facts": []
+    }
+  ]
+}

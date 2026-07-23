@@ -1,0 +1,8 @@
+{
+  "ast_outline": {
+    "package": "ast-outline",
+    "version": "1.8.2",
+    "python": "3.12",
+    "schema_version": 1
+  }
+}

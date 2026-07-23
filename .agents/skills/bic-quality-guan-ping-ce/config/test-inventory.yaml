@@ -1,0 +1,56 @@
+[
+  {
+    "id": "agent-unit",
+    "repo": "BIC-agent-service",
+    "type": "unit",
+    "paths": ["BIC-agent-service/tests/unit/**"],
+    "command_hint": "uv run pytest tests/unit",
+    "relates_modules": ["agent/runtime", "agent/session", "agent/api", "agent/database", "agent/sse"]
+  },
+  {
+    "id": "agent-integration",
+    "repo": "BIC-agent-service",
+    "type": "service-integration",
+    "paths": ["BIC-agent-service/tests/integration/**"],
+    "command_hint": "uv run pytest tests/integration",
+    "relates_modules": ["agent/runtime", "agent/session", "agent/api", "agent/database", "agent/sse"],
+    "relates_repository_modules": [
+      {"repo": "BIC-shared-types", "module_scope": "shared/contracts"}
+    ]
+  },
+  {
+    "id": "lab-tests",
+    "repo": "BIC-lab-service",
+    "type": "service-integration",
+    "paths": ["BIC-lab-service/tests/unit/**", "BIC-lab-service/tests/integration/**"],
+    "command_hint": "run the lab-service pytest suite from BIC-lab-service",
+    "relates_modules": ["lab/orchestration", "lab/mq", "lab/database"]
+  },
+  {
+    "id": "portal-unit",
+    "repo": "BIC-agent-portal",
+    "type": "unit",
+    "paths": ["BIC-agent-portal/src/**/*.test.*", "BIC-agent-portal/src/**/*.spec.*"],
+    "command_hint": "pnpm test or repo-specific unit command",
+    "relates_modules": ["portal/ui", "portal/api-client"]
+  },
+  {
+    "id": "portal-playwright",
+    "repo": "BIC-agent-portal",
+    "type": "frontend-smoke",
+    "paths": ["BIC-agent-portal/tests/**/*.spec.ts", "BIC-agent-portal/playwright.config.*"],
+    "command_hint": "pnpm exec playwright test <related spec>",
+    "relates_modules": ["portal/ui", "portal/api-client"],
+    "relates_repository_modules": [
+      {"repo": "BIC-shared-types", "module_scope": "shared/contracts"}
+    ]
+  },
+  {
+    "id": "shared-types-review",
+    "repo": "BIC-shared-types",
+    "type": "contract-check",
+    "paths": ["BIC-shared-types/**"],
+    "command_hint": "inspect shared type build/test command in BIC-shared-types",
+    "relates_modules": ["shared/contracts"]
+  }
+]

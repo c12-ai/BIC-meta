@@ -27,7 +27,8 @@ BIC_STAGE := $(STAGE)
 export BIC_ROOT BIC_STAGE DRY INFRA CHEM_DIR INFRA_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: help up pull update doctor down restart-lab restart-BE restart-portal restart-mock restart-chem
+.PHONY: help up pull update doctor quality-test-doctor quality-test-setup down \
+        restart-lab restart-BE restart-portal restart-mock restart-chem
 
 help: ## Show this help
 	@echo "BIC env — one-shot local bring-up"
@@ -36,6 +37,8 @@ help: ## Show this help
 	@echo "  make pull      fast-forward all repos (meta/services/infra) to origin/main"
 	@echo "  make update    pull + full restart on the new code (pull && up alone does NOT redeploy running services)"
 	@echo "  make doctor    read-only full checkup (each red card has a fix command)"
+	@echo "  make quality-test-doctor   read-only Phase 2 test runtime check"
+	@echo "  make quality-test-setup    explicitly install Phase 2 project test runtime"
 	@echo "  make down      stop app services (INFRA=1 also stops shared infra)"
 	@echo "  make restart-<svc>   lab | BE | portal | mock | chem"
 	@echo ""
@@ -52,6 +55,8 @@ pull:          ; @$(ENV)/pull.sh
 # exception — it serves from disk). update closes that gap deterministically.
 update:        ; @$(ENV)/pull.sh && $(ENV)/down.sh && $(ENV)/up.sh
 doctor:        ; @$(ENV)/doctor.sh
+quality-test-doctor: ; @./tools/bic-quality-kit/doctor-test-runtime.sh
+quality-test-setup:  ; @./tools/bic-quality-kit/setup-test-runtime.sh --execute
 
 ## --- field (orin) ----------------------------------------------------------
 # Field counterparts of the bench targets. update.sh does survey->guards->

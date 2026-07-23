@@ -1,0 +1,4 @@
+interface:
+  display_name: "BIC Quality Review"
+  short_description: "Review BIC changes and run selected layered tests"
+  default_prompt: "Use $bic-quality-guan-ping-ce to map the current BIC diff to changed behavior and backend, frontend, Playwright, and CDP evidence, produce the Phase 1 quality brief and a behavior-scoped Phase 2 manifest, and execute that manifest only when I explicitly authorize test execution."

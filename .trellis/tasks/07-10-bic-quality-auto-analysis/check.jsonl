@@ -1,0 +1,2 @@
+{"file":".trellis/spec/tech_design/backend/quality-guidelines.md","reason":"Review read-only behavior, edge cases, and verification completeness."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that source and installed behavior share one implementation and do not drift."}

@@ -1,0 +1,14 @@
+{
+  "sensitive_modules": [
+    "shared/contracts",
+    "agent/sse",
+    "agent/api",
+    "agent/database",
+    "portal/api-client",
+    "lab/mq",
+    "lab/database",
+    "lab/orchestration"
+  ],
+  "levels": ["low", "medium", "high", "unassessed"],
+  "stage": "pre-test"
+}
