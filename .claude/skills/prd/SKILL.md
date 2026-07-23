@@ -39,7 +39,7 @@ If the scope is ambiguous, ask one question before editing: "Does this requireme
 
 1. Identify the owning PRD using the routing rules.
 2. Read the target PRD and any linked parent/child PRD.
-3. Preserve existing decisions unless Drake explicitly asks to replace them.
+3. Preserve existing decisions unless the product owner explicitly asks to replace them.
 4. Add or revise requirements in the correct section.
 5. Add acceptance criteria that can be verified.
 6. Update the change log with the date and short summary.

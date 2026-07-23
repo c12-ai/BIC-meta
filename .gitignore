@@ -10,14 +10,22 @@ CLAUDE.local.md
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 
-# Project-owned skills (prd, env-up, bic-quality-guan-ping-ce). Other synced personal/plugin skills are local noise.
+# Project-owned skills. Other synced personal/plugin skills are local noise.
 /.claude/skills/*
 !/.claude/skills/prd/
 !/.claude/skills/prd/SKILL.md
+!/.claude/skills/pr-stack/
+!/.claude/skills/pr-stack/SKILL.md
+!/.claude/skills/gh-stack/
+!/.claude/skills/gh-stack/SKILL.md
 !/.claude/skills/bic-quality-guan-ping-ce/
 !/.claude/skills/bic-quality-guan-ping-ce/**
 !/.claude/skills/env-up/
 !/.claude/skills/env-up/SKILL.md
+!/.claude/skills/s1-triage/
+!/.claude/skills/s1-triage/SKILL.md
+!/.claude/skills/s2-investigate/
+!/.claude/skills/s2-investigate/SKILL.md
 /.agents/skills/*
 !/.agents/skills/prd
 !/.agents/skills/bic-quality-guan-ping-ce/
@@ -42,3 +50,5 @@ CLAUDE.local.md
 
 /BIC-infra/
 .bic-env
+
+.dispatch/runs/*

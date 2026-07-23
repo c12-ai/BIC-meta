@@ -1,0 +1,5 @@
+{"file": "BIC-agent-service/backend/L4/persistence.md", "reason": "Verify failed trial row is frozen (byte-for-byte unchanged) and new attempt is UNIQUE(job_id, attempt) with copied params."}
+{"file": "BIC-lab-service/backend/tlc-placement.md", "reason": "Verify no duplicate tube record; one lab record per physical tube with preserved tube_id after re-stamp (root PRD rule 6, prd AC)."}
+{"file": "BIC-agent-service/backend/L3/narrate-contract.md", "reason": "Verify failure narration cites real lab state and never promises automatic retry."}
+{"file": "BIC-agent-service/backend/quality-guidelines.md", "reason": "Backend test-intent + fail-loud checks for the retry unit-of-work atomicity (design R1)."}
+{"file": "BIC-agent-portal/frontend/quality-guidelines.md", "reason": "Verify no SampleTubeBoxGrid occupied-cell rule change; reused tubes render via the existing already-selected item-card path (prd Req 5)."}

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # common.sh — shared library for the BIC one-shot env scripts.
 #
-# Sourced by doctor.sh / up.sh / status.sh / down.sh / restart.sh.
+# Sourced by doctor.sh / up.sh / down.sh / restart.sh.
 # All BIC bring-up knowledge is ENCODED HERE (ports, containers, health,
 # self-heal), so the human entry point stays "clone meta -> make up".
 #
@@ -21,7 +21,7 @@ _bic_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIC_META_DIR="$(cd "${_bic_here}/../.." && pwd)"
 
 # Machine-local overrides (gitignored): .bic-env in the meta root can pin
-# BIC_ROOT / BIC_PROFILE / CHEM_DIR for THIS machine, so a bare `make up` works
+# BIC_ROOT / CHEM_DIR for THIS machine, so a bare `make up` works
 # on non-standard layouts. Write it with defaulting syntax so real env vars
 # still win, e.g.:  export BIC_ROOT="${BIC_ROOT:-/path/to/repos}"
 # Motivating incident (2026-07-10): autodetect resolved a meta checkout's
@@ -71,69 +71,35 @@ if [ -z "${INFRA_DIR:-}" ]; then
   INFRA_DIR="${INFRA_DIR:-${BIC_ROOT}/infra}"
 fi
 
-# Profile: aws (default) — cloud Mind + real AWS S3 (a1-site 口径; no route or
-# forwarder, both are public-internet direct). Alternatives:
-#   minimal   — Mind mocked + local MinIO (coworker / offline default)
-#   full-real — orin LAN real Mind + orin MinIO (tailscale route + :9000 forwarder)
-BIC_PROFILE="${BIC_PROFILE:-aws}"
+# ----------------------------------------------------------------------------
+# Stage: the single config axis. local (default, bench convenience) | dev | prod.
+# Each service is configured entirely by its own .env.<stage> file — the
+# orchestrator only selects a stage and launches; it never writes config.
+# ----------------------------------------------------------------------------
+BIC_STAGE="${BIC_STAGE:-local}"
+case "${BIC_STAGE}" in
+  local|dev|prod) ;;
+  *) printf 'FATAL: BIC_STAGE must be local|dev|prod (got %s)\n' "${BIC_STAGE}" >&2; exit 2 ;;
+esac
+export BIC_STAGE
+# APP_ENV is the per-service stage selector the Python services read at startup.
+# The orchestrator's OWN `uv run` calls (alembic migrations, check_services) import
+# app.core.config, which requires APP_ENV — so export it here too. (The tmux-launched
+# services set APP_ENV inline in their command string, since send-keys shells do not
+# inherit this process env.)
+export APP_ENV="${BIC_STAGE}"
 
-# ----------------------------------------------------------------------------
-# aws profile constants — cloud Mind + real AWS S3 (a1-site 口径). Public-internet
-# direct: no /32 route, no minio forwarder, no orin leg. Every value is
-# ${VAR:-default} so a site can override any of them via env / .bic-env.
-# ----------------------------------------------------------------------------
-AWS_MIND_HOST="${AWS_MIND_HOST:-52.83.119.132}"
-AWS_MIND_PORT="${AWS_MIND_PORT:-8010}"
-# BE/lab .env form (with scheme):
-AWS_S3_ENDPOINT_URL="${AWS_S3_ENDPOINT_URL:-https://s3.cn-northwest-1.amazonaws.com.cn}"
-# mock form (host:port, no scheme; pair with S3_SECURE=true):
-AWS_S3_ENDPOINT_HOST="${AWS_S3_ENDPOINT_HOST:-s3.cn-northwest-1.amazonaws.com.cn}"
-AWS_S3_REGION="${AWS_S3_REGION:-cn-northwest-1}"
-AWS_S3_BUCKET="${AWS_S3_BUCKET:-aichemengine-release-bundles}"
-# Dedicated S3 credentials file (holds S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY).
-# Kept OUT of the repo; its contents are never echoed. Missing/empty => a red
-# card (fail-loud), never a silent skip.
-AWS_S3_CREDS_FILE="${AWS_S3_CREDS_FILE:-${HOME}/.config/bic-v2/s3-bic.env}"
-
-# ----------------------------------------------------------------------------
-# Mind / orin-tail real-service path (2026-07-13, see scripts/bic-env/mind.sh)
-# Real Mind lives on the LAB network; off-lab benches reach it through the
-# orin-tail tailscale node (c12-workstation), which advertises 192.168.12.0/24.
-# ----------------------------------------------------------------------------
-MIND_LAB_IP="${MIND_LAB_IP:-192.168.12.104}"   # real Mind box (lab LAN)
-MIND_PORT="${MIND_PORT:-8002}"
-ORIN_TS_IP="${ORIN_TS_IP:-100.114.189.44}"     # orin-tail tailnet address
-ORIN_LAB_IP="${ORIN_LAB_IP:-192.168.12.150}"   # orin on the lab LAN = presign host
-MINIO_FWD_PAT='minio[-_]forward'               # pgrep pattern for the :9000 forwarder
-
-# be_mind_mock -> intent from BE .env MIND_MOCK_MODE: "true" | "false" | "unset"
-be_mind_mock() {
-  local f v
-  f="$(repo_dir BIC-agent-service)/.env"
-  [ -f "${f}" ] || { echo unset; return; }
-  v="$(sed -n 's/^MIND_MOCK_MODE=//p' "${f}" | head -1 | sed 's/#.*//' | tr -d '[:space:]')"
-  case "${v}" in
-    true|True|TRUE|1)    echo true ;;
-    false|False|FALSE|0) echo false ;;
-    *)                   echo unset ;;
-  esac
+# env_file <repo-name> -> absolute path to that repo's stage file for BIC_STAGE.
+# Portal's local file is Vite's .env.localdev (not .env.local); everything else
+# is .env.<stage>. This is the ONE authoritative config source per service.
+env_file() {
+  local name="$1"
+  if [ "${name}" = "BIC-agent-portal" ] && [ "${BIC_STAGE}" = "local" ]; then
+    printf '%s/.env.localdev\n' "$(repo_dir "${name}")"
+  else
+    printf '%s/.env.%s\n' "$(repo_dir "${name}")" "${BIC_STAGE}"
+  fi
 }
-
-# tcp_open <host> <port> [timeout_s]
-tcp_open() { nc -z -G "${3:-2}" "$1" "$2" >/dev/null 2>&1; }
-
-# minio_fwd_pid -> pid of a running minio forwarder ("" if none)
-minio_fwd_pid() { pgrep -f "${MINIO_FWD_PAT}" 2>/dev/null | head -1 || true; }
-
-# mind_route_ok — host route for the Mind box goes via a tailscale utun
-# (needed off-lab: the local LAN is also 192.168.12.x, so without the /32 the
-# connected /24 wins and .104 resolves to a dead local ARP).
-mind_route_ok() {
-  route -n get "${MIND_LAB_IP}" 2>/dev/null | grep -q 'interface: utun'
-}
-
-# orin_lab_ip_is_local — this box already answers for ORIN_LAB_IP (presign host)
-orin_lab_ip_is_local() { ifconfig 2>/dev/null | grep -q "inet ${ORIN_LAB_IP} "; }
 
 # DRY: `make up DRY=1` prints mutating actions instead of running them.
 DRY_RUN="${DRY:-${DRY_RUN:-0}}"
@@ -264,12 +230,12 @@ container_on_port() { docker ps --filter "publish=$1" --format '{{.Names}}' 2>/d
 # "which Postgres" selection knob (that mechanism went away when #153
 # collapsed the bench to a single instance).
 # ----------------------------------------------------------------------------
-# app_pg_port -> host port from the first PG_PORT= found (.env before
-# .env.example, agent before lab), default 5432.
+# app_pg_port -> host port from the first PG_PORT= found in the stage files
+# (agent before lab), default 5432. The stage file is authoritative — no
+# .env.example fallback.
 app_pg_port() {
   local f p
-  for f in "$(repo_dir BIC-agent-service)/.env" "$(repo_dir BIC-lab-service)/.env" \
-           "$(repo_dir BIC-agent-service)/.env.example" "$(repo_dir BIC-lab-service)/.env.example"; do
+  for f in "$(env_file BIC-agent-service)" "$(env_file BIC-lab-service)"; do
     [ -f "${f}" ] || continue
     p="$(sed -n 's/^PG_PORT=//p' "${f}" | head -1)"
     if [ -n "${p}" ]; then printf '%s\n' "${p}"; return 0; fi
@@ -327,6 +293,18 @@ REC
 # shellcheck disable=SC2034  # consumed by up.sh via `for u in ${KC_DEV_USERS}`
 KC_DEV_USERS="wenlong valen"
 KC_DEV_PASSWORD="${KC_DEV_PASSWORD:-bic_local_dev}"
+# Demo user with a FIXED Keycloak id: the captured demo snapshot
+# (BIC-agent-service app/data/demo_snapshot.json) binds its sessions to this
+# exact sub — a bench whose `dev` user carries any other id restores demo
+# sessions nobody can see. Mirrors the "users" entry in BIC-infra
+# keycloak/realm-bic.json (fresh-bench import path); up.sh heals benches
+# whose realm was imported before the user existed.
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER="dev"
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER_ID="ef8866ec-6803-4ef6-9961-f4fa273fca29"
+# shellcheck disable=SC2034  # consumed by up.sh
+KC_DEMO_USER_PASSWORD="${KC_DEMO_USER_PASSWORD:-dev}"
 KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
 KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-bic_local_dev}"
 KC_REALM="${KC_REALM:-bic}"
@@ -348,8 +326,8 @@ repo_dir() { printf '%s/%s\n' "${BIC_ROOT}" "$1"; }
 
 # print_context — one-line banner so every command states where it is looking.
 print_context() {
-  printf '%sBIC_ROOT%s=%s  %sprofile%s=%s  %sdry%s=%s\n' \
+  printf '%sBIC_ROOT%s=%s  %sstage%s=%s  %sdry%s=%s\n' \
     "${C_DIM}" "${C_RST}" "${BIC_ROOT}" \
-    "${C_DIM}" "${C_RST}" "${BIC_PROFILE}" \
+    "${C_DIM}" "${C_RST}" "${BIC_STAGE}" \
     "${C_DIM}" "${C_RST}" "${DRY_RUN}"
 }

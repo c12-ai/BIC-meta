@@ -2,9 +2,9 @@
 
 ## Status
 
-- Owner: Drake
+- Owner: BIC product owner
 - Review state: Draft
-- Last updated: 2026-07-08
+- Last updated: 2026-07-23
 
 ## Scope
 
@@ -93,6 +93,10 @@ Core scenarios:
    - Material Preparation is the dispatch-time workflow for experiment-specific items that require human assignment or identity tracking.
    - Consumable Maintenance is the inventory upkeep workflow for non-specific items that the robot can auto-pick.
    - The product must not let a Material Preparation surface become a generic consumables editor, and must not let Consumable Maintenance assign experiment-specific items for a task.
+   - TLC is an explicit experiment-specific creation exception: inside Material Preparation, the
+     chemist may add a typed pure/crude sample tube to a concrete empty cell of an existing supply-
+     shelf 2 ml tube box and bind the Lab Service-created tube to the current experiment. This does
+     not make the general Consumable Maintenance page an editor for experiment-specific tubes.
    - A robot dispatch attempt must validate the current task's material state. If validation fails, the user must be guided back to Material Preparation to complete missing or invalid assignments before dispatch.
 
 10. **ELN report export**
@@ -110,7 +114,7 @@ Core scenarios:
    - Report data the system cannot obtain is shown as an explicit placeholder
      (e.g. "—" / "未提供" / "not reported"), never fabricated and never silently
      dropped — a checklist field must either carry a real value or a visible
-     placeholder (Wenlong ruling 2026-07-11; refines the earlier "omitted" wording).
+     placeholder (product-owner ruling 2026-07-11; refines the earlier "omitted" wording).
      Reactant molecular weights come from BIC-chem-service (a stateless
      RDKit chemistry calculator); any enrichment failure — service not configured,
      unreachable, or unable to parse a molecule — placeholders the affected fields
@@ -132,6 +136,11 @@ Core scenarios:
    - Deterministic backend text should preserve stable machine fields and expose
      display metadata or localizable fields for the portal instead of requiring
      downstream consumers to parse English labels.
+   - System-generated values that a chemist may later edit and that can persist
+     into forms or result evidence must keep a stable machine identity plus
+     localizable display metadata. A chemist-authored replacement is user data:
+     it must remain verbatim across locale changes, replay, dispatch, and result
+     review. Locale-specific default text must not be the value's only identity.
    - Lab Service must keep stable inventory/material keys as the business authority
      while exposing localized display names for physical materials, rack areas, and
      preparation surfaces.
@@ -149,6 +158,84 @@ Core scenarios:
    - The system must preserve enough workflow context from the target assistant reply
      time to support later quality analysis by experiment stage, specialist, task, and
      issue pattern.
+
+13. **Shelf edit mutual exclusion (multi-user concurrency control)**
+   - The physical shelf has three classes of writers: Consumable Maintenance (human bulk
+     upkeep), Material Preparation (human per-task assignment), and the robot (a
+     dispatched task's execution window). Conflicting writers must not edit
+     concurrently.
+   - Conflict is judged by material-type claims: Consumable Maintenance and an executing
+     robot task claim the whole shelf; a Material Preparation session claims only its
+     task's required material types (rule-10 sets). Overlapping claims are mutually
+     exclusive; disjoint claims proceed in parallel (e.g. a TLC preparation and a CC
+     preparation).
+   - Lab Service is the product authority for shelf edit claims. Acquisition is atomic;
+     the losing user receives an explicit conflict that names the current holder and
+     source. UI disabling is advisory only — every shelf write and every dispatch
+     re-validates the claim authoritatively at Lab Service.
+   - Entering maintenance or preparation acquires the claim; leaving releases it; an
+     abandoned editing session (closed tab, dead client) is reclaimed automatically
+     within about a minute, and stale writes from the reclaimed session are rejected —
+     the shelf never wedges.
+   - The robot's claim starts at dispatch and ends only when the task reaches a terminal
+     state. A TLC task parked awaiting confirmation still holds its claim, because its
+     selected boxes remain off-shelf until the run ends.
+   - A robot claim excludes HUMAN writers only. Robot-vs-robot serialization is owned by
+     robot availability, not by shelf claims: concurrent non-terminal tasks' claims
+     coexist (e.g. a CC dispatch proceeds while a TLC task parked awaiting confirmation
+     still holds its claim) — a robot-vs-robot exclusion would deadlock the established
+     "CC/RE run while TLC awaits confirmation" workflow.
+   - A dispatch attempted while a conflicting human claim is live is rejected atomically
+     (no task is created) and the failure surfaces to the chemist naming the holder; the
+     same dispatch succeeds after the claim is released.
+   - **Preparation→robot claim handoff** (2026-07-16, closes BIC-lab-service #140): a
+     user-initiated dispatch carries the acting member's identity (requirement 14's
+     attribution, relayed service-to-service) to Lab Service, and the dispatching
+     member's OWN live preparation claim for the same experiment type hands over to the
+     robot claim atomically — consumed inside the dispatch transaction — instead of
+     rejecting the member with their own claim. The handoff never weakens the
+     protections above: another member's claim still rejects naming the holder, the
+     dispatcher's own Consumable Maintenance claim still rejects (maintenance has no
+     holder-is-self exception), and a system-initiated dispatch carries no identity
+     (never fabricated, per requirement 14) and keeps the conservative rejection. The
+     handed-off preparation session experiences the standard claim-lost behavior, same
+     as automatic reclaim.
+   - **Robot-claim dispatcher naming** (2026-07-23): a user-initiated dispatch also
+     relays the acting member's display name (display name falling back to username, a
+     claim-lifetime snapshot) alongside the identity, and the robot claim's
+     robot-window notice names that member on shelf surfaces. A system-initiated
+     dispatch carries no actor (never fabricated, per requirement 14), so its notice
+     stays unnamed.
+   - The portal reflects claim state on both surfaces (holder-naming banners, disabled
+     entries) within a few seconds, in Chinese and English per requirement 11. Holder
+     naming on claim surfaces prefers the member's display name and falls back to the
+     username; the system never case-transforms or otherwise invents a name.
+   - This intent-level mutual exclusion deliberately does not lock the configuring
+     (intent assignment) phase; cross-task claims over the same specific physical item
+     remain dispatch-validation territory (BIC-lab-service issue #136).
+
+14. **Multi-user identity attribution**
+   - In a multi-user session, every user-initiated action the system persists — chat
+     messages, objective/plan/parameter/result confirmations, HITL decision responses,
+     parameter draft saves, and TLC recognition requests — must record WHICH member
+     performed it (the authenticated user identity), not merely that the session did.
+     This makes requirement 2's human-controlled confirmations traceable to the
+     confirming human.
+   - System-initiated resolutions are never attributed to a human: a decision that
+     expires by timeout records no actor. Absent identity stays absent — never a
+     fabricated or defaulted actor.
+   - The Agent Service runtime executes each turn under the identity of the member who
+     initiated it, falling back to the session owner only for system-driven turns
+     (robot/lab callbacks, scheduler expiries).
+   - The portal shows who sent each chat message, resolving the stable user identity to
+     a display name at render time. Messages persisted before attribution existed, and
+     senders whose display name is unavailable, render unattributed — raw identifiers
+     are never shown and names are never fabricated.
+   - Attribution stores stable user identity, not display-name snapshots, so renames do
+     not corrupt history.
+   - The chat prose the LLM sees remains speaker-anonymous: attribution is a
+     product/audit surface, deliberately not a prompt input. A future product ruling on
+     multi-user instruction precedence would revisit LLM speaker visibility separately.
 
 ## Core Concepts
 
@@ -299,7 +386,7 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      item; selection must never create inventory.
    - Empty slots or cells are filled and cleared only in maintenance mode — refined by the
      experiment-context staged-placement supplement below.
-   - **Supplement (experiment-context staged placement, Wenlong ruling 2026-07-11, BIC-meta#206;
+   - **Supplement (experiment-context staged placement, product-owner ruling 2026-07-11, BIC-meta#206;
      closes #192)**: the TLC/CC material-preparation surface MAY allow placing tubes into empty
      cells within the selection context, provided ALL invariants hold:
      (a) placement is type-first — a 纯品/粗品 type must be armed before any cell can be placed;
@@ -320,9 +407,9 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
      team's own v6 FINAL reference run spots tubes at A1+A4 (non-contiguous) and the 6-channel
      whole-row aspirate is anchored at column 1, so no column-1 anchor tube is physically
      required; lab `_validate_tlc_objects` + portal `tubeSelectionProblem` were relaxed to match
-     on 2026-07-09 (Drake ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
+     on 2026-07-09 (product-owner ruling, robot-team-confirmed, BIC-lab-service PR#95). Duplicate cells
      remain invalid.
-   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (Wenlong
+   - A valid selection must contain BOTH pure (纯品) and crude (粗品) sample tubes (product-owner
      ruling 2026-07-11, BIC-meta#239; revised same day to B2): the pairing is deliberate chemistry
      design. The earlier pure-left / crude-right ordering constraint is RETIRED — it originated in
      portal PR#21's implementation citing a root-PRD provision that never existed, and carries no
@@ -357,8 +444,10 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
 
 11. **FP (fraction preparation) execution rules** (decided 2026-07-06, implemented 2026-07-07)
     - **Container parameter model.** FP execution params are a container list; each container is
-      a flask or the waste container, with a display name (≤5 characters) and its assigned tubes.
-      Defaults: one flask 烧瓶1 + one waste 废液瓶. The user may add flasks; the waste container
+      a flask or the waste container, with a display name (≤32 characters) and its assigned tubes.
+      Defaults: one generated flask 1 + one generated waste container. Their stable display
+      metadata renders Flask 1 / Waste bottle in English and 烧瓶1 / 废液瓶 in Chinese; the user may
+      add flasks or rename a flask, after which the authored name remains verbatim. The waste container
       is fixed. A tube belongs to at most one container; dispatch requires at least one flask
       holding at least one tube.
     - **Recommendation basis is upstream, verbatim.** The FP form's read-only context is the
@@ -388,15 +477,14 @@ TLC evidence flows into downstream recommendation and review. When TLC was robot
 
 ## UI Interaction Requirements
 
-Right-panel consistency across jobs (2026-07-05):
+Right-panel consistency across jobs (revised 2026-07-10):
 
-- For every job's Material Preparation surface, the right panel shows the SAME physical surfaces
-  in the original (selection) view and in the "after entering maintenance" view. Entering
-  maintenance changes editability, not the surface set.
-- This selection-vs-maintenance display logic is uniform across jobs: what TLC does with its
-  shelf sample-tube boxes, CC does with its sample-column rack area, and future RE/FP surfaces
-  must follow the same pattern. A job must not show one surface for selection and a different
-  surface set in maintenance mode.
+- Every Material Preparation right panel uses the same physical inventory projection as the
+  corresponding Lab Service-backed stock surface. The item action changes cell/slot editability,
+  not which physical surface or positions are displayed.
+- TLC reuses the supply-shelf sample-tube box projection shown read-only in Consumable Maintenance;
+  CC uses its sample-column rack area; FP/RE retain their no-manual-placement surfaces. Material
+  Preparation has no separate generic maintenance-mode surface.
 
 For the FP Parameter Design panel (2026-07-07; revised 2026-07-10):
 
@@ -428,8 +516,10 @@ For the TLC Lab Logistic panel:
 - TLC Lab Logistic confirmation happens after TLC parameter confirmation and before TLC dispatch.
 - Experiment-specific items such as sample columns and sample tubes are configured during experiment design/dispatch, not as generic consumables.
 - Generic consumables can be configured through Consumable Maintenance by entering maintenance mode from the upper-right button, clicking slot icons, and exiting edit mode to persist changes.
-- The special item maintenance module is available from the Parameter Design stage and can maintain experiment-specific lab items while also selecting the items required by the current experiment.
-- Exiting special item maintenance/edit mode persists item additions/removals to the database.
+- The Material Preparation special-item module is available from Parameter Design and owns the
+  experiment-specific Add, Assign/Reassign, and Remove actions required by the current task.
+- A successful TLC cell assignment/removal persists through Lab Service immediately; there is no
+  separate special-item maintenance-mode exit step.
 - Dispatch material validation can route the user back to Material Preparation when task material state is incomplete or invalid.
 - Material Preparation task cards separate manual/specific items from robot auto-pick items.
 - Robot auto-pick materials show available stock against capacity and cannot be confirmed when required stock is unavailable.
@@ -439,23 +529,23 @@ For the TLC Lab Logistic panel:
 - TLC inventory state has no records with both `location_id` and `parent_object_id` missing.
 - The Material Preparation special-item module maintains TLC sample tubes in the shelf stock
   boxes; the robot bench is robot-internal parking and is not chemist-maintained.
-- TLC selection and dispatch use tubes in ONE shelf sample-tube box: 2–4 tubes, one row, any
-  distinct columns within the box (columns 1–5); column gaps and non-column-1 starts are allowed,
-  matching the robot's v6 reference run (A1+A4) — no contiguity or start-at-column-1 constraint.
-- A TLC selection containing only one sample type (only pure or only crude) cannot be confirmed,
-  and the surface explains which type is missing instead of silently disabling the confirm
-  control; no ordering constraint applies between pure and crude columns.
+- TLC selection and dispatch use 2–4 tubes in ONE shelf sample-tube box and one row, including at
+  least one pure and one crude tube, with pure tubes left of crude tubes; columns need not be
+  contiguous or start at column 1.
 - A dispatched TLC task's carry coordinates for the sample box, solvent box, and tip boxes match
   those items' recorded inventory placements.
 - The Consumable Maintenance page cannot edit specific (`有特殊性`) items; shelf sample-tube stock
   is read-only there.
-- Selecting an item for a task never creates inventory; empty slots/cells change only in
-  maintenance mode.
+- CC task assignment selects existing inventory. TLC Material Preparation is the explicit
+  exception: Add creates only a local typed item, and the item's Assign/Reassign action may create
+  and bind a pure/crude tube in an empty cell of an existing shelf 2 ml box through Lab Service.
+- TLC Material Preparation exposes one type selector (Pure tube / Crude tube) and one Add action;
+  pending and assigned items show a visible localized type badge.
 - Each experiment's Material Preparation card shows exactly the rule-10 material set, with manual
   and auto-pick items separated; readiness quantity gates match the rule-10 counts (TLC sample
   tubes 2–4).
-- For each job, the right panel's selection view and maintenance view show the same physical
-  surfaces; only editability changes.
+- For each job, the Material Preparation right panel uses the same Lab Service-backed physical
+  projection as the corresponding stock surface; item-owned actions change only editability.
 - TLC readiness does not depend on placeless placeholder records such as staining jar or
   eluent tube pair.
 - TLC tip boxes exist as physical inventory with concrete locations before execution, and execution
@@ -508,6 +598,41 @@ For the TLC Lab Logistic panel:
   rather than creating duplicate ratings.
 - Stored feedback context reflects the workflow state at the time of the target
   assistant reply, not only the later state when the user submits feedback.
+- Two users preparing the SAME experiment type are mutually exclusive: the second
+  entry attempt is rejected with a message naming the holder; preparations of
+  different experiment types proceed in parallel unaffected.
+- While Consumable Maintenance is active, every Material Preparation entry is blocked
+  with a holder-naming banner, and a dispatch attempt is rejected atomically (no task
+  created) with the holder named on the user-visible failure surface; the same
+  dispatch succeeds after the maintenance session ends.
+- While a dispatched task is non-terminal — including a TLC task parked awaiting
+  confirmation — Consumable Maintenance entry is blocked with a robot-window notice;
+  a user-initiated task's notice names the dispatching member (display name, username
+  fallback), and a system-initiated task's notice stays unnamed.
+- A CC dispatch succeeds while a TLC task is parked awaiting confirmation and still
+  holds its shelf claim (robot claims exclude human writers only, never each other).
+- A member who still holds their own same-type preparation claim and confirms the
+  dispatch (e.g. via chat) succeeds: the claim hands over to the robot claim atomically
+  within the dispatch, and the member's open preparation surface receives the standard
+  claim-lost signal rather than an error the portal must specially handle.
+- The handoff never weakens the protections: the same dispatch initiated by a DIFFERENT
+  member is rejected naming the claim holder; a dispatch during the dispatcher's own
+  Consumable Maintenance session is rejected; a system-initiated dispatch (no acting
+  member identity) keeps the conservative rejection.
+- An abandoned editing session's shelf claim is reclaimed automatically (~1 minute);
+  other users' surfaces recover on their next poll, and a write replayed from the
+  reclaimed session is rejected.
+- Shelf claim banners and disabled states appear on other users' portals within one
+  poll cycle (~3 s), in Chinese and English.
+- Every persisted user-initiated event (chat message, objective/plan/parameter/result
+  confirmation, HITL decision response, parameter draft save, TLC recognition) carries
+  the acting member's identity; a scheduler-expired decision carries none.
+- In a two-member session, a message sent by one member renders with that member's
+  display name on the other member's portal both live and after a reload; events
+  persisted before attribution existed render unattributed with no raw identifier
+  shown.
+- A collaborator's turn runs (and is traced) under the collaborator's identity, not the
+  session owner's; system-driven turns keep the owner fallback.
 - Agent behavior that is specific to backend copilot reasoning remains documented in `BIC-agent-service/docs/project-prd.md`.
 
 ## Out of Scope
@@ -532,9 +657,9 @@ For the TLC Lab Logistic panel:
   flasks, but the robot team has not yet confirmed the physical flask cap or the dispatch-time
   validation. Non-blocking — the operating convention is a single flask until answered
   (rule 11). The collect_config indexing definition follows the shared-types contract example
-  (Drake ruling, 2026-07-06).
+  (product-owner ruling, 2026-07-06).
 
-- FP collect_config semantics RESOLVED (Mars via Wenlong, 2026-07-10, BIC-meta#177 closed):
+- FP collect_config semantics RESOLVED (Mars via the product owner, 2026-07-10, BIC-meta#177 closed):
   index i = physical tube i+1, prefix from tube 1, gaps zero-filled. The shipped
   build-parallel-to-referenced-list implementation was a latent misalignment bug for
   non-contiguous reference sets; fix lands with the every-well-assignable work (BIC-meta#176
@@ -552,21 +677,81 @@ For the TLC Lab Logistic panel:
 
 ## Change Log
 
-- 2026-07-11 (latest): Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
+- 2026-07-23: Requirement 13 refinement (product-owner ruling): user-initiated
+  dispatches relay the acting member's display name (display name falling back to
+  username, claim-lifetime snapshot) and the robot claim's robot-window notice names
+  the dispatching member; system-initiated dispatches stay unnamed per requirement 14.
+  Holder naming on all claim surfaces prefers display name with username fallback,
+  never case-transforming or inventing a name. Matching acceptance criterion updated.
+  Implemented as tasks `07-23-robot-lock-attribution` / `07-23-display-name-fallback`
+  (BIC-agent-service `.trellis`).
+
+- 2026-07-17: Clarified the i18n contract for system-generated, user-editable
+  persisted values. FP default containers now use stable display metadata and
+  locale-aware labels; chemist-authored names remain verbatim.
+
+- 2026-07-16 (latest): Requirement 13 handoff supplement (closes BIC-lab-service #140):
+  a user-initiated dispatch relays the acting member's identity to Lab Service
+  (X-On-Behalf-Of, trusted only from the agent-service service account — the first
+  shipped on-behalf-of increment from requirement 14's deferred list), and the
+  dispatching member's own same-type preparation claim hands over to the robot claim
+  atomically inside the dispatch transaction instead of 409ing the member with their
+  own claim. Another member's claim / the dispatcher's own maintenance claim / an
+  identity-less system dispatch keep rejecting; the consumed session gets the standard
+  claim-lost behavior (portal unchanged). This removes the release-timing assumption
+  the 07-15 design shipped with (portal dialog-close beating the LLM-turn dispatch).
+  Matching acceptance criteria added. Implemented as task `07-16-obo-dispatch-handoff`
+  (BIC-agent-service `.trellis`).
+
+- 2026-07-16: Editorial only — no requirement, rule, or ruling changed. Person names
+  were replaced with the role that made the call: `Owner: Drake` → `Owner: BIC product owner`;
+  16 attributions (`Drake ruling` ×4, `Wenlong ruling` ×10, `Mars via Wenlong` ×2) →
+  `product-owner ruling` / `Mars via the product owner`. Every ruling date, PR reference, and
+  issue reference is unchanged (verified by diffing the extracted reference set before/after).
+  Rationale: the PRD is a product document and must not bind the project to a named individual;
+  "who ruled" remains recoverable from git history. `Mars` is retained — it names the external
+  robot team, not a BIC developer.
+
+- 2026-07-15: Added requirement 14 (multi-user identity attribution):
+  user-initiated persisted events carry the acting member's identity (never fabricated;
+  scheduler expiries stay actor-less), runtime turns execute under the initiating
+  member's identity with owner fallback for system turns, portal chat bubbles show the
+  sender's display name resolved from stable identity with graceful legacy fallback,
+  and LLM-visible chat prose stays speaker-anonymous. Matching acceptance criteria
+  added. Implemented as task `07-15-identity-attribution` (BIC-agent-service
+  `.trellis`); design record: 多用户会话身份归因设计结论（方案二）(Feishu
+  PDsadQLbio6WaQxam8VcttZjnTf), whose Enhancements section tracks the deferred
+  lab-side actor persistence / on-behalf-of increments.
+
+- 2026-07-15: Added requirement 13 (shelf edit mutual exclusion): material-type
+  claim model over the three shelf writer classes (maintenance = whole shelf,
+  preparation = the task's rule-10 type set, robot = dispatch→terminal window incl.
+  TLC awaiting-confirm), Lab Service as claim authority with atomic acquisition and
+  holder-naming conflicts, advisory-only UI with authoritative re-validation on every
+  write/dispatch, automatic reclaim of abandoned sessions, and matching acceptance
+  criteria. Review revision (same day): robot claims exclude HUMAN writers only —
+  robot-vs-robot claims coexist (serialization owned by robot availability), so CC
+  dispatches while a parked TLC still holds its claim. Implemented and live-verified as task `07-15-shelf-edit-locks`
+  (BIC-agent-service `.trellis`); design record: 货架编辑互斥锁设计结论
+  (Feishu B498dsIMhorCYLxEGNhc90DTn0f), which supersedes the earlier three-lock
+  slot-level interaction draft. Cross-task same-item dispatch validation is tracked
+  separately (BIC-lab-service #136).
+
+- 2026-07-11: Rule 9 shape clause corrected to robot reality (BIC-meta#244 S3
   investigation). "Contiguous columns, starting at column 1" (2026-07-05) is RETIRED and replaced
   with "any distinct columns within the box (columns 1–5), one row — column gaps and non-column-1
   starts allowed". Decisive primary-source evidence: the robot team's v6 FINAL reference run
-  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, Drake 2026-07-09) spots tubes at
+  (`BIC-lab-service tests/tlc/data/raw_ops.labrun.v6-full.json`, product owner 2026-07-09) spots tubes at
   A1+A4 (non-contiguous), reproduced op-for-op by the lab planner golden test; the 6-channel
   whole-row aspirate is anchored at column 1 (`planner.py`), so no column-1 anchor tube is
   physically required. lab `_validate_tlc_objects` and portal `tubeSelectionProblem` were already
-  relaxed to match on 2026-07-09 (Drake ruling, robot-confirmed, BIC-lab-service PR#95) — the root
+  relaxed to match on 2026-07-09 (product-owner ruling, robot-confirmed, BIC-lab-service PR#95) — the root
   PRD was the stale layer. No code change (lab/portal already correct); only the doc is reconciled.
   Matching acceptance criterion updated. Resolves the #244 three-way conflict on the shape
   dimension. Residual flagged for @root: non-column-1 start has mechanism + landed-contract support
   but no standalone robot reference file (v6 starts at A1).
 
-- 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (Wenlong ruling,
+- 2026-07-11 (later, revised B2): Rule 9 pairing requirement made explicit (product-owner ruling,
   BIC-meta#239): a valid TLC selection must contain both pure and crude tubes — deliberate
   chemistry design. The pure-left / crude-right ordering constraint is RETIRED (same-day B2
   revision): provenance audit showed it came from portal PR#21 citing a root-PRD provision that
@@ -580,13 +765,13 @@ For the TLC Lab Logistic panel:
   download entry until the final result is confirmed instead of showing an
   unclickable hint or disabled button before the report is ready.
 
-- 2026-07-11 (late): Requirement 10 degrade rendering refined (Wenlong ruling): unobtainable
+- 2026-07-11 (late): Requirement 10 degrade rendering refined (product-owner ruling): unobtainable
   report fields switch from silent omission to explicit placeholders ("—"/"未提供"/
   "not reported") — real value or visible placeholder, never fabricated, never silently
   dropped. Matching acceptance criteria updated. Implementation with BIC-agent-service#63
   checklist reconciliation.
 
-- 2026-07-11: Rule 8 supplement (Wenlong ruling, BIC-meta#206): experiment-context staged
+- 2026-07-11: Rule 8 supplement (product-owner ruling, BIC-meta#206): experiment-context staged
   placement — TLC/CC material-prep surface may place tubes into empty cells in the selection
   context under four invariants (type-first, existing-tube select/deselect never touches
   inventory, Confirm-gated writes with client-side draft staging = Option A, Cancel restores
@@ -594,26 +779,31 @@ For the TLC Lab Logistic panel:
   on portal PR#46 (restoring #188 CC semantics in the same pass); main's destructive
   deselect gets an interim hotfix.
 
-- 2026-07-10 (late): FP collect_config semantics settled (Mars via Wenlong, BIC-meta#177):
+- 2026-07-10 (late): FP collect_config semantics settled (Mars via the product owner, BIC-meta#177):
   index i = physical tube i+1, prefix from tube 1, unassigned positions 0. Rule 11 dispatch
   contract and acceptance criteria reworded; the referenced-list-parallel construction is
   recorded as a latent misalignment bug fixed under BIC-meta#176.
 
-- 2026-07-10: FP container-assignment UI revision (Wenlong ruling): side-by-side layout
+- 2026-07-10: FP container-assignment UI revision (product-owner ruling): side-by-side layout
   (containers left, full serpentine rack right) and every physical well selectable —
   supersedes the 2026-07-07 "idle wells are not clickable" clause; Mind classification is
   advisory pre-fill, not an assignment gate. Matching acceptance criterion updated.
   Portal change tracked in BIC-meta#176.
 
-- 2026-07-09: Terminology fix (Wenlong ruling): the algorithm team's canonical name
+- 2026-07-09: Terminology fix (product-owner ruling): the algorithm team's canonical name
   is MIND; requirement 8's "Algo Team" wording corrected. Historical change-log
   entries left as written.
+
+- 2026-07-10: Revised TLC sample-tube assignment to the experiment-specific add-and-bind flow,
+  retained read-only sample-tube stock in Consumable Maintenance, added the single type selector +
+  Add interaction and item type badges, and reconciled the non-contiguous purity-order dispatch
+  contract.
 
 - 2026-07-09: Rule 10 material table drift fix (verified in BIC-meta#81): RE's
   round-bottom flask row removed — it moved to FP's `flasks` task parameter with
   rule 11's flask/collect migration; RE has no readiness material card by design.
 
-- 2026-07-09: Requirement 10 UX refinement (Wenlong ruling): the ELN download control
+- 2026-07-09: Requirement 10 UX refinement (product-owner ruling): the ELN download control
   is shown only on the final experiment step's result surface instead of visible-but-
   disabled everywhere; final-surface disable-until-confirmed and the Agent Service
   conflict gate are unchanged. Matching acceptance criterion updated. Portal change

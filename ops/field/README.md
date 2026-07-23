@@ -1,6 +1,6 @@
-# BIC V2 field deployment (orin 192.168.12.150 · a1 192.168.12.239)
+# BIC V2 field deployment (orin 192.168.12.150 · a1 192.168.12.239 · aws-test bic.labwise.cn)
 
-Two sites share this package. The body below is written against **orin** (the
+Three sites share this package. The body below is written against **orin** (the
 original site); **a1** differs only by the knobs in the "Site: a1" section.
 
 Self-contained package to deploy the BIC V2 stack (Keycloak · chem · lab · agent ·
@@ -9,11 +9,21 @@ portal) on orin. After transfer, the field action collapses to
 Everything provable off-machine has been proven (portal image smoke, full local
 5-service rehearsal, deploy.sh pre-flight self-test) before this package shipped.
 
-> **Do not run any of this until Wenlong approves the window runbook on
+> **Do not run any of this until the product owner approves the window runbook on
 > BIC-meta PR#231.** V1 must be retired first (consumer mutex on
 > `robot.exchange`), and the robot team must be told the bench is switching.
 
 ---
+
+## Stage gate (2026-07-19, BIC-meta#336 batch)
+
+Service images built after the env-staging batch REQUIRE `APP_ENV` and a
+`.env.<stage>` file in the container workdir — a bare container start hard-exits.
+The composes here already handle it: `APP_ENV: prod` plus a mounted, intentionally
+empty `lib/stage.env` as `/app/.env.prod`. Real config stays where it always was —
+the host-level field `.env` interpolated into each compose `environment:` block
+(launch env wins over the stage file). Nothing changes in the operator flow;
+just `git pull` this package alongside pulling the new images.
 
 ## What's in here
 
@@ -40,7 +50,7 @@ per-site build variants).
 
 1. Shared infra containers up & healthy (postgres/redis/minio/rabbitmq) — unchanged from V1.
 2. GHCR PAT (classic, **read:packages only**) at `~/.config/bic-v2/ghcr.token` (600),
-   created by hand by the token owner (Wenlong). `deploy.sh preflight` fails loudly
+   created by hand by the token owner (the product owner). `deploy.sh preflight` fails loudly
    if it's missing and prints the create URL.
 3. The V1 `~/bic/.env` present (init-env derives shared infra creds from it).
 
@@ -114,7 +124,7 @@ V2's new dbs/buckets are harmless to leave; V1 keeps its own `labrun_db` /
 
 ---
 
-## Wenlong pre-actions (before the window)
+## Product-owner pre-actions (before the window)
 
 1. Create the classic PAT (read:packages) and place it on orin at
    `~/.config/bic-v2/ghcr.token` (600). The token never enters git/chat/logs.
@@ -229,6 +239,58 @@ Why AWS S3: Mind is cloud-side, so presigned image URLs must be public-internet
 reachable — a LAN MinIO presign dies at 52.83.119.132. All four S3 writers (BE,
 lab, chem, mock) share ONE bucket; the services have no key-prefix knob, object
 keys carry UUIDs (collision risk accepted, ruling 2026-07-13).
+
+## Site: aws-test (43.192.79.141 · https://bic.labwise.cn) — ALB-fronted / cloud-Mind / AWS-S3 (2026-07-17)
+
+EC2 `t3a.2xlarge`, cn-northwest-1 (`ssh aws-test`), shares the box with
+layer-craft/logging/umami tenants (UNTOUCHABLE). First site with NO V1 history —
+shared infra is created fresh from a BIC-infra checkout at `~/bic-infra`:
+
+```bash
+# NOT `make up` (its keycloak/chem would collide with the field package):
+docker compose up -d postgres redis minio minio-init rabbitmq
+```
+
+A native postgres owns `127.0.0.1:5432`, so `~/bic-infra/docker-compose.override.yml`
+republishes bic-postgres on host `15432` (containers on infra-net are unaffected).
+`init-env` runs with `V1_ENV_FILE=$HOME/bic-infra/.env` (MQ_USER/MQ_PASSWORD
+aliases are written into that file alongside RABBITMQ_DEFAULT_*).
+
+**Domain**: 4 host rules (priority 600–603) + 4 target groups on the EXISTING
+`labwise-cn` ALB 443 listener — wildcard `*.labwise.cn` DNS + ACM cert were
+already in place, so no DNS/cert work:
+
+| Host | Target | TG |
+|---|---|---|
+| bic.labwise.cn | :15173 portal | bic-portal |
+| bic-auth.labwise.cn | :18080 keycloak | bic-keycloak |
+| bic-api.labwise.cn | :8800 agent BE | bic-agent-api |
+| bic-lab.labwise.cn | :8192 lab | bic-lab-svc |
+
+ALB idle timeout is 300s (shared production value — do NOT change): SSE streams
+quiet >5 min are cut; portal SSE recovery handles it. TLS terminates at the ALB,
+so keycloak needs `KC_PROXY_HEADERS: xforwarded` (now in the compose).
+
+Differences from a1 (`.env`): all browser-facing URLs are the https domains —
+`KEYCLOAK_HOSTNAME=https://bic-auth.labwise.cn`, `KEYCLOAK_ISSUER_URL=…/realms/bic`,
+`PORTAL_API_BASE_URL=https://bic-api.labwise.cn`, `PORTAL_LAB_API_BASE_URL=https://bic-lab.labwise.cn`,
+`PORTAL_OIDC_AUTHORITY`, `BE_CORS_ALLOW_ORIGINS=https://bic.labwise.cn`,
+`LAB_CORS_ALLOW_ORIGINS=https://bic.labwise.cn`,
+`BIC_PORTAL_REDIRECT_URI=https://bic.labwise.cn/*`. Everything else follows the
+a1 口径: cloud Mind `52.83.119.132:8010`, same single AWS S3 bucket + `bic-a1-s3`
+creds (`~/.config/bic-v2/s3-bic.env`), DashScope LLM, mock-only robot,
+`TLC_DEVELOP_WAIT_SECONDS=5`.
+
+Operational notes:
+- **Images: Mac 中转 mandatory** — GHCR direct from the box is ~130 KB/s
+  (measured 2026-07-17); Mac→box scp is ~6 MB/s. Same save/load recipe as a1.
+- Known-benign: BE logs `S3 initialization failed … ListAllMyBuckets AccessDenied`
+  at startup — the scoped IAM user can't list buckets; identical on a1, workflow
+  unaffected (lab/chem/mock are the S3 writers).
+- **No EIP**: the public IP changes if the instance is stopped → update `.env`
+  FIELD_HOST, the SG /32 entries, and nothing else (domains stay).
+- Access: office IP (c12-office-pool) reaches raw ports; everyone else goes
+  through https://bic.labwise.cn (the ALB's own allowlist governs 443).
 
 ## Lab-auth flip (lab #112 + BE #97/#135) — BOTH sites, read before rolling
 

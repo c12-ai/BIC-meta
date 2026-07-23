@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/07-10-tlc-rack-tubebox-and-tank-solvent-reuse/research/lab-service.md", "reason": "Lab-service map with file:line — planner op seams, tlc_inventory model, workspace shelves, endpoints"}
+{"file": ".trellis/tasks/07-10-tlc-rack-tubebox-and-tank-solvent-reuse/research/portal.md", "reason": "Portal map — ConsumablesPage/TlcWorkspaceView rendering, area codes, what breaks on the workspace trim"}
+{"file": ".trellis/tasks/07-10-tlc-rack-tubebox-and-tank-solvent-reuse/research/contract.md", "reason": "TLCParam shape at every hop + proof that shared-types/agent-service need no change"}
+{"file": ".trellis/spec/BIC-lab-service/backend/index.md", "reason": "Lab-service layer conventions before editing services/planner/seed"}
+{"file": ".trellis/spec/BIC-lab-service/backend/tlc-placement.md", "reason": "Existing TLC placement/inventory contract this task extends (tank properties, workspace scope)"}
+{"file": ".trellis/spec/BIC-agent-portal/frontend/index.md", "reason": "Portal conventions before touching TlcWorkspaceView and specs"}
+{"file": "Production-PRD.md", "reason": "Rules 6/7/8-10 context; Phase D revises workbench scope + adds the tank-contents rule"}

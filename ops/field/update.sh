@@ -168,6 +168,11 @@ sync_field_file() { # <path relative to ops/field/ and to ~/bic-v2/> [report-onl
 # out-of-scope service is a landmine for its next roll. Out-of-scope syncs land
 # on disk and apply at that service's next `up`.
 for s2 in "${SVCS[@]}"; do sync_field_file "$(compose_dir "$s2")/docker-compose.yml"; done
+# stage-gate satisfier mounted by agent/lab/mock composes (BIC-meta#336) — must
+# exist on the box BEFORE those composes roll, or docker turns the missing bind
+# source into a directory and the gate misfires.
+fssh "mkdir -p ~/bic-v2/lib"
+sync_field_file lib/stage.env
 sync_field_file keycloak/docker-compose.yml
 sync_field_file keycloak/realm-bic.json
 sync_field_file deploy.sh report-only

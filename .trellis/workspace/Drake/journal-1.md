@@ -684,3 +684,35 @@ Prepared Chinese localization PRs across BIC meta, Agent Service, Agent Portal, 
 ### Next Steps
 
 - None - task complete
+
+## Session 20: Bench convergence: make up portable + canonical BIC-infra stack + all repos to main
+
+**Date**: 2026-07-10
+**Task**: Bench convergence: make up portable + canonical BIC-infra stack + all repos to main
+**Branch**: `main`
+
+### Summary
+
+Converged Drake's bench onto the canonical stack and made the env-up scripts layout-portable. Fixed 4 script bugs (BIC_ROOT autodetect nested-vs-sibling, app-postgres from .env PG_PORT, port_owner free-port crash under pipefail, http_code 000000 double-print) — merged as BIC-meta#162 (revised upstream by #153: talos-postgres/5433 retired, single bic-postgres:5432). Found+fixed BIC-infra keycloak missing networks:[infra-net] (JDBC crash-loop) — merged as BIC-infra#6. Swapped old bic-infra-deploy containers for the BIC-infra compose stack (old data kept in bic-infra-deploy_* volumes), keycloak realm bic live with users wenlong/valen/drake (pw bic_local_dev). Restored missing mars_interface_mock checkout (c12-ai). Updated BE/portal/shared-types/mock to latest main (BE now JWT-auth: added KEYCLOAK_ISSUER_URL/AUDIENCE to .env, re-seeded portal .env with OIDC); rebased lab feat/tlc_adapting onto main (dropped superseded v1.3.2-pin commit) and force-pushed with lease. Final state: make doctor GREEN 40 ok/0 red, make up idempotent, all services UP in tmux bic-services. Pending: lab PR not raised; Drake's unpushed bce0fb8 on lab; old backup volumes removable later; chem service absent (optional).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d2c5d4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

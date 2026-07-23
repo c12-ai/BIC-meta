@@ -1,0 +1,6 @@
+{"file": "BIC-lab-service/backend/tlc-placement.md", "reason": "TLC physical inventory + sample-tube placement rules; re-stamp must preserve tube identity/location integrity (design D1)."}
+{"file": "BIC-agent-service/backend/L4/persistence.md", "reason": "Trial row + params JSONB + next_attempt; retry mints a new attempt and copies params (design D2/D3)."}
+{"file": "BIC-agent-service/backend/L2/orchestrator.md", "reason": "L2 session-service transaction shape; retry_failed_trial runs mint+copy+re-stamp in one unit of work (design D2, R1)."}
+{"file": "BIC-agent-service/backend/L1/http-routes.md", "reason": "Where the new POST .../retry route is declared and gated (design §5)."}
+{"file": "BIC-agent-service/backend/L3/narrate-contract.md", "reason": "Failure narration must read real lab state via query_l4_status before narrating (design D4)."}
+{"file": "BIC-agent-portal/frontend/state-management.md", "reason": "workspaceStore attempt model + attempt-switch path the retry action reuses (design D5)."}
