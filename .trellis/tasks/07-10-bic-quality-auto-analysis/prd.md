@@ -390,3 +390,45 @@ code, or execute tests.
       analyzer cache and ephemeral system-temp files may be written.
 - [x] Unit, integration, install, Skill validation, and agent-eval gates pass
       after source/mirror synchronization.
+
+## Phase-Two Layered Test Execution (2026-07-23)
+
+Phase one remains read-only and keeps the existing public brief structure. Its
+machine-readable handoff must no longer turn every raw direct or indirect
+relation into a required test. Build the execution scope from the same strict
+behavior evidence used by the public correspondence, without the public display
+limit. Bind selected evidence to an active concrete test case and changed
+behavior, deduplicate repeated module relations, and separate `must_run`,
+`recommended`, and `not_runnable` candidates.
+
+Phase two is a separately authorized operation that consumes the frozen phase-one
+assessment. It verifies the workspace fingerprint and then executes selected
+pytest, Vitest, Playwright, and configured CDP cases in layers. It does not
+install dependencies, start the complete BIC live bench, reset data, invoke
+`bic-e2e-runner`, or query Phoenix in this iteration.
+
+### Extension Acceptance Criteria
+
+- [x] Raw configured-module, import-only, assertion-free, disabled, and possible
+      relations never become `must_run`.
+- [x] Every `must_run` candidate names a changed behavior, existing test file,
+      active concrete case, safely derived argv, and execution layer.
+- [x] Exact direct behavior/contract cases and result-linked indirect behavior
+      cases enter `must_run`; completed target-linked browser journeys with a
+      machine check may enter the browser layer.
+- [x] Changed test files contribute active asserted cases whose declarations
+      intersect a diff hunk even when no changed source object exists; unchanged
+      sibling cases do not enter the execution scope.
+- [x] Suggested tests that do not exist and CDP assets without a configured
+      command remain `not_runnable`.
+- [x] Candidate identity includes repository, framework, path, and case so
+      repeated module relations do not multiply execution.
+- [x] The executor rejects stale fingerprints, unsafe paths/argv, missing
+      dependencies, and unresolved required commands before claiming success.
+- [x] Pytest and Vitest run before Playwright and CDP. A failed, skipped,
+      blocked, or unresolved must-run foundation prevents the browser layer.
+- [x] Results retain `passed`, `failed`, `skipped`, `blocked`, and `not-run`
+      states and are grouped back under changed behavior.
+- [x] A positive conclusion is emitted only when every must-run behavior has
+      executed evidence and no required test failed, skipped, or remained
+      unresolved.

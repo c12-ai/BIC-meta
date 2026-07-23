@@ -27,6 +27,7 @@ ISSUE_CONTEXT = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/issue_context.
 TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
 TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
 EXECUTION_MANIFEST = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/execution_manifest.py"
+TEST_EXECUTOR = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_executor.py"
 TOOL_RUNTIME = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/tool_runtime.py"
 CODEX_SKILL = ROOT_DIR / ".agents/skills/bic-quality-guan-ping-ce"
 CLAUDE_SKILL = ROOT_DIR / ".claude/skills/bic-quality-guan-ping-ce"
@@ -59,6 +60,11 @@ EXECUTION_MANIFEST_SPEC = importlib.util.spec_from_file_location("bic_quality_ex
 assert EXECUTION_MANIFEST_SPEC and EXECUTION_MANIFEST_SPEC.loader
 EXECUTION_MANIFEST_MODULE = importlib.util.module_from_spec(EXECUTION_MANIFEST_SPEC)
 EXECUTION_MANIFEST_SPEC.loader.exec_module(EXECUTION_MANIFEST_MODULE)
+
+TEST_EXECUTOR_SPEC = importlib.util.spec_from_file_location("bic_quality_test_executor", TEST_EXECUTOR)
+assert TEST_EXECUTOR_SPEC and TEST_EXECUTOR_SPEC.loader
+TEST_EXECUTOR_MODULE = importlib.util.module_from_spec(TEST_EXECUTOR_SPEC)
+TEST_EXECUTOR_SPEC.loader.exec_module(TEST_EXECUTOR_MODULE)
 
 TOOL_RUNTIME_SPEC = importlib.util.spec_from_file_location("bic_quality_tool_runtime", TOOL_RUNTIME)
 assert TOOL_RUNTIME_SPEC and TOOL_RUNTIME_SPEC.loader
@@ -454,11 +460,15 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertTrue(any("function foo" in reason for reason in agent_api["no_obvious_test_gaps"]))
         bar_guidance = next(
             item for item in agent_api["test_guidance"]
-            if item["action"] == "add" and "bar" in item["symbols"]
+            if item["action"] == "strengthen" and "bar" in item["symbols"]
         )
         self.assertEqual(bar_guidance["recommended_framework"], "pytest")
         self.assertEqual(bar_guidance["test_layer"], "unit")
         self.assertEqual(bar_guidance["public_test_method"], "pytest")
+        self.assertEqual(
+            bar_guidance["suggested_test_target"],
+            "BIC-agent-service/tests/unit/test_multi.py",
+        )
         self.assertTrue(bar_guidance["suggested_assertions"])
 
         agent_runtime = modules[("BIC-agent-service", "agent/runtime")]
@@ -2867,7 +2877,7 @@ raise SystemExit(2)
             "object-asserted",
         )
 
-    def test_route_contract_is_partial_and_strengthens_existing_route_test(self) -> None:
+    def test_route_contract_is_partial_and_adds_a_route_behavior_test(self) -> None:
         workspace = Path(self.temp.name) / "route-contract-guidance"
         write(workspace / "app/routes.py", "router = object()\n")
         test_path = workspace / "tests/unit/test_session_route_dto_contract.py"
@@ -2931,10 +2941,21 @@ raise SystemExit(2)
         relation = module["directly_related_tests"][0]
         self.assertEqual(relation["evidence_level"], "contract-asserted")
         guidance = module["test_guidance"][0]
-        self.assertEqual(guidance["action"], "strengthen")
+        self.assertEqual(guidance["action"], "add")
         self.assertEqual(
             guidance["suggested_test_target"],
-            "tests/unit/test_session_route_dto_contract.py",
+            "tests/unit/test_route_feedback.py",
+        )
+        self.assertEqual(
+            guidance["evidence_gaps"],
+            [
+                "the existing contract test covers method/path/status only; "
+                "authenticated route delegation and error mapping are not asserted"
+            ],
+        )
+        self.assertIn(
+            "assert service.cancel_feedback receives session_id, authenticated user_id, and target_event_id",
+            guidance["suggested_assertions"],
         )
 
     def test_guidance_prefers_existing_source_paired_test_over_service_noise(self) -> None:
@@ -2989,6 +3010,95 @@ raise SystemExit(2)
         self.assertEqual(
             guidance["suggested_test_target"],
             "BIC-agent-service/tests/unit/test_main.py",
+        )
+
+    def test_guidance_names_concrete_component_lifespan_and_repository_behavior(self) -> None:
+        chat_panel = TEST_RELATIONS_MODULE.grouped_guidance(
+            "add",
+            "BIC-agent-portal",
+            "portal/ui",
+            "BIC-agent-portal/src/pages/chat/ChatPanel.tsx",
+            [{
+                "name": "ChatPanel",
+                "kind": "component",
+                "diff_tokens": ["assistant", "turn", "active", "bubble"],
+            }],
+            [],
+            ["ChatPanel"],
+        )
+        self.assertEqual(
+            chat_panel["target_behavior"],
+            "same-turn assistant bubbles share the authoritative active state",
+        )
+        self.assertIn(
+            "assert feedback controls stay hidden while that turn is active",
+            chat_panel["suggested_assertions"],
+        )
+
+        lifespan = TEST_RELATIONS_MODULE.grouped_guidance(
+            "add",
+            "BIC-agent-service",
+            "app/core",
+            "BIC-agent-service/app/core/lifespan.py",
+            [{
+                "name": "lifespan",
+                "kind": "function",
+                "diff_tokens": ["provider", "setup", "shutdown", "tracing"],
+            }],
+            [],
+            ["lifespan"],
+        )
+        self.assertEqual(
+            lifespan["target_behavior"],
+            "lifespan stores and shuts down the same tracing provider",
+        )
+        self.assertIn(
+            "assert shutdown_tracing receives that same provider during application shutdown",
+            lifespan["suggested_assertions"],
+        )
+
+        delete_repo = TEST_RELATIONS_MODULE.grouped_guidance(
+            "add",
+            "BIC-agent-service",
+            "agent/database",
+            "BIC-agent-service/app/repositories/message_feedback_repo.py",
+            [{
+                "name": "MessageFeedbackRepo.delete_for_target",
+                "kind": "method",
+                "diff_tokens": ["delete", "returning"],
+            }],
+            [],
+            ["MessageFeedbackRepo.delete_for_target"],
+        )
+        self.assertEqual(
+            delete_repo["target_behavior"],
+            "delete only the caller's feedback for the selected target event",
+        )
+        self.assertIn(
+            "assert only the row matching session_id, user_id, and target_event_id is deleted",
+            delete_repo["suggested_assertions"],
+        )
+
+        find_event = TEST_RELATIONS_MODULE.grouped_guidance(
+            "add",
+            "BIC-agent-service",
+            "agent/database",
+            "BIC-agent-service/app/repositories/session_events_repo.py",
+            [{
+                "name": "SessionEventsRepo.find_by_event_id",
+                "kind": "method",
+                "diff_tokens": ["event", "payload"],
+            }],
+            [],
+            ["SessionEventsRepo.find_by_event_id"],
+        )
+        self.assertEqual(
+            find_event["target_behavior"],
+            "find a session event by id and return its complete payload",
+        )
+        self.assertIn(
+            "assert the matching session and event return a SessionEventRef with the complete payload",
+            find_event["suggested_assertions"],
         )
 
     def test_large_component_behavior_uses_changed_line_terms(self) -> None:
@@ -3046,6 +3156,68 @@ raise SystemExit(2)
             reachable_from_import=True,
         )
         self.assertFalse(matched)
+
+    def test_qualified_field_does_not_match_an_unrelated_payload_identifier(self) -> None:
+        workspace = Path(self.temp.name) / "qualified-field"
+        source = workspace / "app/session_events_repo.py"
+        test_path = workspace / "tests/test_session_events.py"
+        write(
+            source,
+            "from typing import NamedTuple\n\n"
+            "class SessionEventRef(NamedTuple):\n"
+            "    payload: dict[str, object]\n\n"
+            "class SessionEventsRepo:\n"
+            "    async def read_recent(self):\n"
+            "        return []\n",
+        )
+        write(
+            test_path,
+            "from app.session_events_repo import SessionEventsRepo\n\n"
+            "async def test_payload_json_semantic_round_trip():\n"
+            "    repo = SessionEventsRepo()\n"
+            "    rows = await repo.read_recent()\n"
+            "    payload = {'event_id': 'event-1'}\n"
+            "    assert payload['event_id'] == 'event-1'\n"
+            "    assert rows == []\n",
+        )
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace,
+            {
+                "changed_files": [{
+                    "repo": "BIC-meta",
+                    "path": "app/session_events_repo.py",
+                    "change_types": ["modified"],
+                }],
+                "file_mappings": [{
+                    "repo": "BIC-meta",
+                    "path": "app/session_events_repo.py",
+                    "mapping": {"module_scope": "agent/database"},
+                }],
+            },
+            [{
+                "repo": "BIC-meta",
+                "path": "app/session_events_repo.py",
+                "symbols": [{
+                    "name": "SessionEventRef.payload",
+                    "kind": "field",
+                }],
+            }],
+            [{
+                "repo": "BIC-meta",
+                "path": "tests/test_session_events.py",
+                "asset_kind": "test-file",
+                "framework": "pytest",
+                "test_facts": TEST_ASSETS_MODULE.parse_python_test(test_path),
+            }],
+            [],
+        )["modules"][0]
+        relation = module["directly_related_tests"][0]
+        self.assertNotIn(
+            "SessionEventRef.payload",
+            relation["related_symbols"],
+        )
+        summary = TEST_RELATIONS_MODULE.build_public_test_summary([module])
+        self.assertEqual(summary["directly_related_tests"], [])
 
     def test_covered_store_action_suppresses_broad_store_container_gap(self) -> None:
         symbols = [
@@ -3127,11 +3299,11 @@ raise SystemExit(2)
                     "path": "BIC-agent-service/app/api/routers/sessions.py",
                     "symbols": ["cancel_feedback"],
                     "target_behavior": "DELETE /sessions/{session_id}/feedback/{target_event_id}",
-                    "action": "strengthen",
+                    "action": "add",
                     "recommended_framework": "pytest",
                     "suggested_test_target": (
                         "BIC-agent-service/tests/unit/"
-                        "test_session_route_dto_contract.py"
+                        "test_route_feedback.py"
                     ),
                     "evidence_gaps": ["route-to-service delegation is not asserted"],
                 }],
@@ -3150,9 +3322,89 @@ raise SystemExit(2)
         self.assertEqual(
             matrix[0]["recommendation"],
             [
-                "strengthen pytest at "
-                "BIC-agent-service/tests/unit/test_session_route_dto_contract.py"
+                "add pytest at "
+                "BIC-agent-service/tests/unit/test_route_feedback.py"
             ],
+        )
+
+    def test_brief_matrix_does_not_treat_generic_payload_as_session_event_ref_payload(self) -> None:
+        source = "BIC-agent-service/app/repositories/session_events_repo.py"
+        correspondence = {
+            "modules": [{
+                "repo": "BIC-agent-service",
+                "module_scope": "agent/database",
+                "changed_symbols": [
+                    {
+                        "path": source,
+                        "name": "SessionEventRef",
+                        "kind": "class",
+                    },
+                    {
+                        "path": source,
+                        "name": "SessionEventRef.payload",
+                        "kind": "field",
+                    },
+                    {
+                        "path": source,
+                        "name": "SessionEventsRepo.find_by_event_id",
+                        "kind": "method",
+                    },
+                ],
+                "directly_related_tests": [{
+                    "path": (
+                        "BIC-agent-service/tests/unit/"
+                        "test_persistence_repo_session_events.py"
+                    ),
+                    "related_files": [source],
+                    "related_symbols": ["SessionEventRef.payload"],
+                    "assertion_linked_symbols": ["SessionEventRef.payload"],
+                    "behavior_asserted_symbols": ["SessionEventRef.payload"],
+                    "contract_asserted_symbols": [],
+                    "behavior_test_cases": [
+                        "test_payload_json_semantic_round_trip",
+                    ],
+                    "test_names": [
+                        "test_payload_json_semantic_round_trip",
+                    ],
+                }],
+                "indirectly_related_tests": [],
+                "test_guidance": [{
+                    "path": source,
+                    "symbols": [
+                        "SessionEventRef",
+                        "SessionEventsRepo.find_by_event_id",
+                    ],
+                    "target_behavior": (
+                        "find a session event by id and return its complete payload"
+                    ),
+                    "action": "strengthen",
+                    "recommended_framework": "pytest",
+                    "suggested_test_target": (
+                        "BIC-agent-service/tests/unit/"
+                        "test_persistence_repo_session_events.py"
+                    ),
+                    "evidence_gaps": [
+                        "find_by_event_id has no result-linked assertion",
+                    ],
+                }],
+            }],
+            "browser_test_guidance": [],
+        }
+        matrix = RISK_ASSESSMENT_MODULE.build_brief_evidence_matrix(
+            correspondence,
+        )
+        self.assertEqual(len(matrix), 1)
+        self.assertEqual(
+            matrix[0]["existing_test_evidence"],
+            ["no object- or behavior-linked active test evidence"],
+        )
+        self.assertEqual(
+            set(matrix[0]["changed_behavior"]),
+            {
+                "SessionEventRef",
+                "SessionEventRef.payload",
+                "SessionEventsRepo.find_by_event_id",
+            },
         )
 
     def test_public_test_summary_hides_broad_relations_and_groups_possible_candidates(self) -> None:
@@ -3217,6 +3469,8 @@ raise SystemExit(2)
                 ],
                 "related_symbols": ["delete_feedback"],
                 "assertion_linked_symbols": ["delete_feedback"],
+                "behavior_asserted_symbols": ["delete_feedback"],
+                "behavior_test_cases": ["test_feedback_button"],
                 "has_active_test_with_assertion": True,
             }],
             "indirectly_related_tests": [],
@@ -3234,6 +3488,52 @@ raise SystemExit(2)
             direct_and_possible["possibly_related_test_groups"],
             [],
         )
+
+        import_only_direct = {
+            **base_relation,
+            "path": "repo-a/tests/test_event_dispatcher.py",
+            "relation_reasons": [
+                "reaches clearMessageFeedback from a referenced declaration"
+            ],
+            "related_symbols": ["ChatState.clearMessageFeedback"],
+            "assertion_linked_symbols": ["ChatState.clearMessageFeedback"],
+            "has_active_test_with_assertion": True,
+            "test_names": ["test_keeps_bubble_after_text_done"],
+            "selected_test_cases": ["test_keeps_bubble_after_text_done"],
+        }
+        unrelated_behavior_direct = {
+            **base_relation,
+            "path": "repo-a/tests/test_message_attribution.py",
+            "relation_reasons": [
+                "reaches AssistantMessage from a referenced declaration"
+            ],
+            "related_symbols": ["AssistantMessage"],
+            "assertion_linked_symbols": ["AssistantMessage"],
+            "behavior_asserted_symbols": ["AssistantMessage"],
+            "has_active_test_with_assertion": True,
+            "behavior_test_cases": ["test_resolves_sender_name_after_disconnect"],
+            "test_names": ["test_resolves_sender_name_after_disconnect"],
+        }
+        configured_indirect = {
+            **base_relation,
+            "path": "repo-a/tests/test_mind_url_shim.py",
+            "relation_reasons": ["configured module relation agent-unit"],
+            "assertion_linked_files": ["repo-a/app/feedback.py"],
+            "has_active_test_with_assertion": True,
+            "test_names": ["test_lifespan_wires_minio_client"],
+        }
+        strict = TEST_RELATIONS_MODULE.build_public_test_summary([{
+            "repo": "repo-a",
+            "module_scope": "app/feedback",
+            "directly_related_tests": [
+                import_only_direct,
+                unrelated_behavior_direct,
+            ],
+            "indirectly_related_tests": [configured_indirect],
+            "possibly_related_tests": [],
+        }])
+        self.assertEqual(strict["directly_related_tests"], [])
+        self.assertEqual(strict["indirectly_related_tests"], [])
 
 
 class BrowserEvidenceAndManifestTest(unittest.TestCase):
@@ -3858,9 +4158,16 @@ test('experiment route', async ({ request }) => {
                     "merge_base": "base", "change_count": 1, "change_fingerprint": "fp",
                 }]},
                 correspondence,
-                {"tests": []},
+                {"tests": [], "discovered_assets": [{
+                    "repo": "portal",
+                    "path": "portal/tests/e2e/selected.spec.ts",
+                    "asset_kind": "test-file",
+                    "framework": "playwright",
+                    "test_facts": facts,
+                }]},
             )
-            self.assertEqual(manifest["optional_candidates"][0]["selected_test_cases"], ["experiment route"])
+            self.assertEqual(manifest["must_run"][0]["selected_test_cases"], ["experiment route"])
+            self.assertFalse(manifest["optional_candidates"])
             self.assertEqual(manifest["affected_user_journey_evidence"][0]["scenarios"], ["experiment route"])
             self.assertEqual(len(manifest["completed_user_journey_paths"]), 1)
             completed = manifest["completed_user_journey_paths"][0]
@@ -4370,6 +4677,11 @@ test('creates experiment', async ({ page }) => {
         relation = {
             "repo": "portal", "path": "portal/tests/e2e/flow.spec.ts",
             "framework": "playwright", "test_names": ["flow"],
+            "selected_test_cases": ["flow"],
+            "behavior_test_cases": ["flow"],
+            "behavior_asserted_symbols": ["feedback_flow"],
+            "related_symbols": ["feedback_flow"],
+            "relation_reasons": ["references feedback_flow from the imported changed file"],
             "has_active_test_with_assertion": True,
             "browser_evidence": {"framework": "playwright", "has_machine_check": True},
         }
@@ -4377,10 +4689,26 @@ test('creates experiment', async ({ page }) => {
             "directly_related_tests": [relation],
             "indirectly_related_tests": [], "possibly_related_tests": [],
         }]}
-        inventory = {"tests": [{
-            "repo": "portal", "matching_discovered_assets": [relation["path"]],
-            "command_hint": "pnpm exec playwright test tests/e2e/flow.spec.ts",
-        }]}
+        inventory = {
+            "tests": [{
+                "repo": "portal", "matching_discovered_assets": [relation["path"]],
+                "command_hint": "pnpm exec playwright test tests/e2e/flow.spec.ts",
+            }],
+            "discovered_assets": [{
+                "repo": "portal",
+                "path": relation["path"],
+                "asset_kind": "test-file",
+                "framework": "playwright",
+                "test_facts": {
+                    "test_cases": [{
+                        "name": "flow",
+                        "assertions": ["expect in flow"],
+                        "disabled": False,
+                        "has_machine_check": True,
+                    }],
+                },
+            }],
+        }
         manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(context, correspondence, inventory)
         self.assertEqual(manifest["execution_status"], "not-run")
         self.assertTrue(manifest["analysis_complete"])
@@ -4388,10 +4716,498 @@ test('creates experiment', async ({ page }) => {
         self.assertTrue(manifest["required_candidates"][0]["required"])
         self.assertEqual(
             manifest["required_candidates"][0]["command_argv"],
-            ["pnpm", "exec", "playwright", "test", "tests/e2e/flow.spec.ts"],
+            [
+                "pnpm", "exec", "playwright", "test",
+                "tests/e2e/flow.spec.ts", "-g", "^flow$", "--workers=1",
+            ],
         )
         self.assertTrue(manifest["required_candidates"][0]["command_ready"])
-        self.assertIn("healthy live BIC bench", manifest["required_candidates"][0]["environment_prerequisites"])
+        self.assertIn(
+            "configured browser runtime",
+            manifest["required_candidates"][0]["environment_prerequisites"],
+        )
+
+    def test_execution_manifest_uses_strict_behavior_cases_not_raw_relations(self) -> None:
+        context = {
+            "analysis_mode": "worktree-only",
+            "repositories": [{
+                "name": "service", "relative_path": "service", "head": "abc",
+                "base_ref": None, "merge_base": None, "change_count": 1,
+                "change_fingerprint": "change-a",
+            }],
+            "changed_files": [],
+        }
+        direct = {
+            "repo": "service",
+            "path": "service/tests/test_feedback.py",
+            "framework": "pytest",
+            "test_names": ["test_cancel_feedback"],
+            "selected_test_cases": ["test_cancel_feedback"],
+            "behavior_test_cases": ["test_cancel_feedback"],
+            "behavior_asserted_symbols": ["cancel_feedback"],
+            "related_symbols": ["cancel_feedback"],
+            "related_files": ["service/app/feedback.py"],
+            "relation_reasons": [
+                "references cancel_feedback from the imported changed file",
+            ],
+            "has_active_test_with_assertion": True,
+        }
+        configured = {
+            "repo": "service",
+            "path": "service/tests/test_unrelated.py",
+            "framework": "pytest",
+            "test_names": ["test_unrelated"],
+            "selected_test_cases": ["test_unrelated"],
+            "related_symbols": ["FeedbackService"],
+            "related_files": ["service/app/feedback.py"],
+            "relation_reasons": ["configured module relation agent-unit"],
+            "has_active_test_with_assertion": True,
+        }
+        assertion_free = {
+            **direct,
+            "path": "service/tests/test_import_only.py",
+            "test_names": ["test_import_only"],
+            "selected_test_cases": ["test_import_only"],
+            "behavior_test_cases": [],
+            "behavior_asserted_symbols": [],
+            "has_active_test_with_assertion": False,
+        }
+        correspondence = {"modules": [{
+            "repo": "service",
+            "module_scope": "agent/session",
+            "directly_related_tests": [direct, assertion_free],
+            "indirectly_related_tests": [configured],
+            "possibly_related_tests": [{
+                **direct,
+                "path": "service/tests/test_search_clue.py",
+                "framework": "pytest",
+            }],
+        }]}
+        inventory = {"tests": [], "discovered_assets": [{
+            "repo": "service",
+            "path": direct["path"],
+            "asset_kind": "test-file",
+            "framework": "pytest",
+            "test_facts": {
+                "test_cases": [{
+                    "name": "test_cancel_feedback",
+                    "assertions": ["assert at line 1"],
+                    "disabled": False,
+                }],
+            },
+        }]}
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+            context, correspondence, inventory,
+        )
+        self.assertEqual(manifest["schema_version"], 2)
+        self.assertEqual(len(manifest["must_run"]), 1)
+        self.assertEqual(
+            manifest["must_run"][0]["test_case"],
+            "test_cancel_feedback",
+        )
+        self.assertTrue(manifest["must_run"][0]["static_assertion_evidence"])
+        self.assertEqual(manifest["recommended"], [])
+        self.assertEqual(
+            manifest["excluded_summary"],
+            {
+                "assertion-free-or-disabled": 1,
+                "configured-module-only": 1,
+                "possible-search-clue": 1,
+            },
+        )
+
+    def test_execution_manifest_dedupes_the_same_case_across_modules(self) -> None:
+        relation = {
+            "repo": "portal",
+            "path": "portal/src/feedback.test.ts",
+            "framework": "vitest",
+            "test_names": ["clears feedback"],
+            "selected_test_cases": ["clears feedback"],
+            "behavior_test_cases": ["clears feedback"],
+            "behavior_asserted_symbols": ["clearFeedback"],
+            "related_symbols": ["clearFeedback"],
+            "related_files": ["portal/src/feedback.ts"],
+            "relation_reasons": [
+                "references clearFeedback from the imported changed file",
+            ],
+            "has_active_test_with_assertion": True,
+        }
+        correspondence = {"modules": [
+            {
+                "repo": "portal", "module_scope": "portal/ui",
+                "directly_related_tests": [relation],
+                "indirectly_related_tests": [], "possibly_related_tests": [],
+            },
+            {
+                "repo": "portal", "module_scope": "portal/api-client",
+                "directly_related_tests": [relation],
+                "indirectly_related_tests": [], "possibly_related_tests": [],
+            },
+        ]}
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+            {"repositories": [{
+                "name": "portal", "relative_path": "portal", "head": "abc",
+                "base_ref": "main", "merge_base": "base", "change_count": 1,
+                "change_fingerprint": "change",
+            }]},
+            correspondence,
+            {"tests": [], "discovered_assets": []},
+        )
+        self.assertEqual(len(manifest["must_run"]), 1)
+        self.assertEqual(
+            len(manifest["must_run"][0]["covers_changed_modules"]),
+            2,
+        )
+
+    def test_execution_manifest_includes_active_cases_from_changed_test_files(self) -> None:
+        path = "portal/src/new-feedback.test.ts"
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+            {
+                "repositories": [{
+                    "name": "portal", "relative_path": "portal", "head": "abc",
+                    "base_ref": "main", "merge_base": "base", "change_count": 1,
+                    "change_fingerprint": "change",
+                }],
+                "changed_files": [{
+                    "repo": "portal",
+                    "path": path,
+                    "diff_hunks": [{
+                        "new_start": 10, "new_end": 20, "new_count": 11,
+                    }],
+                }],
+            },
+            {"modules": []},
+            {"tests": [], "discovered_assets": [{
+                "repo": "portal", "path": path, "asset_kind": "test-file",
+                "framework": "vitest",
+                "test_facts": {
+                    "has_active_test_with_assertion": True,
+                    "test_cases": [
+                        {
+                            "name": "new behavior",
+                            "start_line": 10,
+                            "end_line": 14,
+                            "assertions": ["expect in new behavior"],
+                            "disabled": False,
+                        },
+                        {
+                            "name": "disabled behavior",
+                            "start_line": 16,
+                            "end_line": 20,
+                            "assertions": ["expect in disabled behavior"],
+                            "disabled": True,
+                        },
+                        {
+                            "name": "unchanged behavior",
+                            "start_line": 30,
+                            "end_line": 34,
+                            "assertions": ["expect in unchanged behavior"],
+                            "disabled": False,
+                        },
+                    ],
+                },
+            }]},
+        )
+        self.assertEqual(
+            [item["test_case"] for item in manifest["must_run"]],
+            ["new behavior"],
+        )
+        self.assertEqual(
+            manifest["excluded_summary"]["unchanged-case-in-changed-test-file"],
+            1,
+        )
+        self.assertEqual(
+            manifest["excluded_summary"]["changed-test-case-not-runnable"],
+            1,
+        )
+
+    def test_execution_manifest_keeps_unconfigured_cdp_not_runnable(self) -> None:
+        relation = {
+            "repo": "portal",
+            "path": "portal/tests/network.cdp.ts",
+            "framework": "cdp",
+            "test_names": ["network feedback"],
+            "selected_test_cases": ["network feedback"],
+            "behavior_test_cases": ["network feedback"],
+            "behavior_asserted_symbols": ["cancelFeedback"],
+            "related_symbols": ["cancelFeedback"],
+            "related_files": ["portal/src/feedback.ts"],
+            "relation_reasons": [
+                "references cancelFeedback from the imported changed file",
+            ],
+            "has_active_test_with_assertion": True,
+            "browser_evidence": {"framework": "cdp", "has_machine_check": True},
+        }
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+            {"repositories": [{
+                "name": "portal", "relative_path": "portal", "head": "abc",
+                "base_ref": "main", "merge_base": "base", "change_count": 1,
+                "change_fingerprint": "change",
+            }]},
+            {"modules": [{
+                "repo": "portal", "module_scope": "portal/ui",
+                "directly_related_tests": [relation],
+                "indirectly_related_tests": [], "possibly_related_tests": [],
+            }]},
+            {"tests": [], "discovered_assets": []},
+        )
+        self.assertEqual(manifest["must_run"], [])
+        self.assertEqual(len(manifest["not_runnable"]), 1)
+        self.assertTrue(manifest["not_runnable"][0]["required"])
+        self.assertEqual(
+            manifest["not_runnable"][0]["command_source"],
+            "command-resolution-required",
+        )
+
+    def test_layered_executor_stops_browser_after_foundation_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "tests/test_backend.py", "def test_backend(): pass\n")
+            write(workspace / "src/frontend.test.ts", "test('frontend', () => {})\n")
+            write(workspace / "tests/browser.spec.ts", "test('browser', () => {})\n")
+
+            def candidate(
+                framework: str,
+                layer: str,
+                path: str,
+                case: str,
+                argv: list[str],
+            ) -> dict[str, object]:
+                return {
+                    "repo": "repo",
+                    "path": path,
+                    "framework": framework,
+                    "execution_layer": layer,
+                    "test_case": case,
+                    "changed_behaviors": [case],
+                    "selection_tier": "must-run",
+                    "command_argv": argv,
+                }
+
+            manifest = {
+                "workspace_change_fingerprint": "same",
+                "repositories": [{"repo": "repo", "relative_path": "."}],
+                "must_run": [
+                    candidate(
+                        "pytest", "backend", "tests/test_backend.py", "backend",
+                        ["uv", "run", "pytest", "tests/test_backend.py::backend", "-q"],
+                    ),
+                    candidate(
+                        "vitest", "frontend", "src/frontend.test.ts", "frontend",
+                        ["pnpm", "exec", "vitest", "run", "src/frontend.test.ts", "-t", "^frontend$"],
+                    ),
+                    candidate(
+                        "playwright", "browser", "tests/browser.spec.ts", "browser",
+                        [
+                            "pnpm", "exec", "playwright", "test",
+                            "tests/browser.spec.ts", "-g", "^browser$", "--workers=1",
+                        ],
+                    ),
+                ],
+                "recommended": [],
+                "not_runnable": [],
+            }
+            calls: list[list[str]] = []
+
+            def fake_runner(argv: list[str], _cwd: Path, _timeout: int) -> dict[str, object]:
+                calls.append(argv)
+                status = "failed" if "vitest" in argv else "passed"
+                return {
+                    "status": status,
+                    "returncode": 1 if status == "failed" else 0,
+                    "duration_seconds": 0.1,
+                    "stdout": "",
+                    "stderr": "",
+                    "failure_reason": "fixture failure" if status == "failed" else None,
+                }
+
+            with mock.patch.object(
+                TEST_EXECUTOR_MODULE.shutil, "which", return_value="/bin/tool",
+            ):
+                report = TEST_EXECUTOR_MODULE.execute_manifest(
+                    manifest,
+                    workspace,
+                    verify_fingerprint=False,
+                    command_runner=fake_runner,
+                )
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(
+                [item["status"] for item in report["results"]],
+                ["passed", "failed", "not-run"],
+            )
+            self.assertEqual(report["execution_status"], "failed")
+
+    def test_layered_executor_rejects_stale_fingerprint(self) -> None:
+        manifest = {
+            "workspace_change_fingerprint": "expected",
+            "repositories": [],
+            "must_run": [],
+            "recommended": [],
+            "not_runnable": [],
+        }
+        with mock.patch.object(
+            TEST_EXECUTOR_MODULE,
+            "recompute_fingerprint",
+            return_value="current",
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                report = TEST_EXECUTOR_MODULE.execute_manifest(
+                    manifest,
+                    Path(directory),
+                )
+        self.assertEqual(report["execution_status"], "blocked")
+        self.assertIn("重新运行第一阶段", report["final_conclusion"])
+
+    def test_python_manifest_uses_exact_class_method_nodeid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            test_path = Path(directory) / "test_feedback.py"
+            write(test_path, """
+class TestFeedback:
+    def test_cancel(self):
+        assert cancel_feedback() is None
+""")
+            facts = TEST_ASSETS_MODULE.parse_python_test(test_path)
+        self.assertEqual(
+            facts["test_cases"][0]["selector"],
+            "TestFeedback::test_cancel",
+        )
+        manifest = EXECUTION_MANIFEST_MODULE.build_execution_manifest(
+            {"repositories": [{
+                "name": "service", "relative_path": "service", "head": "abc",
+                "base_ref": "main", "merge_base": "base", "change_count": 1,
+                "change_fingerprint": "change",
+            }]},
+            {"modules": [{
+                "repo": "service", "module_scope": "agent/session",
+                "directly_related_tests": [{
+                    "repo": "service",
+                    "path": "service/tests/test_feedback.py",
+                    "framework": "pytest",
+                    "selected_test_cases": ["test_cancel"],
+                    "behavior_test_cases": ["test_cancel"],
+                    "behavior_asserted_symbols": ["cancel_feedback"],
+                    "related_symbols": ["cancel_feedback"],
+                    "related_files": ["service/app/feedback.py"],
+                    "relation_reasons": [
+                        "references cancel_feedback from the imported changed file",
+                    ],
+                    "has_active_test_with_assertion": True,
+                }],
+                "indirectly_related_tests": [],
+                "possibly_related_tests": [],
+            }]},
+            {"discovered_assets": [{
+                "repo": "service",
+                "path": "service/tests/test_feedback.py",
+                "asset_kind": "test-file",
+                "framework": "pytest",
+                "test_facts": facts,
+            }]},
+        )
+        self.assertEqual(
+            manifest["must_run"][0]["command_argv"],
+            [
+                "uv", "run", "pytest",
+                "tests/test_feedback.py::TestFeedback::test_cancel", "-q",
+            ],
+        )
+
+    def test_layered_executor_counts_unresolved_required_case_as_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "tests/test_ok.py", "def test_ok(): assert True\n")
+            manifest = {
+                "workspace_change_fingerprint": "same",
+                "repositories": [{"repo": "repo", "relative_path": "."}],
+                "must_run": [{
+                    "repo": "repo",
+                    "path": "tests/test_ok.py",
+                    "framework": "pytest",
+                    "execution_layer": "backend",
+                    "test_case": "test_ok",
+                    "test_selector": "test_ok",
+                    "changed_behaviors": ["working behavior"],
+                    "selection_tier": "must-run",
+                    "intended_tier": "must-run",
+                    "required": True,
+                    "command_argv": [
+                        "uv", "run", "pytest", "tests/test_ok.py::test_ok", "-q",
+                    ],
+                }],
+                "recommended": [],
+                "not_runnable": [{
+                    "repo": "repo",
+                    "path": "tests/missing.py",
+                    "framework": "pytest",
+                    "execution_layer": "backend",
+                    "test_case": "test_missing",
+                    "changed_behaviors": ["unresolved behavior"],
+                    "selection_tier": "not-runnable",
+                    "intended_tier": "must-run",
+                    "required": True,
+                    "command_argv": None,
+                    "not_runnable_reason": "test command is unresolved",
+                }],
+            }
+
+            def fake_runner(_argv: list[str], _cwd: Path, _timeout: int) -> dict[str, object]:
+                return {
+                    "status": "passed",
+                    "returncode": 0,
+                    "duration_seconds": 0.1,
+                    "stdout": "1 passed",
+                    "stderr": "",
+                    "failure_reason": None,
+                }
+
+            with mock.patch.object(
+                TEST_EXECUTOR_MODULE.shutil, "which", return_value="/bin/uv",
+            ):
+                report = TEST_EXECUTOR_MODULE.execute_manifest(
+                    manifest,
+                    workspace,
+                    verify_fingerprint=False,
+                    command_runner=fake_runner,
+                )
+        self.assertEqual(report["execution_status"], "incomplete")
+        self.assertEqual(report["result_counts"], {"blocked": 1, "passed": 1})
+
+    def test_layered_executor_rejects_tampered_case_argv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "tests/test_feedback.py", "def test_feedback(): assert True\n")
+            candidate = {
+                "repo": "repo",
+                "path": "tests/test_feedback.py",
+                "framework": "pytest",
+                "execution_layer": "backend",
+                "test_case": "test_feedback",
+                "test_selector": "test_feedback",
+                "changed_behaviors": ["feedback"],
+                "selection_tier": "must-run",
+                "required": True,
+                "command_argv": [
+                    "uv", "run", "pytest", "tests/test_feedback.py",
+                    "--basetemp=/tmp/untrusted",
+                ],
+            }
+            with mock.patch.object(
+                TEST_EXECUTOR_MODULE.shutil, "which", return_value="/bin/uv",
+            ):
+                report = TEST_EXECUTOR_MODULE.execute_manifest(
+                    {
+                        "workspace_change_fingerprint": "same",
+                        "repositories": [{"repo": "repo", "relative_path": "."}],
+                        "must_run": [candidate],
+                        "recommended": [],
+                        "not_runnable": [],
+                    },
+                    workspace,
+                    verify_fingerprint=False,
+                )
+        self.assertEqual(report["execution_status"], "incomplete")
+        self.assertEqual(report["results"][0]["status"], "blocked")
+        self.assertIn("exactly select", report["results"][0]["failure_reason"])
 
     def test_runtime_lock_recovers_dead_installer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

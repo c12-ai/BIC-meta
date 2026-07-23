@@ -103,29 +103,77 @@ def build_brief_evidence_matrix(
     def supports(
         relation: dict[str, Any],
         path: str,
-        symbols: set[str],
+        symbols: list[dict[str, Any]],
     ) -> tuple[str | None, set[str]]:
+        if path not in set(relation.get("related_files", [])):
+            return None, set()
+        symbol_kinds = {
+            str(symbol.get("name") or ""): str(symbol.get("kind") or "")
+            for symbol in symbols
+            if symbol.get("name")
+        }
+        symbol_names = set(symbol_kinds)
+        cases = [
+            str(case)
+            for case in (
+                relation.get("behavior_test_cases")
+                or relation.get("contract_test_cases")
+                or relation.get("selected_test_cases")
+                or relation.get("test_names")
+                or []
+            )
+        ]
+        case_terms = set().union(*(terms(case) for case in cases)) if cases else set()
+
+        def exact_field_names(names: set[str]) -> set[str]:
+            exact: set[str] = set()
+            for name in names:
+                if symbol_kinds.get(name) != "field" or "." not in name:
+                    exact.add(name)
+                    continue
+                owner, leaf = name.rsplit(".", 1)
+                owner_terms = terms(owner.rsplit(".", 1)[-1])
+                leaf_terms = terms(leaf)
+                if (
+                    owner_terms
+                    and owner_terms <= case_terms
+                    and leaf_terms & case_terms
+                ):
+                    exact.add(name)
+            return exact
+
         related = set(relation.get("related_symbols", []))
-        object_linked = symbols & set(relation.get("assertion_linked_symbols", []))
-        behavior_linked = symbols & set(relation.get("behavior_asserted_symbols", []))
-        contract_linked = symbols & set(relation.get("contract_asserted_symbols", []))
+        object_linked = exact_field_names(
+            symbol_names & set(relation.get("assertion_linked_symbols", []))
+        )
+        behavior_linked = exact_field_names(
+            symbol_names & set(relation.get("behavior_asserted_symbols", []))
+        )
+        contract_linked = exact_field_names(
+            symbol_names & set(relation.get("contract_asserted_symbols", []))
+        )
         if object_linked:
             return "object-asserted", object_linked
         if behavior_linked:
             return "behavior-asserted", behavior_linked
         if contract_linked:
             return "contract-asserted", contract_linked
-        if not symbols and path in relation.get("assertion_linked_files", []):
+        if not symbol_names and path in relation.get("assertion_linked_files", []):
             return "object-asserted", set()
-        if symbols & related:
-            return None, symbols & related
+        if symbol_names & related:
+            return None, symbol_names & related
         return None, set()
 
     def evidence_for(
         module: dict[str, Any],
         path: str,
-        symbols: set[str],
+        symbols: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        symbol_names = {
+            str(symbol.get("name") or "")
+            for symbol in symbols
+            if symbol.get("name")
+        }
         ranked: list[tuple[int, dict[str, Any]]] = []
         for relation in [
             *module.get("directly_related_tests", []),
@@ -143,7 +191,7 @@ def build_brief_evidence_matrix(
             score += len(relation.get("behavior_test_cases", [])) * 8
             if path in relation.get("related_files", []):
                 score += 20
-            behavior_terms = set().union(*(terms(name) for name in symbols))
+            behavior_terms = set().union(*(terms(name) for name in symbol_names))
             cases = (
                 relation.get("behavior_test_cases")
                 or relation.get("contract_test_cases")
@@ -202,17 +250,26 @@ def build_brief_evidence_matrix(
             requested_names = set(
                 guidance.get("symbols", []) if guidance else []
             )
+            def requested_by_guidance(symbol: dict[str, Any]) -> bool:
+                name = str(symbol.get("name") or "")
+                return (
+                    name in requested_names
+                    or any(
+                        name.startswith(f"{requested}.")
+                        for requested in requested_names
+                    )
+                )
             groups: list[tuple[list[dict[str, Any]], dict[str, Any] | None]] = []
             if guidance:
                 uncovered = [
                     symbol for symbol in path_symbols
-                    if str(symbol.get("name") or "") in requested_names
+                    if requested_by_guidance(symbol)
                 ]
                 if uncovered:
                     groups.append((uncovered, guidance))
             covered = [
                 symbol for symbol in path_symbols
-                if str(symbol.get("name") or "") not in requested_names
+                if not requested_by_guidance(symbol)
             ]
             if covered:
                 groups.append((covered, None))
@@ -221,7 +278,7 @@ def build_brief_evidence_matrix(
                     str(symbol.get("name") or "")
                     for symbol in group_symbols if symbol.get("name")
                 }
-                relations = evidence_for(module, path, names)
+                relations = evidence_for(module, path, group_symbols)
                 existing = unique_strings([
                     relation_evidence_summary(item) for item in relations
                 ])

@@ -313,6 +313,40 @@ state-mutation prerequisites. Commands are inert data and must be revalidated
 by the future executor. No phase-one code starts services, resets datasets, or
 executes a command from the manifest.
 
+The manifest selection boundary is behavior evidence, not the raw relation
+inventory. One shared eligibility predicate feeds both the public test
+correspondence and the execution manifest: the public view applies bounded
+display limits after eligibility, while the manifest retains every eligible
+case. Candidate identity is `(repo, framework, path, case)` and merges changed
+behaviors and module references from duplicate relations.
+
+Direct behavior-asserted and route-contract cases are must-run. Indirect cases
+are must-run only when they are behavior-asserted through an explainable
+result-linked import/reference chain. A completed browser path may be must-run
+only when the exact selected scenario has a target-linked machine check.
+Configured-module-only, import-only, possible, disabled, and assertion-free
+relations remain diagnostic. A changed test file contributes only active
+asserted test declarations intersecting a diff hunk; unchanged sibling cases
+remain excluded. Suggested tests that do not yet exist remain planning gaps
+rather than executable commands.
+
+The separately authorized executor consumes the frozen assessment rather than
+rerunning issue or correspondence analysis. It recomputes the same local change
+fingerprint, validates repository-contained paths and allowlisted structured
+argv, and runs layers in this order:
+
+1. pytest backend/service cases;
+2. Vitest frontend unit/component cases;
+3. targeted Playwright scenarios with one worker;
+4. repository-configured CDP diagnostics.
+
+The executor never uses a shell command string. It does not install
+dependencies, start the live bench, reset/seed/migrate/clean data, dispatch
+`bic-e2e-runner`, or query Phoenix. Foundation-layer failure, skip, block, or
+unresolved required command stops browser execution. Results are mapped back to
+changed behavior and retain explicit passed/failed/skipped/blocked/not-run
+states.
+
 ## Real-Agent Evaluation
 
 Agent evals live outside the runtime Skill under `tools/bic-quality-kit/evals`.

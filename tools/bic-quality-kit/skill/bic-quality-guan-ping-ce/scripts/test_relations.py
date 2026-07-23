@@ -43,6 +43,9 @@ MAX_PUBLIC_POSSIBLE_PER_BEHAVIOR = 3
 BEHAVIOR_STOPWORDS = TOKEN_STOPWORDS | {
     "behavior", "repository", "repo", "router", "route", "session", "state",
     "handler", "helper", "manager", "model", "context", "result", "target",
+    "after", "before", "only", "this", "that", "the", "and", "with",
+    "without", "while", "when", "then", "from", "into", "for", "its",
+    "has", "have", "does", "each", "every", "same", "whole",
 }
 PUBLIC_GENERIC_BEHAVIOR_TOKENS = {
     "active", "build", "chat", "clear", "create", "delete", "event", "find",
@@ -109,18 +112,40 @@ def suggested_assertions(
     """Return behavior-facing assertions for one grouped recommendation."""
     kinds = {str(symbol.get("kind") or "") for symbol in symbols}
     lowered = path.lower()
+    symbol_names = {
+        str(symbol.get("name") or "")
+        for symbol in symbols
+        if symbol.get("name")
+    }
+    diff_tokens = {
+        str(token).lower()
+        for symbol in symbols
+        for token in symbol.get("diff_tokens", [])
+    }
     routes = [
         f"{symbol.get('route_method', '')} {symbol.get('route_path', '')}".strip()
         for symbol in symbols
         if symbol.get("kind") == "route" and symbol.get("route_path")
     ]
     if routes:
+        if any(name.rsplit(".", 1)[-1] == "cancel_feedback" for name in symbol_names):
+            return [
+                f"assert {', '.join(routes)} returns 204 after successful cancellation",
+                "assert service.cancel_feedback receives session_id, authenticated user_id, and target_event_id",
+                "assert authentication, missing-session, and permission failures use the project's route error mapping",
+            ]
         return [
             f"assert the request method/path and response contract for {', '.join(routes)}",
             "assert the intended state mutation or downstream call",
             "assert not-found, authorization, and downstream-failure behavior where applicable",
         ]
     if "component" in kinds:
+        if {"assistant", "turn", "active"} <= diff_tokens:
+            return [
+                "assert sibling assistant bubbles from the same turn receive the same active state",
+                "assert feedback controls stay hidden while that turn is active",
+                "assert feedback controls become available for every persisted sibling after the turn settles",
+            ]
         return [
             "assert the user-visible state after the changed interaction",
             "assert failure/disabled state instead of only rendering or clicking",
@@ -137,9 +162,30 @@ def suggested_assertions(
             "assert rollback/error behavior and unaffected sibling state",
         ]
     if "/repositories/" in lowered:
+        if any(name.endswith(".delete_for_target") for name in symbol_names):
+            return [
+                "assert only the row matching session_id, user_id, and target_event_id is deleted",
+                "assert the deleted row is returned while other users and target events remain unchanged",
+                "assert repeating the delete after the row is gone returns None",
+            ]
+        if any(name.endswith(".find_by_event_id") for name in symbol_names):
+            return [
+                "assert the matching session and event return a SessionEventRef with the complete payload",
+                "assert the same event id in another session is not returned",
+                "assert an unknown event id returns None",
+            ]
         return [
             "assert the persisted/query result for the changed key",
-            "assert missing-row and idempotent behavior",
+            "assert missing-row behavior without affecting unrelated rows",
+        ]
+    if (
+        "lifespan" in {name.rsplit(".", 1)[-1] for name in symbol_names}
+        and {"provider", "setup", "shutdown", "tracing"} <= diff_tokens
+    ):
+        return [
+            "assert startup stores the exact provider returned by setup_tracing on app.state",
+            "assert shutdown_tracing receives that same provider during application shutdown",
+            "assert app.state.tracer_provider is cleared after shutdown",
         ]
     if any(token in lowered for token in ("observability", "trace", "runtime")):
         return [
@@ -150,6 +196,50 @@ def suggested_assertions(
         "assert the changed return value or state transition",
         "assert the relevant failure or boundary case",
     ]
+
+
+def guidance_behavior(
+    path: str,
+    symbols: list[dict[str, Any]],
+) -> str:
+    """Name the concrete changed behavior instead of repeating a container name."""
+    symbol_names = sorted({
+        str(symbol.get("name") or "")
+        for symbol in symbols
+        if symbol.get("name")
+    })
+    diff_tokens = {
+        str(token).lower()
+        for symbol in symbols
+        for token in symbol.get("diff_tokens", [])
+    }
+    route = next((symbol for symbol in symbols if symbol.get("kind") == "route"), None)
+    if route:
+        return (
+            f"{route.get('route_method', '')} {route.get('route_path', '')}".strip()
+            or str(route.get("name") or "")
+        )
+    kinds = {str(symbol.get("kind") or "") for symbol in symbols}
+    if "component" in kinds and {"assistant", "turn", "active"} <= diff_tokens:
+        return "same-turn assistant bubbles share the authoritative active state"
+    if (
+        "lifespan" in {name.rsplit(".", 1)[-1] for name in symbol_names}
+        and {"provider", "setup", "shutdown", "tracing"} <= diff_tokens
+    ):
+        return "lifespan stores and shuts down the same tracing provider"
+    if any(name.endswith(".delete_for_target") for name in symbol_names):
+        return "delete only the caller's feedback for the selected target event"
+    if any(name.endswith(".find_by_event_id") for name in symbol_names):
+        return "find a session event by id and return its complete payload"
+    if len(symbol_names) == 1:
+        return symbol_names[0]
+    if symbol_names and len(symbol_names) <= 2:
+        return " / ".join(symbol_names)
+    return (
+        f"{Path(path).stem.replace('_', ' ')}: "
+        + ", ".join(symbol_names[:3])
+        + (f" (+{len(symbol_names) - 3})" if len(symbol_names) > 3 else "")
+    )
 
 
 def identifier_tokens(value: str) -> set[str]:
@@ -212,6 +302,22 @@ def substantive_case_assertion(case: dict[str, Any]) -> bool:
     )
 
 
+def source_inspection_case(case: dict[str, Any]) -> bool:
+    """Detect tests that inspect source syntax instead of executing the entrypoint."""
+    identifiers = {
+        str(value)
+        for value in (
+            *case.get("referenced_identifiers", []),
+            *case.get("assertion_linked_identifiers", []),
+        )
+    }
+    return bool(
+        {"inspect.getsource", "ast.parse"} <= identifiers
+        or "getsource" in identifiers
+        and "parse" in identifiers
+    )
+
+
 def behavior_case_names(
     symbol: dict[str, Any],
     test_cases: Iterable[dict[str, Any]],
@@ -243,7 +349,15 @@ def behavior_case_names(
         )) if asserted else set()
         overlap = target_tokens & (case_tokens | assertion_tokens)
         diff_overlap = diff_tokens & (case_tokens | assertion_tokens)
-        direct_reference = bool(identifier and identifier in referenced)
+        owner = (
+            symbol_name.rsplit(".", 1)[0].rsplit(".", 1)[-1]
+            if symbol.get("kind") == "field" and "." in symbol_name
+            else None
+        )
+        owner_referenced = not owner or owner in referenced
+        direct_reference = bool(
+            identifier and identifier in referenced and owner_referenced
+        )
         route_contract = (
             symbol.get("kind") == "route"
             and "router" in referenced
@@ -259,13 +373,7 @@ def behavior_case_names(
         else:
             reachable_match = (
                 reachable_from_import
-                and (
-                    len(overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS) >= 2
-                    or bool(
-                        (overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS)
-                        & assertion_tokens
-                    )
-                )
+                and len(overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS) >= 2
             )
         direct_match = (
             direct_reference
@@ -360,6 +468,36 @@ def suggested_test_target(
     symbol_list = list(symbols)
     available = sorted(set(available_tests))
     preferred: list[str] = []
+    route = next(
+        (symbol for symbol in symbol_list if symbol.get("kind") == "route"),
+        None,
+    )
+    if route:
+        route_parts = [
+            part
+            for part in str(route.get("route_path") or "").split("/")
+            if part and not part.startswith("{")
+        ]
+        resource = (
+            re.sub(r"[^a-z0-9]+", "_", route_parts[-1].lower()).strip("_")
+            if route_parts else ""
+        )
+        route_target = (
+            f"{prefix}tests/unit/test_route_{resource or source.stem}.py"
+        )
+        route_behavior_tests = [
+            candidate
+            for candidate in available
+            if "/test_route_" in f"/{candidate}"
+            and "contract" not in Path(candidate).stem.lower()
+            and (
+                not resource
+                or resource in identifier_tokens(Path(candidate).stem)
+            )
+        ]
+        if route_behavior_tests:
+            return route_behavior_tests[0]
+        return route_target
     if framework == "playwright":
         stem = re.sub(r"[^a-z0-9]+", "-", source.stem.lower()).strip("-")
         preferred.append(f"{prefix}tests/{stem or 'changed-behavior'}.spec.ts")
@@ -378,7 +516,7 @@ def suggested_test_target(
     exact_available = [candidate for candidate in preferred if candidate in available]
     if exact_available:
         return exact_available[0]
-    if "/repositories/" in f"/{local_path}" and preferred:
+    if (route or "/repositories/" in f"/{local_path}") and preferred:
         return preferred[0]
 
     ranked_existing = sorted(
@@ -409,6 +547,11 @@ def suggested_test_target(
     ]
     if relevant_existing:
         return relevant_existing[0]
+    if existing_tests:
+        # Callers pass only relations that already cleared behavior relevance.
+        # A generic fixture name must not force a duplicate test file when the
+        # exact weak test is the file that should be strengthened.
+        return sorted(set(existing_tests))[0]
 
     target_tokens = behavior_tokens(path, symbol_list)
     nearby = sorted(
@@ -458,25 +601,12 @@ def grouped_guidance(
 ) -> dict[str, Any]:
     layer, framework, alternatives = guidance_profile(repo, module_scope, path, symbols)
     weak_relations = relevant_weak_relations(weak_relations, path, symbols)
-    symbol_names = sorted({str(symbol.get("name") or "") for symbol in symbols if symbol.get("name")})
     route = next((symbol for symbol in symbols if symbol.get("kind") == "route"), None)
-    if route:
-        behavior = (
-            f"{route.get('route_method', '')} {route.get('route_path', '')}".strip()
-            or route.get("name")
-        )
-    elif len(symbol_names) == 1 and "component" in {
-        str(symbol.get("kind") or "") for symbol in symbols
-    }:
-        behavior = f"{symbol_names[0]} user interaction"
-    elif symbol_names and len(symbol_names) <= 2:
-        behavior = " / ".join(symbol_names)
-    else:
-        behavior = (
-            f"{Path(path).stem.replace('_', ' ')}: "
-            + ", ".join(symbol_names[:3])
-            + (f" (+{len(symbol_names) - 3})" if len(symbol_names) > 3 else "")
-        )
+    symbol_names = sorted({
+        str(symbol.get("name") or "")
+        for symbol in symbols if symbol.get("name")
+    })
+    behavior = guidance_behavior(path, symbols)
     all_existing_tests = sorted({
         str(relation.get("path"))
         for relation in weak_relations
@@ -500,6 +630,7 @@ def grouped_guidance(
             relation.get("contract_asserted_symbols")
             or relation.get("evidence_level") == "contract-asserted"
         )
+        and not route
     })
     target = (
         partial_evidence_targets[0]
@@ -522,7 +653,19 @@ def grouped_guidance(
         else "add"
     )
     if effective_action == "add":
-        evidence_gaps = ["no active direct or safe-indirect test asserts this changed behavior"]
+        if route and any(
+            relation.get("contract_asserted_symbols")
+            or relation.get("evidence_level") == "contract-asserted"
+            for relation in weak_relations
+        ):
+            evidence_gaps = [
+                "the existing contract test covers method/path/status only; "
+                "authenticated route delegation and error mapping are not asserted"
+            ]
+        else:
+            evidence_gaps = [
+                "no active direct or safe-indirect test asserts this changed behavior"
+            ]
     elif target_exists and target not in all_existing_tests:
         all_existing_tests.append(target)
         all_existing_tests.sort()
@@ -742,6 +885,7 @@ def explained_public_symbols(relation: dict[str, Any]) -> list[str]:
 def relevant_public_cases(
     relation: dict[str, Any],
     explained_symbols: Iterable[str],
+    limit: int | None = 3,
 ) -> list[str]:
     symbols = [str(symbol) for symbol in explained_symbols]
     selected = list(
@@ -780,10 +924,7 @@ def relevant_public_cases(
         ):
             matched.append(case_text)
     if matched:
-        return matched[:3]
-    all_cases = list(relation.get("test_names", []))
-    if selected and all_cases and len(selected) < len(all_cases):
-        return [str(case) for case in selected[:3]]
+        return matched if limit is None else matched[:limit]
     return []
 
 
@@ -842,8 +983,6 @@ def relation_evidence_level(relation: dict[str, Any]) -> str:
         return "behavior-asserted"
     if relation.get("contract_asserted_symbols"):
         return "contract-asserted"
-    if relation.get("assertion_linked_files") and not relation.get("related_symbols"):
-        return "object-asserted"
     return "related-only"
 
 
@@ -925,6 +1064,67 @@ def public_relation_record(
     }
 
 
+def strict_relation_evidence(
+    relation: dict[str, Any],
+    relation_type: str,
+) -> dict[str, Any] | None:
+    """Return behavior-level evidence shared by the brief and execution scope."""
+    if relation_type not in {"direct", "indirect"}:
+        return None
+    explained_symbols = explained_public_symbols(relation)
+    score = relation_public_score(
+        relation, relation_type, explained_symbols,
+    )
+    public_record = public_relation_record(
+        relation, relation_type, explained_symbols,
+    )
+    record = {
+        **public_record,
+        "relevant_test_cases": relevant_public_cases(
+            relation, explained_symbols, limit=None,
+        ),
+    }
+    if (
+        relation_type == "direct"
+        and explained_symbols
+        and bool(
+            relation.get("behavior_asserted_symbols")
+            or relation.get("contract_asserted_symbols")
+        )
+        and record["relevant_test_cases"]
+        and score >= 20
+    ):
+        return {
+            "score": score,
+            "explained_symbols": explained_symbols,
+            "record": record,
+            "public_record": public_record,
+            "selection_reason": (
+                "active direct case asserts the changed behavior"
+                if relation.get("behavior_asserted_symbols")
+                else "active route contract case asserts the changed method/path/status"
+            ),
+        }
+    if (
+        relation_type == "indirect"
+        and explained_symbols
+        and bool(relation.get("behavior_asserted_symbols"))
+        and record["relevant_test_cases"]
+        and score >= 22
+    ):
+        return {
+            "score": score,
+            "explained_symbols": explained_symbols,
+            "record": record,
+            "public_record": public_record,
+            "selection_reason": (
+                "active indirect case asserts the changed behavior through an "
+                "explainable import/reference chain"
+            ),
+        }
+    return None
+
+
 def dedupe_public_relations(
     items: Iterable[tuple[int, dict[str, Any]]],
     limit: int,
@@ -979,6 +1179,16 @@ def build_public_test_summary(
             raw_counts[relation_type] += len(relations)
             ranked: list[tuple[int, dict[str, Any]]] = []
             for relation in relations:
+                strict = strict_relation_evidence(relation, relation_type)
+                if strict is not None:
+                    score = int(strict["score"])
+                    record = strict["public_record"]
+                    if relation_type == "direct":
+                        direct_ranked.append((score, record))
+                    else:
+                        indirect_ranked.append((score, record))
+                    ranked.append((score, record))
+                    continue
                 explained_symbols = explained_public_symbols(relation)
                 score = relation_public_score(
                     relation, relation_type, explained_symbols,
@@ -986,25 +1196,7 @@ def build_public_test_summary(
                 record = public_relation_record(
                     relation, relation_type, explained_symbols,
                 )
-                evidence_level = relation_evidence_level(relation)
                 if (
-                    relation_type == "direct"
-                    and explained_symbols
-                    and evidence_level != "related-only"
-                    and score >= 20
-                ):
-                    direct_ranked.append((score, record))
-                    ranked.append((score, record))
-                elif (
-                    relation_type == "indirect"
-                    and explained_symbols
-                    and evidence_level in {"object-asserted", "behavior-asserted"}
-                    and record["relevant_test_cases"]
-                    and score >= 22
-                ):
-                    indirect_ranked.append((score, record))
-                    ranked.append((score, record))
-                elif (
                     relation_type == "possible"
                     and not all(
                         test_or_document_path(str(path))
@@ -1387,6 +1579,15 @@ def import_matches(import_value: str, test_path: str, changed_path: str, repo: s
 def symbol_identifier(symbol: dict[str, Any]) -> str | None:
     name = symbol["name"].rsplit(".", 1)[-1]
     return name if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name) else None
+
+
+def symbol_owner_identifier(symbol: dict[str, Any]) -> str | None:
+    """Return the declaring type for a qualified field/member when available."""
+    name = str(symbol.get("name") or "")
+    if "." not in name:
+        return None
+    owner = name.rsplit(".", 1)[0].rsplit(".", 1)[-1]
+    return owner if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", owner) else None
 
 
 def declaration_reachable_changed_symbols(
@@ -2508,6 +2709,17 @@ def analyze_test_relations(
                         )
                         source_root_identifiers = source_identifiers & identifiers
                         linked_root_identifiers = source_identifiers & linked_identifiers
+                        rendered_asserted_cases = {
+                            str(case.get("name"))
+                            for case in facts.get("test_cases", [])
+                            if not case.get("disabled")
+                            and substantive_case_assertion(case)
+                            and source_identifiers
+                            & set(case.get("rendered_identifiers", []))
+                            and source_identifiers
+                            & set(case.get("assertion_linked_identifiers", []))
+                        }
+                        rendered_asserted_cases.discard("")
                         reachable_names = (
                             reachable_changed_declarations(
                                 source_path, source["symbols"], identifiers,
@@ -2526,15 +2738,33 @@ def analyze_test_relations(
                         )
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
-                            symbol_is_reachable = bool(identifier and (
-                                identifier in source_root_identifiers
-                                or str(symbol["name"]) in reachable_names
-                            ))
+                            owner_identifier = symbol_owner_identifier(symbol)
+                            owner_is_referenced = (
+                                symbol.get("kind") != "field"
+                                or bool(
+                                    owner_identifier
+                                    and owner_identifier in identifiers
+                                )
+                            )
+                            symbol_is_reachable = bool(
+                                owner_is_referenced
+                                and identifier
+                                and (
+                                    identifier in source_root_identifiers
+                                    or str(symbol["name"]) in reachable_names
+                                )
+                            )
                             behavior_cases = behavior_case_names(
                                 {**symbol, "path": source["path"]},
                                 facts.get("test_cases", []),
                                 reachable_from_import=symbol_is_reachable,
                             )
+                            if (
+                                symbol.get("kind") == "component"
+                                and symbol_is_reachable
+                                and str(symbol["name"]) in assertion_reachable_names
+                            ):
+                                behavior_cases.update(rendered_asserted_cases)
                             contract_cases = (
                                 behavior_case_names(
                                     {**symbol, "path": source["path"]},
@@ -2556,8 +2786,22 @@ def analyze_test_relations(
                                 if (
                                     identifier
                                     and (
-                                    identifier in linked_root_identifiers
-                                    or str(symbol["name"]) in assertion_reachable_names
+                                        (
+                                            identifier in linked_root_identifiers
+                                            and (
+                                                symbol.get("kind") != "field"
+                                                or bool(
+                                                    owner_identifier
+                                                    and owner_identifier
+                                                    in linked_identifiers
+                                                )
+                                            )
+                                        )
+                                        or (
+                                            str(symbol["name"])
+                                            in assertion_reachable_names
+                                            and bool(behavior_cases)
+                                        )
                                     )
                                     and (
                                         not symbol.get("requires_diff_overlap")
@@ -2634,6 +2878,9 @@ def analyze_test_relations(
                 one_hop_cases: set[str] = set()
                 one_hop_assertion_files: set[str] = set()
                 one_hop_assertion_symbols: set[str] = set()
+                one_hop_behavior_files: set[str] = set()
+                one_hop_behavior_symbols: set[str] = set()
+                one_hop_behavior_cases: set[str] = set()
                 entrypoints: list[
                     tuple[Path, str, str | None, dict[str, Any] | None, set[str], set[str]]
                 ] = []
@@ -2714,11 +2961,30 @@ def analyze_test_relations(
                         )
                         one_hop_cases.update(linked_cases)
                         entry_identifiers = set(references["identifiers"])
+                        linked_test_cases = [
+                            case
+                            for case in facts.get("test_cases", [])
+                            if case.get("name") in linked_cases
+                        ]
                         source_roots: set[str] = set()
                         source_related_symbols: set[str] = set()
+                        source_behavior_symbols: set[str] = set()
+                        source_behavior_cases: set[str] = set()
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
-                            if identifier and identifier in entry_identifiers:
+                            owner_identifier = symbol_owner_identifier(symbol)
+                            owner_is_referenced = (
+                                symbol.get("kind") != "field"
+                                or bool(
+                                    owner_identifier
+                                    and owner_identifier in entry_identifiers
+                                )
+                            )
+                            if (
+                                owner_is_referenced
+                                and identifier
+                                and identifier in entry_identifiers
+                            ):
                                 one_hop_symbols.add(symbol["name"])
                                 source_related_symbols.add(symbol["name"])
                                 source_roots.add(identifier)
@@ -2730,9 +2996,41 @@ def analyze_test_relations(
                             if identifier and identifier in expanded_symbols:
                                 one_hop_symbols.add(symbol["name"])
                                 source_related_symbols.add(symbol["name"])
-                        if linked_cases:
+                            behavior_cases = behavior_case_names(
+                                {**symbol, "path": source["path"]},
+                                linked_test_cases,
+                                reachable_from_import=bool(
+                                    identifier
+                                    and identifier in expanded_symbols
+                                ),
+                            )
+                            if (
+                                not behavior_cases
+                                and identifier
+                                and identifier in expanded_symbols
+                                and linked_test_cases
+                                and not any(
+                                    source_inspection_case(case)
+                                    for case in linked_test_cases
+                                )
+                            ):
+                                behavior_cases = {
+                                    str(case.get("name") or "")
+                                    for case in linked_test_cases
+                                    if substantive_case_assertion(case)
+                                }
+                                behavior_cases.discard("")
+                            if behavior_cases:
+                                one_hop_behavior_files.add(source["path"])
+                                one_hop_behavior_symbols.add(symbol["name"])
+                                one_hop_behavior_cases.update(behavior_cases)
+                                source_behavior_symbols.add(symbol["name"])
+                                source_behavior_cases.update(behavior_cases)
+                        if source_behavior_cases:
                             one_hop_assertion_files.add(source["path"])
-                            one_hop_assertion_symbols.update(source_related_symbols)
+                            one_hop_assertion_symbols.update(
+                                source_related_symbols & source_behavior_symbols
+                            )
                 if one_hop_files:
                     asset_has_indirect_relation = True
                     indirect.append(relation_record(
@@ -2747,6 +3045,9 @@ def analyze_test_relations(
                         assertion_linked_files=(
                             one_hop_assertion_files if has_assertion_linkage_facts else None
                         ),
+                        behavior_asserted_symbols=one_hop_behavior_symbols,
+                        behavior_asserted_files=one_hop_behavior_files,
+                        behavior_case_names=one_hop_behavior_cases,
                     ))
 
             if configured and not related_files and not asset_has_indirect_relation:

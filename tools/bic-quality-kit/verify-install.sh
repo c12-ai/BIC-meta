@@ -66,6 +66,7 @@ check_file "$SOURCE_DIR/scripts/symbol_extraction.py"
 check_file "$SOURCE_DIR/scripts/ast_outline_adapter.py"
 check_file "$SOURCE_DIR/scripts/diff_hunks.py"
 check_file "$SOURCE_DIR/scripts/execution_manifest.py"
+check_file "$SOURCE_DIR/scripts/test_executor.py"
 check_file "$SOURCE_DIR/scripts/tool_runtime.py"
 check_file "$SOURCE_DIR/scripts/test_assets.py"
 check_file "$SOURCE_DIR/scripts/test_relations.py"
@@ -74,6 +75,7 @@ check_file "$SOURCE_DIR/scripts/detect-impact-scope.sh"
 check_file "$SOURCE_DIR/scripts/inspect-test-inventory.sh"
 check_file "$SOURCE_DIR/scripts/suggest-test-scope.sh"
 check_file "$SOURCE_DIR/scripts/assess-risk-matrix.sh"
+check_file "$SOURCE_DIR/scripts/execute-selected-tests.sh"
 
 python3 -m json.tool "$SOURCE_DIR/config/scope-taxonomy.yaml" >/dev/null
 python3 -m json.tool "$SOURCE_DIR/config/test-inventory.yaml" >/dev/null

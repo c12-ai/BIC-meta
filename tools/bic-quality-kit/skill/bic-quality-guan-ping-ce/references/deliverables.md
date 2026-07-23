@@ -62,12 +62,13 @@ BIC 质量简报
 
 第二阶段测试执行交接（本阶段不执行）
 - 变更指纹：
-- 必跑候选：<direct and indirect candidates>
-- 可选候选：<possible candidates>
+- 必须执行：<strict behavior-linked direct/indirect cases and completed browser-journey cases>
+- 建议执行：<exact opt-in regression cases; broad possible relations are excluded>
+- 当前无法执行：<missing command, disabled/assertion-free case, or suggested test that does not exist yet>
+- 已排除：<raw module/import/name matches excluded from the execution list, summarized by reason>
 - 浏览器/用户旅程证据：<Playwright/CDP scenarios, actions, observations, machine checks>
 - 完整静态旅程：<completed_user_journey_paths with node_path and edge_path>
 - 未闭合静态旅程：<partial_user_journey_paths with terminal and reason>
-- 环境前置条件：
 - 执行状态：not-run
 
 说明：本次仅做静态分析，未执行测试；静态对应关系不代表测试已通过。
@@ -232,9 +233,10 @@ brief concise:
   brief. Use derived test correspondence and quality evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.
 - Summarize the emitted `test_execution_manifest` without executing it. State
-  its change fingerprint, required/optional candidates, unresolved commands,
-  prerequisites, browser journey evidence, completed and partial journey paths,
-  and `not-run` status. Each manifest path expands both `node_path` and
+  its change fingerprint, must-run/recommended/not-runnable candidates,
+  exclusions, browser journey evidence, completed and partial journey paths,
+  and `not-run` status. Do not describe raw possible relations as executable
+  candidates. Each manifest path expands both `node_path` and
   `edge_path`, keeps `execution_status: not-run`, and repeats that it cannot
   clear an object-level gap. It is invalid
   for execution if the workspace fingerprint changes.
@@ -245,3 +247,43 @@ brief concise:
   coverage-percentage, severity, `technical_risk`, `overall_risk`,
   `risk_floor`, `mapping_source`, or a general next-step recommendation. State
   the static-analysis limitation once, at the end.
+
+## Phase 2 execution report
+
+Render this report only from the schema-version-1 result produced by
+`scripts/execute-selected-tests.sh`. Do not manually infer statuses from console
+output.
+
+```text
+BIC 分层测试执行报告
+
+核心结论
+- 执行结论：<the executor final_conclusion>
+- 执行范围：<must-run only, or must-run plus explicitly requested recommended>
+- 变更指纹：<workspace_change_fingerprint>
+
+执行范围
+- 必须执行：<selected count>
+- 建议执行：<selected count only when include_recommended=true>
+- 当前无法执行：<not_runnable count and concrete reasons>
+
+分层结果
+| 测试层 | 测试文件与用例 | 结果 | 失败或未执行原因 |
+|---|---|---|---|
+| pytest / Vitest / Playwright / CDP | <repo-qualified path>::<test_case> | passed/failed/skipped/blocked/not-run | <empty when passed; otherwise executor failure_reason> |
+
+行为验证结果
+| 变更行为 | 关联测试 | 结果 |
+|---|---|---|
+| <changed_behavior> | <repo-qualified path>::<test_case> | passed/failed/incomplete |
+
+未执行与限制
+- <blocked, skipped, not-run, or not-runnable entries and concrete reasons>
+- 本阶段没有安装依赖、启动 live bench、重置数据、调用 bic-e2e-runner 或查询 Phoenix。
+```
+
+Use `passed` only when every must-run case completed successfully and no
+executed recommended case failed. `skipped`, `blocked`, `not-run`, missing
+commands, and missing must-run cases make the conclusion incomplete. A passing
+report means only that the selected behavior-scoped layers passed; it is not a
+release guarantee or proof of unselected cross-service behavior.

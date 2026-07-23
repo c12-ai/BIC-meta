@@ -303,6 +303,38 @@ Validation: schema tests, stale-fingerprint fixtures, Skill Creator validation,
 unit tests, agent evals, install verification, mirror comparison, and
 `git diff --check`; then create local commits only.
 
+## 14. Behavior-Scoped Phase-Two Execution
+
+- Extract shared execution eligibility from strict public correspondence rules.
+  Keep public display caps separate from the unbounded eligible execution set.
+- Replace raw-relation file deduplication with case identity
+  `(repo, framework, path, case)` and merge changed behaviors/module references.
+- Emit schema-v2 `must_run`, `recommended`, `not_runnable`, and exclusion
+  accounting while retaining compatibility aliases for existing consumers.
+- Resolve safe case-level argv for pytest, Vitest, and Playwright. Resolve CDP
+  only from a concrete configured project command.
+- Include active asserted cases whose declarations intersect changed test-file
+  hunks. Do not schedule unchanged sibling cases from the same file. Keep
+  disabled, assertion-free, missing suggested tests, unsupported frameworks,
+  and unresolved commands out of `must_run`.
+- Add a separate executor that consumes an assessment/manifest file, verifies
+  the workspace fingerprint, validates repository containment and argv, and
+  executes backend, frontend, browser, then browser-diagnostic layers.
+- Stop browser execution when a required foundation case fails, skips, blocks,
+  or cannot run. Do not install dependencies, start services, mutate data,
+  invoke live-bench runners, or query Phoenix.
+- Emit a behavior-linked execution report with per-case and per-layer states,
+  unresolved reasons, and a qualified final conclusion.
+- Update the Skill and deliverable contract while preserving the existing
+  phase-one public brief headings and default read-only behavior.
+
+Validation: add focused fixtures for strict direct/indirect selection,
+configured-module exclusion, changed tests, duplicate case merging, missing
+commands, precise framework argv, stale fingerprints, path/argv rejection,
+layer gating, skipped tests, and behavior result aggregation. Re-run the known
+feedback worktree case only after focused tests pass; do not run the slow full
+verification chain during iteration.
+
 ### 2026-07-22 quality-gap closure
 
 - `test_correspondence.user_journey_graph` schema version 1 now exposes bounded

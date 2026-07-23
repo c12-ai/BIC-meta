@@ -941,10 +941,22 @@ def parse_python_test(path: Path) -> dict[str, Any]:
             identifiers.add(node.attr)
 
     targets_by_function = function_target_calls(tree, path)
+
+    def iter_test_functions(
+        body: list[ast.stmt],
+        class_path: tuple[str, ...] = (),
+    ) -> Iterable[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str]]:
+        for item in body:
+            if isinstance(item, ast.ClassDef):
+                yield from iter_test_functions(
+                    item.body, (*class_path, item.name),
+                )
+            elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if item.name.startswith("test"):
+                    yield item, "::".join((*class_path, item.name))
+
     test_cases: list[dict[str, Any]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test"):
-            continue
+    for node, selector in iter_test_functions(tree.body):
         decorators = {
             dotted_name(item.func if isinstance(item, ast.Call) else item)
             for item in node.decorator_list
@@ -976,6 +988,9 @@ def parse_python_test(path: Path) -> dict[str, Any]:
                     linked_identifiers.add(f"{original}{identifier[len(alias):]}")
         test_cases.append({
             "name": node.name,
+            "selector": selector,
+            "start_line": node.lineno,
+            "end_line": getattr(node, "end_lineno", node.lineno),
             "assertions": assertions,
             "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
@@ -1025,6 +1040,8 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
         *,
         case_index: int,
         disabled: bool,
+        start_line: int,
+        end_line: int,
     ) -> dict[str, Any]:
         executable_body = JS_NONCODE_RE.sub(" ", body)
         case_identifiers = set(JS_IDENTIFIER_RE.findall(executable_body))
@@ -1079,6 +1096,8 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             case_assertions.append(f"explicit CDP pass/fail condition in {name}")
         return {
             "name": name,
+            "start_line": start_line,
+            "end_line": end_line,
             "assertions": case_assertions,
             "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
@@ -1095,7 +1114,8 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     for case_index, match in enumerate(test_matches, start=1):
         if match.group(1) not in {"test", "it"}:
             continue
-        body = js_test_body(content, match.end())
+        body_start, body_end = js_test_body_range(content, match.end())
+        body = content[body_start:body_end]
         test_cases.append(browser_case(
             match.group(3),
             body,
@@ -1103,6 +1123,8 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             disabled=match.group(2) in {"skip", "todo", "fixme"} or any(
                 start <= match.start() <= end for start, end in disabled_suite_ranges
             ),
+            start_line=content.count("\n", 0, match.start()) + 1,
+            end_line=content.count("\n", 0, body_end) + 1,
         ))
 
     # Standalone CDP diagnostics often export a probe function instead of using
@@ -1110,7 +1132,14 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     # failure condition before claiming a machine check.
     standalone_browser_scenario = not test_cases and bool(CDP_RE.search(executable_code))
     if standalone_browser_scenario:
-        test_cases.append(browser_case("standalone-cdp", content, case_index=1, disabled=False))
+        test_cases.append(browser_case(
+            "standalone-cdp",
+            content,
+            case_index=1,
+            disabled=False,
+            start_line=1,
+            end_line=max(1, content.count("\n") + 1),
+        ))
         scenario_names = ["standalone-cdp"]
     assertions = [item for case in test_cases for item in case["assertions"]]
     disabled = {case["name"] for case in test_cases if case["disabled"]}

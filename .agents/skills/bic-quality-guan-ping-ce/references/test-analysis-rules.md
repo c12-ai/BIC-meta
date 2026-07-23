@@ -229,8 +229,8 @@ alone because it may define runtime behavior.
 
 ## Public brief
 
-Preserve raw module relations for diagnostics and Phase 2 selection. Build a
-separate bounded `public_summary` for the default brief:
+Preserve raw module relations for diagnostics. Build a separate bounded
+`public_summary` for the default brief:
 
 - direct tests retain the strongest object/assertion-linked evidence;
 - indirect tests require a concrete changed object and an explainable
@@ -255,17 +255,51 @@ These outcomes are not risk, priority, confidence, pass/fail, or proof of
 runtime coverage. Describe the concrete behavior and assertion in natural
 language.
 
+## Execution-scope selection
+
+The Phase 2 list is a third projection over the same static facts. It is neither
+the raw relation inventory nor the display-capped public brief.
+
+- A direct case enters `must_run` only when an active assertion is bound to the
+  changed behavior or its exact contract.
+- An indirect case enters `must_run` only when an active assertion is bound to
+  a result reached through a concrete test → source → changed-object
+  import/reference chain.
+- An exact Playwright/CDP case on a completed static journey enters `must_run`
+  only when it has a target-linked machine check. Other exact browser clues may
+  enter `recommended`; broad token/module matches do not.
+- Active asserted cases in changed test files enter `must_run` only when the
+  concrete test declaration intersects a current diff hunk. Unchanged sibling
+  cases in the same file are excluded.
+- Deduplicate using `(repo, framework, repository-qualified path, case name)`.
+  Merge the changed behaviors and relation reasons attached to that case.
+- Public display limits never remove an otherwise eligible execution case, and
+  raw relation volume never adds one.
+- Disabled, skipped, assertion-free, unresolved, unsafe, or not-yet-created
+  tests remain `not_runnable` or excluded; they are never silently counted as
+  executed coverage.
+
+Derive a concrete case command for pytest (exact file/node id), Vitest (`-t`),
+and Playwright (`-g`, one worker). CDP is runnable only when the owning
+repository exposes a real CDP package script. Never derive a generic CDP command
+from a file name.
+
 ## Phase 2 handoff
 
-The assessment emits a `test_execution_manifest` but does not execute it.
-Direct and safe-indirect candidates are required candidates; possible relations
-remain optional. Each entry retains repository/path, framework, selected cases,
-command source, prerequisites, assertion/browser evidence, and `not-run` status.
+The Phase 1 assessment emits a schema-version-2 `test_execution_manifest` but
+does not execute it. It separates `must_run`, `recommended`, `not_runnable`,
+and `excluded_summary`. Each entry retains repository/path, framework, one
+exact selected case, changed behaviors, command source, assertion/browser
+evidence, and `not-run` status.
 Safely derivable commands are also represented as an argv array; consumers must
 not pass a free-form hint through a shell.
-The manifest is bound to repository change fingerprints. A separate executor
-must reject a stale fingerprint and obtain distinct authorization for test
-execution and for any state-changing setup or cleanup.
+The manifest is bound to repository change fingerprints. The Phase 2 executor
+must reject a stale fingerprint and requires explicit `--execute`
+authorization. It runs backend pytest, frontend Vitest, Playwright, and
+configured CDP in that order. A required backend/frontend failure, skip, block,
+or missing command stops later browser layers. Phase 2 never installs
+dependencies, starts services, resets/seeds data, invokes `bic-e2e-runner`, or
+queries Phoenix.
 It also exposes `completed_user_journey_paths` and
 `partial_user_journey_paths`; both expand the exact graph nodes/edges and remain
 static `not-run` evidence with `clears_object_gap: false`.

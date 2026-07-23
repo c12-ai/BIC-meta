@@ -1,8 +1,9 @@
 # BIC Quality Skill Kit
 
-This kit provides the current-phase BIC quality analysis skill.
+This kit provides the two-phase BIC quality review and selected-test execution
+skill.
 
-It is intentionally read-only:
+Phase 1 is intentionally read-only:
 
 - It dynamically discovers the root and immediate child Git repositories.
 - It reads committed changes relative to a local base plus worktree changes.
@@ -16,9 +17,9 @@ It is intentionally read-only:
   test helpers that launch a local Python entrypoint, without executing either;
   unrelated assertions and imports used only by sibling command branches do not
   clear a test gap.
-- It freezes a Diff/AST/test-derived technical scope before Issue analysis, then
-  uses Issue context additively and generates a pre-test Risk Matrix with
-  separate technical risk and requirement alignment.
+- It freezes a Diff/AST/test-derived technical scope before Issue analysis,
+  uses authoritative Issue context additively, and generates a behavior-facing
+  pre-test Quality Evidence Matrix.
 - It performs requirement verification as a separate static pass only for an
   authoritative or explicitly justified strong-related Issue. Each eligible
   acceptance item keeps independent scope, implementation-evidence, and test-
@@ -36,12 +37,20 @@ It is intentionally read-only:
   contracts through frontend imports and route literals, preserving both
   completed paths and dead-end/anchor-only partial paths.
 - It emits a fingerprint-bound, `not-run` Phase 2 execution manifest with
-  required/optional candidates, command sources, and environment prerequisites.
+  behavior-scoped `must_run`, `recommended`, and `not_runnable` cases. Raw
+  possible/module/import relations do not become an execution queue.
 - It outputs one `BIC Quality Brief`.
 - It reads content only from regular files contained by their discovered
   repository, skips symbolic links and credential-bearing paths, and redacts
   common credential values and sensitive paths from CLI JSON output.
-- It does not execute tests, start services, reset data, kill processes, or invoke E2E.
+- It does not execute tests, start services, reset data, kill processes, or
+  invoke E2E.
+
+Phase 2 requires explicit authorization. It verifies the frozen change
+fingerprint, then runs exact pytest, Vitest, Playwright, and
+repository-configured CDP cases in layers. It never installs dependencies,
+starts the live bench, resets data, invokes `bic-e2e-runner`, or queries
+Phoenix.
 
 ## Repository Availability
 
@@ -162,12 +171,14 @@ the head. A missing ref is reported per repository and never silently replaced.
 
 The expected output is one structured `BIC Quality Brief` with:
 
+- `Core Conclusion`
 - `Change Set`
-- `Issue Context`
+- optional authoritative `Issue Context`
 - `Module Mapping`
 - `Test Correspondence`
-- `Risk Matrix`
-- `Missing Tests`
+- `Pre-test Quality Evidence Matrix`
+- `Tests to Add`
+- `Tests to Strengthen`
 - `Phase 2 Test Execution Handoff (not run)`
 
 Within `Issue Context`, formal acceptance-item comparison is present only when
@@ -180,8 +191,9 @@ shown in requirement-traced, technical-regression, and exploratory groups; the
 combined result preserves every technical recommendation.
 
 `mapping_source` remains available in raw JSON for diagnostics but is omitted
-from the default brief. Direct, indirect, and possible test relations remain
-visible; the report does not add a general next-step recommendation.
+from the default brief. The default brief shows bounded direct, indirect, and
+possible relations; the machine handoff independently retains every strictly
+eligible case without the display cap.
 
 ## Read-only Scripts
 
@@ -196,11 +208,22 @@ tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/assess-risk-matrix.
 
 The assessment uses the complete test inventory internally but omits that raw,
 large intermediate from its final JSON. It returns derived test correspondence
-and risk evidence plus `test_execution_manifest`. The manifest is static
+and quality evidence plus `test_execution_manifest`. The manifest is static
 guidance, includes expanded completed/partial journey paths, never clears an
-object-level test gap, and becomes stale when its workspace change fingerprint no longer
-matches. Use the inventory or suggest diagnostics below only when raw
+object-level test gap, and becomes stale when its workspace change fingerprint
+no longer matches. Use the inventory or suggest diagnostics below only when raw
 test-asset details are required.
+
+After the user explicitly authorizes Phase 2, run the frozen assessment:
+
+```bash
+tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/scripts/execute-selected-tests.sh \
+  /path/to/phase-one-assessment.json --execute
+```
+
+This runs `must_run` only. Add `--include-recommended` only for explicitly
+requested broader regression. The command returns a behavior-linked execution
+result; render it using the `BIC 分层测试执行报告` template in the Skill.
 
 On the first structural-analysis run, the Skill uses `uv` to create a pinned
 `ast-outline` environment under the platform user cache (for example,
