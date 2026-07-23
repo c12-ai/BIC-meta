@@ -28,6 +28,7 @@ TEST_ASSETS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_assets.py"
 TEST_RELATIONS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_relations.py"
 EXECUTION_MANIFEST = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/execution_manifest.py"
 TEST_EXECUTOR = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/test_executor.py"
+RUNTIME_READINESS = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/runtime_readiness.py"
 TOOL_RUNTIME = KIT_DIR / "skill/bic-quality-guan-ping-ce/scripts/tool_runtime.py"
 CODEX_SKILL = ROOT_DIR / ".agents/skills/bic-quality-guan-ping-ce"
 CLAUDE_SKILL = ROOT_DIR / ".claude/skills/bic-quality-guan-ping-ce"
@@ -65,6 +66,14 @@ TEST_EXECUTOR_SPEC = importlib.util.spec_from_file_location("bic_quality_test_ex
 assert TEST_EXECUTOR_SPEC and TEST_EXECUTOR_SPEC.loader
 TEST_EXECUTOR_MODULE = importlib.util.module_from_spec(TEST_EXECUTOR_SPEC)
 TEST_EXECUTOR_SPEC.loader.exec_module(TEST_EXECUTOR_MODULE)
+
+RUNTIME_READINESS_SPEC = importlib.util.spec_from_file_location(
+    "bic_quality_runtime_readiness",
+    RUNTIME_READINESS,
+)
+assert RUNTIME_READINESS_SPEC and RUNTIME_READINESS_SPEC.loader
+RUNTIME_READINESS_MODULE = importlib.util.module_from_spec(RUNTIME_READINESS_SPEC)
+RUNTIME_READINESS_SPEC.loader.exec_module(RUNTIME_READINESS_MODULE)
 
 TOOL_RUNTIME_SPEC = importlib.util.spec_from_file_location("bic_quality_tool_runtime", TOOL_RUNTIME)
 assert TOOL_RUNTIME_SPEC and TOOL_RUNTIME_SPEC.loader
@@ -5093,6 +5102,7 @@ test('creates experiment', async ({ page }) => {
                     "framework": framework,
                     "execution_layer": layer,
                     "test_case": case,
+                    "test_selector": f"{path}:1" if framework == "playwright" else case,
                     "changed_behaviors": [case],
                     "selection_tier": "must-run",
                     "command_argv": argv,
@@ -5147,6 +5157,10 @@ test('creates experiment', async ({ page }) => {
 
             with mock.patch.object(
                 TEST_EXECUTOR_MODULE.shutil, "which", return_value="/bin/tool",
+            ), mock.patch.object(
+                TEST_EXECUTOR_MODULE,
+                "playwright_browser_status",
+                return_value=(True, "/fixture/chromium"),
             ):
                 report = TEST_EXECUTOR_MODULE.execute_manifest(
                     manifest,
@@ -5228,6 +5242,12 @@ test('creates experiment', async ({ page }) => {
         self.assertEqual(calls, [])
         self.assertEqual(report["results"][0]["status"], "blocked")
         self.assertIn("will not install dependencies", report["results"][0]["failure_reason"])
+        self.assertFalse(report["runtime_readiness"]["ready"])
+        self.assertTrue(report["runtime_readiness"]["user_confirmation_required"])
+        self.assertEqual(
+            report["runtime_readiness"]["setup_command"],
+            "make quality-test-setup",
+        )
 
     def test_executor_prefers_selected_pass_over_filtered_sibling_skips(self) -> None:
         output = """
@@ -5246,6 +5266,71 @@ test('creates experiment', async ({ page }) => {
             ),
             "skipped",
         )
+
+    def test_runtime_doctor_checks_meta_child_repositories_without_machine_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory) / "team-workspace"
+            write(workspace / "BIC-agent-service/.venv/bin/pytest", "")
+            write(workspace / "BIC-agent-portal/node_modules/vitest/vitest.mjs", "")
+            write(
+                workspace
+                / "BIC-agent-portal/node_modules/@playwright/test/cli.js",
+                "",
+            )
+            write(
+                workspace / "BIC-agent-portal/package.json",
+                json.dumps({
+                    "scripts": {"test:cdp": "node tests/cdp-probe.cjs"},
+                }),
+            )
+            available = {
+                "python3": "/opt/tools/python3",
+                "uv": "/opt/tools/uv",
+                "node": "/opt/tools/node",
+                "npm": "/opt/tools/npm",
+                "pnpm": None,
+                "corepack": "/opt/tools/corepack",
+            }
+            with mock.patch.object(
+                RUNTIME_READINESS_MODULE.shutil,
+                "which",
+                side_effect=lambda name: available.get(name),
+            ), mock.patch.object(
+                RUNTIME_READINESS_MODULE,
+                "playwright_browser_status",
+                return_value=(True, "/cache/chromium"),
+            ):
+                report = RUNTIME_READINESS_MODULE.meta_readiness(workspace)
+        self.assertTrue(report["ready"])
+        self.assertEqual(report["meta_root"], str(workspace.resolve()))
+        self.assertEqual(
+            next(
+                item for item in report["checks"]
+                if item["name"] == "installer:pnpm"
+            )["detail"],
+            "/opt/tools/corepack",
+        )
+        self.assertNotIn("/Users/", json.dumps(report))
+
+    def test_runtime_setup_requires_explicit_execute_flag(self) -> None:
+        setup = KIT_DIR / "setup-test-runtime.sh"
+        source = setup.read_text(encoding="utf-8")
+        self.assertNotIn("BIC_ROOT", source)
+        self.assertNotIn("--workspace-root", source)
+        self.assertIn('SERVICE_DIR="$META_ROOT/BIC-agent-service"', source)
+        self.assertIn('PORTAL_DIR="$META_ROOT/BIC-agent-portal"', source)
+        self.assertNotIn("/Users/", source)
+        process = subprocess.run(
+            [str(setup)],
+            cwd=str(ROOT_DIR),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            env=os.environ.copy(),
+        )
+        self.assertEqual(process.returncode, 2)
+        self.assertIn("--execute", process.stderr)
 
     def test_python_manifest_uses_exact_class_method_nodeid(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -5361,7 +5446,7 @@ class TestFeedback:
                     command_runner=fake_runner,
                 )
         self.assertEqual(report["execution_status"], "incomplete")
-        self.assertEqual(report["result_counts"], {"blocked": 1, "passed": 1})
+        self.assertEqual(report["result_counts"], {"blocked": 1, "not-run": 1})
 
     def test_layered_executor_rejects_tampered_case_argv(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

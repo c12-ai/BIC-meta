@@ -356,6 +356,22 @@ The executor checks for an existing `.venv` or repository-local JavaScript CLI
 before spawning a command, disables uv dependency synchronization, and rejects
 CDP scripts that request dependency installation.
 
+Before spawning the first selected test, the executor validates the complete
+selected list. Any missing repository, executable, local test dependency,
+Chromium launch capability, unsafe path/argv, or unresolved required command
+returns a single incomplete report and leaves all otherwise runnable cases
+`not-run`. This prevents a half-executed result caused by discovering a missing
+browser only after backend tests already ran.
+
+Runtime preparation is a separate explicit operation. The kit's fixed location
+under `BIC-meta/tools/bic-quality-kit` determines two fixed targets:
+`BIC-meta/BIC-agent-service` and `BIC-meta/BIC-agent-portal`. There is no
+workspace discovery, `BIC_ROOT` lookup, sibling fallback, or caller path
+override. The read-only doctor checks base tools, locked project runtimes, and
+an actual headless Chromium launch. The setup command uses `uv sync --frozen`,
+the Portal-pinned pnpm through pnpm or Corepack, and the repository-local
+Playwright CLI. Phase 2 authorization does not imply setup authorization.
+
 ## Real-Agent Evaluation
 
 Agent evals live outside the runtime Skill under `tools/bic-quality-kit/evals`.

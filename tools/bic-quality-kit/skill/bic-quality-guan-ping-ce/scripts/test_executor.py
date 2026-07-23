@@ -21,6 +21,11 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from content_safety import sanitize_for_output
 from execution_manifest import repository_records, workspace_fingerprint
+from runtime_readiness import (
+    SETUP_COMMAND,
+    is_runtime_setup_error,
+    playwright_browser_status,
+)
 
 
 FOUNDATION_LAYERS = {"backend", "frontend"}
@@ -158,6 +163,12 @@ def validate_candidate(
             return None, "Playwright argv does not exactly select the manifest test case"
         if not (root / "node_modules/@playwright/test/cli.js").is_file():
             return None, "Playwright dependency is missing; phase 2 will not install dependencies"
+        browser_ready, browser_detail = playwright_browser_status(str(root))
+        if not browser_ready:
+            return None, (
+                f"{browser_detail or 'Playwright browser executable is missing'}; "
+                "phase 2 will not install dependencies"
+            )
     elif framework == "cdp":
         if len(argv) != 4 or not re.fullmatch(r"[A-Za-z0-9:_-]+", argv[3]):
             return None, "CDP argv must select one repository-owned CDP package script"
@@ -345,6 +356,52 @@ def conclusion_for(
     )
 
 
+def build_execution_report(
+    manifest: dict[str, Any],
+    results: list[dict[str, Any]],
+    *,
+    expected_fingerprint: str,
+    current_fingerprint: str,
+    include_recommended: bool,
+    runtime_readiness: dict[str, Any],
+    conclusion_override: str | None = None,
+) -> dict[str, Any]:
+    must_results = [
+        result for result in results
+        if result.get("selection_tier") == "must-run" or result.get("required")
+    ]
+    status, conclusion = conclusion_for(must_results, results)
+    layer_summary = {
+        layer: dict(Counter(
+            str(result.get("status"))
+            for result in results
+            if result.get("execution_layer") == layer
+        ))
+        for layer in LAYER_ORDER
+    }
+    return {
+        "schema_version": 1,
+        "execution_status": status,
+        "workspace_change_fingerprint": expected_fingerprint,
+        "current_workspace_change_fingerprint": current_fingerprint,
+        "include_recommended": include_recommended,
+        "layer_order": list(LAYER_ORDER),
+        "layer_summary": layer_summary,
+        "result_counts": dict(Counter(
+            str(result.get("status")) for result in results
+        )),
+        "results": results,
+        "behavior_results": behavior_results(results),
+        "not_runnable": manifest.get("not_runnable", []),
+        "runtime_readiness": runtime_readiness,
+        "final_conclusion": conclusion_override or conclusion,
+        "boundary_note": (
+            "Phase 2 did not install dependencies, start the live bench, reset "
+            "data, invoke bic-e2e-runner, or query Phoenix."
+        ),
+    }
+
+
 def execute_manifest(
     manifest: dict[str, Any],
     workspace_root: Path,
@@ -368,6 +425,13 @@ def execute_manifest(
                 "current_workspace_change_fingerprint": current_fingerprint,
                 "results": [],
                 "behavior_results": [],
+                "runtime_readiness": {
+                    "ready": False,
+                    "checked": False,
+                    "missing": [],
+                    "user_confirmation_required": False,
+                    "setup_command": None,
+                },
                 "final_conclusion": (
                     "工作区代码已经变化，第二阶段拒绝执行；请重新运行第一阶段。"
                 ),
@@ -392,6 +456,56 @@ def execute_manifest(
         )
         for item in blocking_unresolved
     ]
+    preflight: dict[int, tuple[Path | None, str | None]] = {
+        id(candidate): validate_candidate(candidate, roots)
+        for candidate in candidates
+    }
+    preflight_errors = [
+        (candidate, error)
+        for candidate in candidates
+        for _cwd, error in [preflight[id(candidate)]]
+        if error
+    ]
+    if blocking_unresolved or preflight_errors:
+        for candidate in candidates:
+            _cwd, error = preflight[id(candidate)]
+            results.append(blocked_result(
+                candidate,
+                "blocked" if error else "not-run",
+                error or "phase-two preflight did not pass; no tests were executed",
+            ))
+        missing_runtime = [
+            {
+                "repo": candidate.get("repo"),
+                "framework": candidate.get("framework"),
+                "reason": error,
+            }
+            for candidate, error in preflight_errors
+            if is_runtime_setup_error(error)
+        ]
+        readiness = {
+            "ready": False,
+            "checked": True,
+            "missing": missing_runtime,
+            "user_confirmation_required": bool(missing_runtime),
+            "setup_command": SETUP_COMMAND if missing_runtime else None,
+        }
+        conclusion = None
+        if missing_runtime:
+            conclusion = (
+                "测试运行环境尚未准备好，本次没有执行任何测试；"
+                f"请在用户明确同意后运行 `{SETUP_COMMAND}`。"
+            )
+        return build_execution_report(
+            manifest,
+            results,
+            expected_fingerprint=expected_fingerprint,
+            current_fingerprint=current_fingerprint,
+            include_recommended=include_recommended,
+            runtime_readiness=readiness,
+            conclusion_override=conclusion,
+        )
+
     foundation_blocked = any(
         item.get("execution_layer") in FOUNDATION_LAYERS
         for item in blocking_unresolved
@@ -410,7 +524,7 @@ def execute_manifest(
                     "foundation pytest/Vitest layer did not complete successfully",
                 ))
                 continue
-            cwd, error = validate_candidate(candidate, roots)
+            cwd, error = preflight[id(candidate)]
             if error or cwd is None:
                 result = blocked_result(
                     candidate, "blocked", error or "candidate validation failed",
@@ -440,39 +554,20 @@ def execute_manifest(
             ):
                 foundation_blocked = True
 
-    must_results = [
-        result for result in results
-        if result.get("selection_tier") == "must-run" or result.get("required")
-    ]
-    status, conclusion = conclusion_for(must_results, results)
-    layer_summary = {
-        layer: dict(Counter(
-            str(result.get("status"))
-            for result in results
-            if result.get("execution_layer") == layer
-        ))
-        for layer in LAYER_ORDER
-    }
-    return {
-        "schema_version": 1,
-        "execution_status": status,
-        "workspace_change_fingerprint": expected_fingerprint,
-        "current_workspace_change_fingerprint": current_fingerprint,
-        "include_recommended": include_recommended,
-        "layer_order": list(LAYER_ORDER),
-        "layer_summary": layer_summary,
-        "result_counts": dict(Counter(
-            str(result.get("status")) for result in results
-        )),
-        "results": results,
-        "behavior_results": behavior_results(results),
-        "not_runnable": manifest.get("not_runnable", []),
-        "final_conclusion": conclusion,
-        "boundary_note": (
-            "Phase 2 did not install dependencies, start the live bench, reset "
-            "data, invoke bic-e2e-runner, or query Phoenix."
-        ),
-    }
+    return build_execution_report(
+        manifest,
+        results,
+        expected_fingerprint=expected_fingerprint,
+        current_fingerprint=current_fingerprint,
+        include_recommended=include_recommended,
+        runtime_readiness={
+            "ready": True,
+            "checked": True,
+            "missing": [],
+            "user_confirmation_required": False,
+            "setup_command": None,
+        },
+    )
 
 
 def main() -> int:

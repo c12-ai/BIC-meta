@@ -23,7 +23,8 @@ export BIC_ROOT BIC_PROFILE DRY INFRA CHEM_DIR INFRA_DIR
 .DEFAULT_GOAL := help
 .PHONY: help up pull update doctor status down restart-lab restart-BE restart-portal restart-mock restart-chem \
         mind-status mind-real mind-mock \
-        bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared bootstrap-infra
+        bootstrap bootstrap-backend bootstrap-portal bootstrap-lab bootstrap-shared bootstrap-infra \
+        quality-test-doctor quality-test-setup
 
 help: ## Show this help
 	@echo "BIC env — one-shot local bring-up"
@@ -32,6 +33,8 @@ help: ## Show this help
 	@echo "  make update    pull + full restart on the new code (pull && up alone does NOT redeploy running services)"
 	@echo "  make up        idempotent bring-up + self-heal (DRY=1 to preview)"
 	@echo "  make doctor    read-only full checkup (each red card has a fix command)"
+	@echo "  make quality-test-doctor   read-only Phase 2 test runtime check"
+	@echo "  make quality-test-setup    explicitly install Phase 2 project test runtime"
 	@echo "  make status    one-screen service:port:status:sha"
 	@echo "  make down      stop app services (INFRA=1 also stops shared infra)"
 	@echo "  make restart-<svc>   lab | BE | portal | mock | chem"
@@ -52,6 +55,8 @@ pull:          ; @$(ENV)/pull.sh
 # exception — it serves from disk). update closes that gap deterministically.
 update:        ; @$(ENV)/pull.sh && $(ENV)/down.sh && $(ENV)/up.sh
 doctor:        ; @$(ENV)/doctor.sh
+quality-test-doctor: ; @./tools/bic-quality-kit/doctor-test-runtime.sh
+quality-test-setup:  ; @./tools/bic-quality-kit/setup-test-runtime.sh --execute
 
 ## --- field (orin) ----------------------------------------------------------
 # Field counterparts of the bench targets. update.sh does survey->guards->

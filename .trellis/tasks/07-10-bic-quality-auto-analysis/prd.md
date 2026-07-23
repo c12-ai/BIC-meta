@@ -441,3 +441,13 @@ install dependencies, start the complete BIC live bench, reset data, invoke
       package-manager installation.
 - [x] A real runtime smoke executes one Playwright case and one standalone CDP
       Chromium session through the phase-two executor.
+- [x] Before any selected case starts, Phase 2 validates every selected case
+      and project runtime; one missing requirement prevents partial execution.
+- [x] Runtime setup uses only the fixed `BIC-agent-service` and
+      `BIC-agent-portal` directories beneath this `BIC-meta` checkout. It does
+      not search workspaces, consult `BIC_ROOT`, or accept a path override.
+- [x] `make quality-test-doctor` performs a read-only tool, dependency, and
+      Chromium launch check. A blocked execution reports concrete missing items.
+- [x] `make quality-test-setup` requires separate user approval and prepares
+      locked service/Portal dependencies plus Chromium without sudo, OS package
+      installation, service startup, data reset, or selected-test execution.

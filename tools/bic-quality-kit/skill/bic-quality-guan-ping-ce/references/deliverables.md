@@ -279,6 +279,9 @@ BIC 分层测试执行报告
 
 未执行与限制
 - <blocked, skipped, not-run, or not-runnable entries and concrete reasons>
+- 测试运行环境：<ready；或 not-ready、具体缺失项以及 make quality-test-setup>
+- 当 `user_confirmation_required=true` 时，只能询问用户是否单独授权安装；
+  第二阶段执行授权本身不包含安装授权。
 - 本阶段没有安装依赖、启动 live bench、重置数据、调用 bic-e2e-runner 或查询 Phoenix。
 ```
 

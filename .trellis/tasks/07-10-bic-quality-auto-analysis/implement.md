@@ -342,6 +342,22 @@ as Playwright cases, block missing runtimes before subprocess execution, and run
 Playwright case plus one real standalone Chromium CDP session pass through the
 executor without installing dependencies.
 
+## 15. Team Runtime Readiness and Setup
+
+- Add a read-only doctor for Python/uv/Node/npm/pnpm-or-Corepack, the service
+  pytest runtime, Portal Vitest/Playwright runtimes, and a real Chromium launch.
+- Resolve install targets only as fixed children of the `BIC-meta` checkout
+  containing `tools/bic-quality-kit`; do not search, read `BIC_ROOT`, or accept
+  a workspace argument.
+- Add an explicit, idempotent setup entry that uses repository locks to sync
+  Agent Service and Portal dependencies and install Chromium. Do not install
+  base tools or system packages, start services, reset data, or execute tests.
+- Preflight every selected Phase 2 candidate before running any command. Report
+  missing runtime items, a separate-confirmation flag, and the setup command.
+- Document that Phase 2 execution approval and runtime installation approval
+  are distinct, synchronize discovery mirrors, and validate the missing-runtime
+  block plus real Playwright/CDP execution.
+
 ### 2026-07-22 quality-gap closure
 
 - `test_correspondence.user_journey_graph` schema version 1 now exposes bounded

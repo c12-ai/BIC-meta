@@ -49,10 +49,44 @@ Phase 1 is intentionally read-only:
 Phase 2 requires explicit authorization. It verifies the frozen change
 fingerprint, then runs exact pytest node ids, Vitest suite/case title paths,
 Playwright file/line locations, and repository-configured standalone CDP cases
-in layers. It requires the existing project runtime, disables pytest dependency
-sync, invokes repository-local JavaScript CLIs directly, and rejects
+in layers. Before any test starts, it preflights every selected case and project
+runtime. A missing dependency, browser, repository, executable, or command stops
+the whole run without partially executing the list. It disables pytest
+dependency sync, invokes repository-local JavaScript CLIs directly, and rejects
 dependency-installing CDP scripts. It never installs dependencies, starts the
 live bench, resets data, invokes `bic-e2e-runner`, or queries Phoenix.
+
+## Team Test Runtime Setup
+
+The helpers use fixed paths beneath the `BIC-meta` checkout containing this kit:
+`BIC-agent-service` and `BIC-agent-portal`. There is no workspace search,
+`BIC_ROOT` lookup, sibling-checkout fallback, or workspace override. The
+commands only check that those fixed directories exist before using them.
+
+Check readiness without changing the machine or repositories:
+
+```bash
+make quality-test-doctor
+```
+
+If Phase 2 or the doctor reports missing project runtimes, review the result and
+explicitly approve the separate setup:
+
+```bash
+make quality-test-setup
+```
+
+Setup is idempotent and uses repository lock files: `uv sync --frozen` for
+Agent Service, the Portal's pinned pnpm version (direct pnpm or Corepack) with
+`--frozen-lockfile`, and the repository-local Playwright CLI to install
+Chromium. Python 3, uv, Node.js, npm, and pnpm/Corepack are developer-machine
+prerequisites; the command reports them but does not install them. It never uses
+sudo or an OS package manager, starts services, resets data, or executes the
+selected Phase 2 cases. On Linux, any missing privileged browser system library
+is reported by the launch probe for the developer to resolve under team policy.
+
+Approval to execute Phase 2 is not approval to install dependencies. The Skill
+must ask separately before running `make quality-test-setup`.
 
 ## Repository Availability
 
