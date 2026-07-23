@@ -4,7 +4,7 @@
 
 - Owner: BIC product owner
 - Review state: Draft
-- Last updated: 2026-07-17
+- Last updated: 2026-07-23
 
 ## Scope
 
@@ -200,8 +200,16 @@ Core scenarios:
      (never fabricated, per requirement 14) and keeps the conservative rejection. The
      handed-off preparation session experiences the standard claim-lost behavior, same
      as automatic reclaim.
+   - **Robot-claim dispatcher naming** (2026-07-23): a user-initiated dispatch also
+     relays the acting member's display name (display name falling back to username, a
+     claim-lifetime snapshot) alongside the identity, and the robot claim's
+     robot-window notice names that member on shelf surfaces. A system-initiated
+     dispatch carries no actor (never fabricated, per requirement 14), so its notice
+     stays unnamed.
    - The portal reflects claim state on both surfaces (holder-naming banners, disabled
-     entries) within a few seconds, in Chinese and English per requirement 11.
+     entries) within a few seconds, in Chinese and English per requirement 11. Holder
+     naming on claim surfaces prefers the member's display name and falls back to the
+     username; the system never case-transforms or otherwise invents a name.
    - This intent-level mutual exclusion deliberately does not lock the configuring
      (intent assignment) phase; cross-task claims over the same specific physical item
      remain dispatch-validation territory (BIC-lab-service issue #136).
@@ -598,7 +606,9 @@ For the TLC Lab Logistic panel:
   created) with the holder named on the user-visible failure surface; the same
   dispatch succeeds after the maintenance session ends.
 - While a dispatched task is non-terminal — including a TLC task parked awaiting
-  confirmation — Consumable Maintenance entry is blocked with a robot-window notice.
+  confirmation — Consumable Maintenance entry is blocked with a robot-window notice;
+  a user-initiated task's notice names the dispatching member (display name, username
+  fallback), and a system-initiated task's notice stays unnamed.
 - A CC dispatch succeeds while a TLC task is parked awaiting confirmation and still
   holds its shelf claim (robot claims exclude human writers only, never each other).
 - A member who still holds their own same-type preparation claim and confirms the
@@ -666,6 +676,15 @@ For the TLC Lab Logistic panel:
 - Lab Service Project PRD: `BIC-lab-service/docs/project-prd.md`
 
 ## Change Log
+
+- 2026-07-23: Requirement 13 refinement (product-owner ruling): user-initiated
+  dispatches relay the acting member's display name (display name falling back to
+  username, claim-lifetime snapshot) and the robot claim's robot-window notice names
+  the dispatching member; system-initiated dispatches stay unnamed per requirement 14.
+  Holder naming on all claim surfaces prefers display name with username fallback,
+  never case-transforming or inventing a name. Matching acceptance criterion updated.
+  Implemented as tasks `07-23-robot-lock-attribution` / `07-23-display-name-fallback`
+  (BIC-agent-service `.trellis`).
 
 - 2026-07-17: Clarified the i18n contract for system-generated, user-editable
   persisted values. FP default containers now use stable display metadata and
