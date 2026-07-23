@@ -17,25 +17,25 @@ Use only concrete evidence from:
   including Playwright/CDP browser evidence kept separate from backend/unit tests.
 
 Do not use a path, label, filename, or keyword match by itself to assign risk.
-Do not choose among equally authoritative Issue candidates. Keep requirement
-alignment `unassessed` until the association is authoritative or a
-provenance-bearing reference hint is explicitly justified as strong-related;
-preserve the independently derived technical risk.
+Do not choose among equally authoritative Issue candidates. Enable requirement
+alignment only when the user explicitly supplies an Issue or the auto-detected
+current PR yields exactly one linked/closing Issue. Otherwise use technical-only
+mode and preserve the independently derived technical risk.
 
 Keep provenance and topical similarity separate:
 
 - `authoritative`: explicit Issue override, local Issue file, or a linked/closing
   Issue from the auto-detected current PR.
-- `reference-hint`: commit/branch reference. It may become `strong-related` only
-  after its preserved provenance and full body both match concrete Diff objects.
+- `reference-hint`: commit/branch reference. It remains diagnostic context until
+  the user explicitly supplies the Issue on a later run.
 - `thematic-candidate`: ordinary open-Issue search match. It is background
   context even when it is the only similar candidate.
 - `mentioned-reference`: bounded one-hop reference from a hydrated body. It does
   not inherit the parent candidate's authority.
 
-Only `authoritative` and explicitly justified `strong-related` Issues may supply
-acceptance items to the risk matrix. Never turn a thematic candidate into the
-requirement source because its vocabulary resembles the Diff.
+Only `authoritative` Issues may supply acceptance items to the risk matrix.
+Never turn a reference hint or thematic candidate into the requirement source
+because its vocabulary resembles the Diff.
 
 ## Affected-repository Issue analysis
 
@@ -43,17 +43,17 @@ Run Issue analysis only after the Diff identifies affected repositories and
 modules. Scan open Issues for each affected repository. An explicit override is
 authoritative. A unique current-PR linked/closing reference may resolve directly
 and skip the broad scan only when exactly one affected GitHub repository exists.
-With multiple affected repositories, scan every repository and keep that
-current-PR Issue as a repository-local candidate; it cannot resolve workspace
-Issue alignment by itself. A Diff-commit closing reference or `issue-123` branch
-reference is a protected search hint, not sufficient evidence for automatic
-selection.
+With multiple affected repositories, scan every repository, then use one unique
+current-PR Issue as an additive requirement overlay without filtering technical
+scope. A Diff-commit closing reference or `issue-123` branch reference is a
+protected search hint, not sufficient evidence for automatic selection.
 
 When no authoritative link exists, use Issue titles and labels only to shortlist.
 Match English, Chinese, and mixed-language module/object/path terms. Require a
-module, object, path, or label signal for ordinary candidates, while allowing at
-most one no-signal fallback per affected repository. Do not fill the shortlist
-with unrelated candidates merely because budget remains. Read
+module, object, path, or label signal for every ordinary candidate. Repository
+membership alone records scan coverage and must not create a shortlist
+candidate; report affected repositories without a semantic match as unmatched.
+Do not fill the shortlist with unrelated candidates merely because budget remains. Read
 at most 100 metadata records per affected repository, reduce ordinary candidates
 to at most 10 after module and changed-object mapping, and read the full body of
 every shortlisted candidate. Do not select a smaller body subset from metadata.
@@ -62,18 +62,18 @@ candidates, and one shared 60-second deadline for the complete GitHub phase.
 Require repository identity plus a concrete match between the Issue goal or
 acceptance item and a changed module, file, or object when explaining thematic
 context. Even if exactly one ordinary candidate meets that standard, keep it
-thematic and leave workspace Issue alignment `unassessed`. Follow at most ten
+thematic and leave workspace requirement alignment `not-enabled`. Follow at most ten
 repository-contained Issue references from hydrated bodies for one hop; show
 them as `mentioned-reference` context without inheriting authority. Historical
 PR URLs are background context only: do not claim their Issue linkage as
 workspace provenance unless the analyzer auto-detects that PR from the current
-checkout. Keep Issue alignment unassessed rather than substituting a thematic
+checkout. Keep requirement alignment disabled rather than substituting a thematic
 Issue.
 
 Treat `scan-failed` and `partial-scan` as unavailable or incomplete Issue
 evidence, never as proof that no open Issue exists. Keep requirement alignment
-`unassessed` unless a separately preserved authoritative reference resolves and
-aligns; do not discard technical risk.
+`not-enabled` unless an authoritative reference resolves; do not discard
+technical risk.
 
 ## Deterministic floor
 
@@ -82,15 +82,16 @@ contract/state boundaries, test evidence, browser user-journey evidence, and
 change attribution. A frontend or backend-route change without related browser
 evidence raises the static verification floor; a possible, module-level,
 disabled, manual-only, or non-object-linked browser scenario remains medium.
-Treat the highest deterministic row as the risk floor. Semantic review may raise but must
-not lower it.
+In technical-only mode, omit the `issue-clarity` row entirely. Treat the highest
+deterministic row as the risk floor. Semantic review may raise but must not lower
+it.
 
 ## Issue alignment rows
 
 Requirement verification is a separate pass after structural/technical review.
-Run it only for an authoritative or explicitly justified `strong-related`
-Issue. A thematic candidate receives no acceptance-item verdict and leaves
-requirement alignment `unassessed`.
+Run it only when `requirement_alignment_enabled` is true for an authoritative
+Issue. A reference hint or thematic candidate receives no acceptance-item
+verdict and leaves requirement alignment `not-enabled`.
 
 For every eligible acceptance item, report three independent axes:
 
@@ -159,9 +160,9 @@ remove or downgrade technical-regression guidance.
 
 Use the highest deterministic technical row as `technical_risk` and the known
 pre-test `overall_risk`. Issue alignment may raise this result later but cannot
-lower it. If no Issue was authoritatively linked or explicitly promoted from a
-provenance-bearing reference hint to `strong-related`, set
-`requirement_alignment` to `unassessed` and assessment completeness to partial.
-State explicitly that tests were not executed. The current analyzer returns one
-workspace-level risk assessment. Do not infer business streams or allocate
-workspace test counts and risk rows among guessed streams.
+lower it. If no Issue was authoritatively supplied or uniquely linked from the
+current PR, set `requirement_alignment` to `not-enabled`, omit requirement rows,
+and mark the assessment `complete-for-technical-pretest`. State explicitly that
+tests were not executed. The current analyzer returns one workspace-level risk
+assessment. Do not infer business streams or allocate workspace test counts and
+risk rows among guessed streams.

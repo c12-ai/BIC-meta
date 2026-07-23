@@ -17,9 +17,16 @@ ANALYZER_TIMEOUT_SECONDS = 30
 MAX_ANALYZER_OUTPUT_BYTES = 8 * 1024 * 1024
 ROUTE_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"}
 ROUTE_RE = re.compile(
-    r"(?:@|\b)(?:[A-Za-z_$][\w$]*\.)?(get|post|put|patch|delete|options|head)"
-    r"\s*\(\s*['\"]([^'\"]+)['\"]",
+    r"(?:@|\b)(?:(?P<router>[A-Za-z_$][\w$]*)\.)?"
+    r"(?P<method>get|post|put|patch|delete|options|head)"
+    r"\s*\(\s*['\"](?P<path>[^'\"]*)['\"]",
     re.IGNORECASE,
+)
+FASTAPI_ROUTER_PREFIX_RE = re.compile(
+    r"\b(?P<router>[A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$]*\.)?"
+    r"APIRouter\s*\((?:(?!\)\s*(?:\n|$)).)*?\bprefix\s*=\s*"
+    r"['\"](?P<prefix>[^'\"]*)['\"]",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -78,8 +85,13 @@ def classify_declaration(
     metadata: dict[str, str] = {}
 
     route = ROUTE_RE.search(" ".join([signature, *map(str, declaration.get("attrs", []))]))
-    if route and route.group(1).upper() in ROUTE_METHODS:
-        metadata = {"route_method": route.group(1).upper(), "route_path": route.group(2)}
+    if route and route.group("method").upper() in ROUTE_METHODS:
+        metadata = {
+            "route_method": route.group("method").upper(),
+            "route_path": route.group("path"),
+        }
+        if route.group("router"):
+            metadata["route_router"] = route.group("router")
         return "route", metadata
     if suffix in {".tsx", ".jsx"} and name[:1].isupper() and kind in {"function", "method", "field"}:
         return "component", metadata
@@ -144,11 +156,31 @@ def flatten_declarations(
 
 def analyze_file(path: Path, executable: Path | None = None) -> dict[str, Any]:
     parsed = run_outline(path, executable)
+    declarations = flatten_declarations(parsed["declarations"], path)
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        content = ""
+    router_prefixes = {
+        match.group("router"): match.group("prefix")
+        for match in FASTAPI_ROUTER_PREFIX_RE.finditer(content)
+    }
+    for declaration in declarations:
+        router = declaration.pop("route_router", None)
+        prefix = router_prefixes.get(str(router)) if router else None
+        if declaration.get("kind") != "route" or prefix is None:
+            continue
+        route_path = str(declaration.get("route_path") or "")
+        declaration["route_path"] = (
+            f"/{'/'.join(part for part in (prefix.strip('/'), route_path.strip('/')) if part)}"
+            if prefix or route_path
+            else "/"
+        )
     return {
         "language": parsed.get("language") or path.suffix.lstrip("."),
         "imports": parsed.get("imports") or [],
         "line_count": parsed.get("line_count") or 0,
-        "declarations": flatten_declarations(parsed["declarations"], path),
+        "declarations": declarations,
     }
 
 

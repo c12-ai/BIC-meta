@@ -374,6 +374,54 @@ def symbol_identifier(symbol: dict[str, Any]) -> str | None:
     return name if re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name) else None
 
 
+def declaration_reachable_changed_symbols(
+    path: Path,
+    symbols: Iterable[dict[str, Any]],
+    roots: Iterable[str],
+    *,
+    repository_root: Path,
+) -> set[str]:
+    """Expand tested declaration roots through references inside the same file.
+
+    The changed-object mapper already provides declaration line ranges. Reusing
+    those ranges keeps this traversal language-neutral and bounded: only other
+    changed declarations referenced from a proven root can be added.
+    """
+    symbol_list = list(symbols)
+    by_identifier: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for symbol in symbol_list:
+        identifier = symbol_identifier(symbol)
+        if identifier:
+            by_identifier[identifier].append(symbol)
+
+    pending = [str(root) for root in roots if str(root) in by_identifier]
+    reachable: set[str] = set()
+    safe_path, _ = safe_repository_file(path, repository_root)
+    if safe_path is None:
+        return reachable
+    try:
+        lines = safe_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return reachable
+
+    seen_identifiers: set[str] = set()
+    while pending:
+        identifier = pending.pop()
+        if identifier in seen_identifiers:
+            continue
+        seen_identifiers.add(identifier)
+        for symbol in by_identifier[identifier]:
+            reachable.add(str(symbol["name"]))
+            start = symbol.get("start_line")
+            end = symbol.get("end_line")
+            if not isinstance(start, int) or not isinstance(end, int) or start < 1 or end < start:
+                continue
+            declaration_text = "\n".join(lines[start - 1:min(end, len(lines))])
+            referenced = set(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration_text))
+            pending.extend(sorted((referenced & set(by_identifier)) - seen_identifiers))
+    return reachable
+
+
 def module_ref(key: tuple[str, str]) -> dict[str, str]:
     return {"repo": key[0], "module_scope": key[1]}
 
@@ -648,20 +696,70 @@ def resolve_package_source(
 
 
 def route_literal_evidence(content: str, method: str, route_path: str) -> str | None:
-    quoted_path = rf"(['\"]){re.escape(route_path)}\1"
-    method_pattern = re.compile(
-        rf"\.\s*{re.escape(method.lower())}\s*\(\s*{quoted_path}", re.IGNORECASE,
-    )
-    if method_pattern.search(content):
-        return f"{method.upper()} literal {route_path} in API-client call"
-    fetch_pattern = re.compile(
-        rf"\bfetch\s*\(\s*{quoted_path}\s*,(?:(?!\)\s*;).)*?"
-        rf"\bmethod\s*:\s*(['\"]){re.escape(method.upper())}\2",
-        re.IGNORECASE | re.DOTALL,
-    )
-    if fetch_pattern.search(content):
-        return f"fetch literal {route_path} with method {method.upper()}"
+    method = method.upper()
+    # Scan each JavaScript literal form independently. A combined alternation
+    # can start at an apostrophe in a comment (or at a closing quote) and then
+    # swallow a later template literal. Ordinary JS quotes cannot cross a raw
+    # newline; template literals can.
+    string_matches = [
+        match
+        for pattern in (
+            re.compile(r"`(?:\\.|[^`\\])*`", re.DOTALL),
+            re.compile(r"'(?:\\.|[^'\\\r\n])*'"),
+            re.compile(r'"(?:\\.|[^"\\\r\n])*"'),
+        )
+        for match in pattern.finditer(content)
+    ]
+    for match in sorted(string_matches, key=lambda item: item.start()):
+        candidate = match.group(0)[1:-1]
+        if not route_templates_match(candidate, route_path):
+            continue
+        prefix = content[max(0, match.start() - 120):match.start()]
+        suffix = content[match.end():min(len(content), match.end() + 1200)]
+        if re.search(rf"\.\s*{re.escape(method.lower())}\s*\(\s*$", prefix, re.IGNORECASE):
+            return f"{method} route template {candidate} in API-client call"
+        if (
+            re.search(r"\bfetch\s*\(\s*$", prefix, re.IGNORECASE)
+            and re.search(
+                rf"\bmethod\s*:\s*(['\"]){re.escape(method)}\1",
+                suffix,
+                re.IGNORECASE,
+            )
+        ):
+            return f"fetch route template {candidate} with method {method}"
     return None
+
+
+def route_template_segments(value: str) -> tuple[str, ...]:
+    """Normalize backend and JS-template route variables to wildcard segments."""
+    raw = value.strip().strip("'\"`")
+    raw = re.sub(r"^\$\{[^}]+\}", "", raw)
+    parsed = urlsplit(raw)
+    path = parsed.path or raw.split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/"):
+        path = f"/{path}"
+    segments: list[str] = []
+    for segment in path.split("/"):
+        if not segment:
+            continue
+        if re.search(r"\{[^}]+\}|\$\{[^}]+\}", segment):
+            segments.append("*")
+        else:
+            segments.append(segment.lower())
+    return tuple(segments)
+
+
+def route_templates_match(candidate: str, route_path: str) -> bool:
+    """Match a full frontend URL template against a backend router path."""
+    candidate_segments = route_template_segments(candidate)
+    route_segments = route_template_segments(route_path)
+    if not candidate_segments or not route_segments or len(candidate_segments) < len(route_segments):
+        return False
+    candidate_suffix = candidate_segments[-len(route_segments):]
+    return all(
+        left == right or left == "*" or right == "*"
+        for left, right in zip(candidate_suffix, route_segments)
+    )
 
 
 def frontend_route_literal_evidence(content: str, source_path: str, route_path: str) -> str | None:
@@ -673,6 +771,44 @@ def frontend_route_literal_evidence(content: str, source_path: str, route_path: 
     ):
         return f"route-config path literal {route_path} in {source_path}"
     return None
+
+
+def javascript_imported_bindings(content: str) -> dict[str, set[str]]:
+    """Return statically imported bindings keyed by module specifier."""
+    bindings: dict[str, set[str]] = defaultdict(set)
+    import_re = re.compile(
+        r"\bimport\s+(?P<clause>(?:type\s+)?(?:"
+        r"\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*|"
+        r"[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?"
+        r"))\s+from\s*['\"](?P<path>[^'\"]+)['\"]",
+        re.DOTALL,
+    )
+    for match in import_re.finditer(content):
+        clause = re.sub(r"^type\s+", "", match.group("clause").strip())
+        path = match.group("path")
+        named = re.search(r"\{(?P<items>[^}]*)\}", clause, re.DOTALL)
+        if named:
+            for item in named.group("items").split(","):
+                imported = re.sub(r"^type\s+", "", item.strip()).split(" as ", 1)[0].strip()
+                if re.fullmatch(r"[A-Za-z_$][\w$]*", imported):
+                    bindings[path].add(imported)
+        if re.search(r"\*\s+as\s+[A-Za-z_$][\w$]*", clause):
+            bindings[path].add("*")
+        prefix = clause.split(",", 1)[0].strip()
+        if re.fullmatch(r"[A-Za-z_$][\w$]*", prefix) and named is None:
+            bindings[path].add("*")
+    return bindings
+
+
+JOURNEY_FEATURE_STOPWORDS = {
+    "session", "sessions", "target", "event", "events", "request", "response",
+    "page", "opens", "open", "real", "with", "from", "into", "user", "users",
+}
+
+
+def journey_feature_tokens(value: str) -> set[str]:
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value).replace("_", "-")
+    return semantic_tokens(expanded) - JOURNEY_FEATURE_STOPWORDS
 
 
 def build_user_journey_graph(
@@ -691,6 +827,7 @@ def build_user_journey_graph(
     source_nodes: dict[Path, str] = {}
     source_contents: dict[Path, str] = {}
     source_imports: dict[Path, list[str]] = {}
+    source_import_bindings: dict[Path, dict[str, set[str]]] = {}
     scan_counts: dict[str, int] = {}
     warnings: list[str] = []
 
@@ -775,6 +912,7 @@ def build_user_journey_graph(
                     r"['\"]([^'\"]+)['\"]",
                     content,
                 )
+                source_import_bindings[safe_path] = javascript_imported_bindings(content)
         scan_counts[repo] = count
         if skipped_count:
             warnings.append(f"{repo} skipped {skipped_count} unsafe or unreadable journey source files")
@@ -782,6 +920,7 @@ def build_user_journey_graph(
     anchor_ids: list[str] = []
     shared_anchors: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     route_anchors: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    anchor_feature_tokens: dict[str, set[str]] = {}
     for changed in changed_symbols:
         repo = str(changed.get("repo"))
         path = str(changed.get("path"))
@@ -805,6 +944,11 @@ def build_user_journey_graph(
                 "route_path": symbol.get("route_path"),
             })
             anchor_ids.append(node_id)
+            anchor_feature_tokens[node_id] = journey_feature_tokens(
+                " ".join(str(value or "") for value in (
+                    symbol.get("name"), symbol.get("route_path"), path,
+                ))
+            )
             target = (node_id, changed, symbol)
             (route_anchors if layer == "backend-route" else shared_anchors).append(target)
 
@@ -824,6 +968,15 @@ def build_user_journey_graph(
             imported_node = source_nodes[resolved[1]]
             if imported_node == importer_node:
                 continue
+            imported_symbols = {
+                identifier
+                for name in nodes[imported_node].get("symbols", [])
+                if (identifier := symbol_identifier({"name": name}))
+            }
+            if nodes[imported_node]["layer"] == "api-client" and imported_symbols:
+                bindings = source_import_bindings.get(importer, {}).get(import_value, set())
+                if "*" not in bindings and not (bindings & imported_symbols):
+                    continue
             add_edge(
                 imported_node, importer_node, "reverse-import",
                 f"{importer_path} imports {import_value} from {workspace_path(resolved[1], workspace_root)}",
@@ -860,6 +1013,7 @@ def build_user_journey_graph(
                     f"{nodes[source_nodes[source_path]]['path']} imports {identifier} via {', '.join(matched)}",
                 )
 
+    scenario_feature_tokens: dict[str, set[str]] = {}
     for asset in discovered_assets:
         facts = asset.get("test_facts", {})
         if not facts.get("browser_framework") or asset.get("asset_kind") not in {"test-file", "browser-scenario"}:
@@ -883,6 +1037,16 @@ def build_user_journey_graph(
                 "framework": facts.get("browser_framework"),
                 "disabled": bool(case.get("disabled")),
             })
+            scenario_feature_tokens[scenario_id] = journey_feature_tokens(
+                " ".join([
+                    case_name,
+                    *map(str, case.get("assertions", [])),
+                    *(
+                        str(check.get("expression") or "")
+                        for check in case.get("machine_checks", [])
+                    ),
+                ])
+            )
             for import_value in facts.get("imports", []):
                 resolved = resolve_package_source(import_value, aliases)
                 if resolved is None:
@@ -944,10 +1108,19 @@ def build_user_journey_graph(
                     current, (node_path, edge_path, "path-depth-limit"),
                 )
                 continue
-            outgoing = [
-                edge for edge in sorted(adjacency.get(current, []), key=lambda item: item["id"])
-                if edge["to"] not in node_path
-            ]
+            outgoing = []
+            for edge in sorted(adjacency.get(current, []), key=lambda item: item["id"]):
+                if edge["to"] in node_path:
+                    continue
+                if (
+                    edge["relation"] == "frontend-route-browser-target"
+                    and not (
+                        anchor_feature_tokens.get(anchor_id, set())
+                        & scenario_feature_tokens.get(edge["to"], set())
+                    )
+                ):
+                    continue
+                outgoing.append(edge)
             if not outgoing:
                 terminal_branches.setdefault(
                     current,
@@ -1056,6 +1229,10 @@ def analyze_test_relations(
             inventory_by_asset[path].append(entry)
     source_reference_cache: dict[Path, dict[str, list[str]]] = {}
     reachable_symbol_cache: dict[tuple[Path, Path, tuple[str, ...], tuple[str, ...]], set[str]] = {}
+    changed_declaration_cache: dict[
+        tuple[Path, Path, tuple[str, ...], tuple[tuple[str, int | None, int | None], ...]],
+        set[str],
+    ] = {}
 
     def reachable_symbols(
         path: Path,
@@ -1070,6 +1247,29 @@ def analyze_test_relations(
                 path, key[2], key[3], repository_root=repository_root,
             )
         return reachable_symbol_cache[key]
+
+    def reachable_changed_declarations(
+        path: Path,
+        symbols: Iterable[dict[str, Any]],
+        roots: Iterable[str],
+        *,
+        repository_root: Path,
+    ) -> set[str]:
+        symbol_list = list(symbols)
+        symbol_key = tuple(sorted(
+            (
+                str(symbol.get("name") or ""),
+                symbol.get("start_line") if isinstance(symbol.get("start_line"), int) else None,
+                symbol.get("end_line") if isinstance(symbol.get("end_line"), int) else None,
+            )
+            for symbol in symbol_list
+        ))
+        key = (path, repository_root, tuple(sorted(set(roots))), symbol_key)
+        if key not in changed_declaration_cache:
+            changed_declaration_cache[key] = declaration_reachable_changed_symbols(
+                path, symbol_list, key[2], repository_root=repository_root,
+            )
+        return changed_declaration_cache[key]
 
     module_results: list[dict[str, Any]] = []
     for key in sorted(module_files):
@@ -1140,16 +1340,51 @@ def analyze_test_relations(
                             identifier
                             for case in facts.get("test_cases", [])
                             if case.get("name") in source_linked_cases
-                            for identifier in case.get("assertion_linked_identifiers", [])
+                            for identifier in (
+                                *case.get("assertion_linked_identifiers", []),
+                                *case.get("rendered_identifiers", []),
+                            )
                         }
                         if source_linked_cases:
                             direct_assertion_files.add(source["path"])
+                        source_path, _ = safe_repository_file(
+                            workspace_root / source["path"], repo_root,
+                        )
+                        source_root_identifiers = source_identifiers & identifiers
+                        linked_root_identifiers = source_identifiers & linked_identifiers
+                        reachable_names = (
+                            reachable_changed_declarations(
+                                source_path, source["symbols"], source_root_identifiers,
+                                repository_root=repo_root,
+                            )
+                            if source_path is not None
+                            else set()
+                        )
+                        assertion_reachable_names = (
+                            reachable_changed_declarations(
+                                source_path, source["symbols"], linked_root_identifiers,
+                                repository_root=repo_root,
+                            )
+                            if source_path is not None
+                            else set()
+                        )
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
-                            if identifier and identifier in identifiers:
+                            if identifier and (
+                                identifier in source_root_identifiers
+                                or str(symbol["name"]) in reachable_names
+                            ):
                                 related_symbols.add(symbol["name"])
-                                reasons.append(f"references {identifier} from the imported changed file")
-                                if identifier in linked_identifiers:
+                                if identifier in source_root_identifiers:
+                                    reasons.append(f"references {identifier} from the imported changed file")
+                                else:
+                                    reasons.append(
+                                        f"reaches {identifier} from a referenced declaration in the imported changed file"
+                                    )
+                                if (
+                                    identifier in linked_root_identifiers
+                                    or str(symbol["name"]) in assertion_reachable_names
+                                ):
                                     direct_assertion_symbols.add(symbol["name"])
 
                     matching_targets = [

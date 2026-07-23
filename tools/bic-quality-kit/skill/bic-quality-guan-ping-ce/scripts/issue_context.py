@@ -43,7 +43,12 @@ AUTHORITATIVE_CANDIDATE_PRIORITY_MAX = 1
 SEARCH_STOP_WORDS = {
     "app", "apps", "src", "source", "lib", "libs", "service", "services",
     "api", "test", "tests", "issue", "feature", "change", "update", "repo",
-    "repository", "bic", "meta",
+    "repository", "bic", "meta", "the", "and", "for", "with", "from",
+    "into", "onto", "over", "under", "between", "across", "after", "before",
+    "when", "while", "where", "which", "this", "that", "these", "those",
+    "using", "used", "current", "existing", "new", "add", "fix", "support",
+    "agent", "portal", "backend", "frontend", "state", "target", "data",
+    "system",
 }
 SEARCH_TERM_ALIASES = {
     "workflow": {"工作流"},
@@ -167,6 +172,42 @@ def candidate_association(candidate: dict[str, Any]) -> str:
     if source == "mentioned-reference":
         return "mentioned-reference"
     return "thematic-candidate"
+
+
+def apply_requirement_alignment_gate(payload: dict[str, Any]) -> dict[str, Any]:
+    """Expose one authoritative gate for requirement-facing analysis and output."""
+    enabled = bool(
+        payload.get("resolved")
+        and payload.get("association") == "authoritative"
+        and payload.get("acceptance_items_eligible")
+    )
+    if enabled:
+        origin = "explicit" if payload.get("requested") else "current-pr"
+        reason = (
+            "explicit-issue"
+            if origin == "explicit"
+            else "unique-current-pr-authoritative-issue"
+        )
+        summary = (
+            f"Requirement alignment enabled from authoritative Issue "
+            f"{payload.get('reference') or '(unknown reference)'}."
+        )
+    else:
+        origin = None
+        reason = "no-authoritative-issue"
+        summary = (
+            "No authoritative Issue was identified; requirement alignment is not enabled "
+            "and this assessment covers technical scope only."
+        )
+    payload.update({
+        "requirement_alignment_enabled": enabled,
+        "requirement_alignment_mode": "authoritative" if enabled else "technical-only",
+        "requirement_alignment_origin": origin,
+        "requirement_alignment_reason": reason,
+        "default_report_summary": summary,
+        "thematic_candidates_visibility": "diagnostics-only",
+    })
+    return payload
 
 
 def closing_reference_candidates(
@@ -489,7 +530,7 @@ def normalize_issue(payload: dict[str, Any], reference: str, source: str) -> dic
     url = str(payload.get("url") or "") or None
     state = payload.get("state")
     item_type = "pull-request" if (url and "/pull/" in url) or state == "MERGED" else "issue"
-    return {
+    return apply_requirement_alignment_gate({
         "requested": True,
         "resolved": True,
         "reference": reference,
@@ -513,11 +554,11 @@ def normalize_issue(payload: dict[str, Any], reference: str, source: str) -> dic
         "acceptance_scope_review": "required" if acceptance_items else "not-applicable",
         "warnings": ["Reference resolved to a pull request, not an Issue"]
         if item_type == "pull-request" else [],
-    }
+    })
 
 
 def unresolved(reference: str | None, source: str | None, warning: str | None = None) -> dict[str, Any]:
-    return {
+    return apply_requirement_alignment_gate({
         "requested": bool(reference),
         "resolved": False,
         "reference": reference,
@@ -540,7 +581,7 @@ def unresolved(reference: str | None, source: str | None, warning: str | None = 
         "acceptance_items_eligible": False,
         "acceptance_scope_review": "not-eligible",
         "warnings": [warning] if warning else [],
-    }
+    })
 
 
 def load_issue_file(path: Path) -> dict[str, Any]:
@@ -968,13 +1009,11 @@ def shortlist_issue_candidates(
     ]
     selected = strong[:limit]
     selected_refs = {item["reference"] for item in selected}
-    fallback_selected_refs: set[str] = set()
     signaled = [item for item in ordinary if item.get("has_search_signal")]
-    fallback = [item for item in ordinary if not item.get("has_search_signal")]
 
-    # Reserve one candidate per affected repository. Prefer a real search signal;
-    # otherwise allow exactly one repository fallback without filling the budget
-    # with unrelated recent Issues.
+    # Preserve affected-repository diversity only when that repository has a
+    # real semantic signal. Repository membership alone is scan coverage, not
+    # evidence that an Issue belongs in the shortlist.
     for repository in snapshot.get("affected_repositories", []):
         if len(selected) >= limit:
             break
@@ -987,19 +1026,9 @@ def shortlist_issue_candidates(
             ),
             None,
         )
-        if candidate is None:
-            candidate = next(
-                (
-                    item for item in fallback
-                    if item.get("repository") == repository and item["reference"] not in selected_refs
-                ),
-                None,
-            )
         if candidate:
             selected.append(candidate)
             selected_refs.add(candidate["reference"])
-            if not candidate.get("has_search_signal"):
-                fallback_selected_refs.add(candidate["reference"])
 
     for candidate in signaled:
         if len(selected) >= limit:
@@ -1025,6 +1054,10 @@ def shortlist_issue_candidates(
     for item in selected:
         repository = str(item.get("repository") or "unknown")
         shortlisted_by_repository[repository] = shortlisted_by_repository.get(repository, 0) + 1
+    unmatched_repositories = sorted(
+        repository for repository in snapshot.get("affected_repositories", [])
+        if repository not in shortlisted_by_repository
+    )
     excluded_by_repository: dict[str, int] = {}
     for item in excluded:
         repository = str(item.get("repository") or "unknown")
@@ -1038,9 +1071,10 @@ def shortlist_issue_candidates(
         "excluded_count": len(excluded),
         "exclusion_reasons": exclusion_reasons,
         "shortlisted_by_repository": shortlisted_by_repository,
+        "unmatched_repositories": unmatched_repositories,
         "excluded_by_repository": excluded_by_repository,
         "signal_candidate_count": len(signaled),
-        "fallback_selected_count": len(fallback_selected_refs),
+        "fallback_selected_count": 0,
         "strong_candidate_count": len(strong),
         "strong_candidate_overflow_count": max(0, len(strong) - limit),
         "strong_overflow_references": [item["reference"] for item in strong[limit:]],
@@ -1246,20 +1280,16 @@ def finalized_auto_issue_context(
         "authoritative_scope_complete",
         len(set(snapshot.get("affected_repositories", []))) == 1,
     )
-    selectable_authoritative_candidates = (
-        authoritative_candidates if authoritative_scope_complete else []
-    )
-    repository_local_authoritative_candidates = (
-        [] if authoritative_scope_complete else authoritative_candidates
-    )
     reference_hints = [
         item for item in reference_candidates
         if AUTHORITATIVE_CANDIDATE_PRIORITY_MAX < item.get("priority", 99)
         <= STRONG_CANDIDATE_PRIORITY_MAX
     ]
-    selected, authoritative_ordered = select_issue_candidate(
-        selectable_authoritative_candidates,
-    )
+    # A unique current-PR linked/closing Issue is authoritative even when the
+    # technical Diff spans multiple repositories. Multi-repository discovery
+    # still scans every affected repository; the selected Issue is an additive
+    # requirement overlay and never narrows the frozen technical scope.
+    selected, authoritative_ordered = select_issue_candidate(authoritative_candidates)
     fast_path_reference = snapshot.get("authoritative_fast_path_reference")
     shortlist_snapshot = snapshot
     if selected and fast_path_reference == selected["reference"]:
@@ -1292,15 +1322,7 @@ def finalized_auto_issue_context(
     }
 
     if selected is None:
-        if repository_local_authoritative_candidates:
-            warning = (
-                "Current-PR Issue references are repository-local, but multiple affected repositories "
-                "were found; all affected repositories were scanned and workspace Issue alignment "
-                "requires semantic review"
-            )
-            discovery_mode = "affected-repository-scan"
-            analysis_status = "semantic-review-required"
-        elif authoritative_ordered:
+        if authoritative_ordered:
             warning = (
                 "Multiple equally authoritative Issue references were found; compare them with the Diff or provide --issue"
             )
@@ -1429,6 +1451,7 @@ def finalized_auto_issue_context(
         "excluded_count": shortlist["excluded_count"],
         "exclusion_reasons": shortlist["exclusion_reasons"],
         "shortlisted_by_repository": shortlist["shortlisted_by_repository"],
+        "unmatched_repositories": shortlist["unmatched_repositories"],
         "excluded_by_repository": shortlist["excluded_by_repository"],
         "signal_candidate_count": shortlist["signal_candidate_count"],
         "fallback_selected_count": shortlist["fallback_selected_count"],
@@ -1449,7 +1472,7 @@ def finalized_auto_issue_context(
         *hydration["warnings"],
         *mentioned_hydration["warnings"],
     ]
-    return result
+    return apply_requirement_alignment_gate(result)
 
 
 def auto_discover_issue(

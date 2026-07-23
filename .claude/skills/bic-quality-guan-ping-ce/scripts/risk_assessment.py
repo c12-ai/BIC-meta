@@ -43,8 +43,9 @@ def assess_pretest_risk(
     issue: dict[str, Any],
     model: dict[str, Any],
 ) -> dict[str, Any]:
+    alignment_enabled = bool(issue.get("requirement_alignment_enabled", False))
     acceptance_eligible = bool(
-        issue.get("acceptance_items_eligible", issue.get("resolved"))
+        alignment_enabled and issue.get("acceptance_items_eligible", False)
     )
     acceptance_items = issue.get("acceptance_items", []) if acceptance_eligible else []
     modules = module_names(scope)
@@ -83,24 +84,13 @@ def assess_pretest_risk(
     issue_summary = issue_evidence[:1]
 
     rows: list[dict[str, Any]] = []
-    if not issue.get("resolved"):
-        rows.append(row(
-            "issue-clarity", "unassessed",
-            "No resolved Issue context is available; Issue-to-Diff alignment cannot be judged.",
-        ))
-    elif not acceptance_eligible:
-        rows.append(row(
-            "issue-clarity", "unassessed",
-            "The available Issue is contextual only and is not eligible to define this change's acceptance scope.",
-            issue_evidence=issue_evidence,
-        ))
-    elif not acceptance_items:
+    if alignment_enabled and not acceptance_items:
         rows.append(row(
             "issue-clarity", "medium",
             "The Issue is available but has no explicit acceptance checklist or acceptance section.",
             issue_evidence=issue_evidence,
         ))
-    else:
+    elif alignment_enabled:
         rows.append(row(
             "issue-clarity", "low",
             "The Issue provides explicit acceptance items for semantic comparison with the Diff.",
@@ -223,15 +213,13 @@ def assess_pretest_risk(
         if item["risk_level"] in RANK
     ]
     technical_risk = max(ranked, key=RANK.get) if ranked else "low"
-    if not issue.get("resolved") or not acceptance_eligible:
-        requirement_alignment = "unassessed"
+    if not alignment_enabled:
+        requirement_alignment = "not-enabled"
     elif acceptance_items:
         requirement_alignment = "pending-review"
     else:
         requirement_alignment = "insufficient-definition"
-    requirement_scope_status = (
-        "available" if requirement_alignment != "unassessed" else "unassessed"
-    )
+    requirement_scope_status = "available" if alignment_enabled else "not-enabled"
     return {
         "assessment_stage": "pre-test",
         "overall_risk": technical_risk,
@@ -239,18 +227,24 @@ def assess_pretest_risk(
         "risk_floor": technical_risk,
         "requirement_alignment": requirement_alignment,
         "assessment_completeness": {
-            "overall": "partial" if requirement_scope_status == "unassessed" else "complete-for-pretest",
+            "overall": (
+                "complete-for-pretest"
+                if alignment_enabled
+                else "complete-for-technical-pretest"
+            ),
             "technical_scope": "assessed",
             "requirement_scope": requirement_scope_status,
             "test_execution": "not-run",
         },
         "risk_matrix": rows,
-        "requires_semantic_issue_alignment": bool(issue.get("resolved") and acceptance_eligible),
+        "requires_semantic_issue_alignment": alignment_enabled,
         "issue_acceptance_items": acceptance_items,
         "assessment_note": (
-            "This is a pre-test risk assessment. Technical risk remains available when requirement "
-            "alignment is unavailable. Compare every eligible Issue acceptance item semantically "
-            "with Diff and test evidence; requirement evidence may raise, but must not lower, the "
-            "technical risk floor."
+            "This is a pre-test risk assessment. Requirement alignment is enabled from an "
+            "authoritative Issue and may raise, but must not lower, the technical risk floor."
+            if alignment_enabled else
+            "This is a technical-only pre-test risk assessment. No authoritative Issue was "
+            "identified, so thematic Issue candidates are diagnostics only and do not contribute "
+            "requirement risk rows or requirement-traced test guidance."
         ),
     }

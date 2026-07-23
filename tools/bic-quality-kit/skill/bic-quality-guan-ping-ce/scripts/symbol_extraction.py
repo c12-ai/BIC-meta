@@ -286,6 +286,14 @@ def extract_changed_symbols(
                     declaration["change_kind"] = "deleted"
                 else:
                     declaration["change_kind"] = "added" if is_new_file else "modified"
+                # The first merged record may come from the base-side AST.  A
+                # modified declaration must expose the current range when the
+                # current file is what downstream relationship analysis reads;
+                # otherwise inserted lines can truncate the declaration body
+                # and hide nested component/function references.
+                active_side = "new" if "new" in sides else "old"
+                declaration["start_line"] = declaration.get(f"{active_side}_start_line")
+                declaration["end_line"] = declaration.get(f"{active_side}_end_line")
                 declaration["line"] = declaration.get("new_start_line", declaration.get("old_start_line"))
                 symbols.append(declaration)
 

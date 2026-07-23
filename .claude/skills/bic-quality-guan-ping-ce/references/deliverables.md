@@ -8,7 +8,7 @@ BIC 质量简报
 核心结论
 - 影响范围：<affected repositories, core modules, and change size>
 - 多仓事实：<single/multi-repository only; repository count is not business-chain evidence>
-- Issue 对齐：<repository -> selected Issue, unresolved, or no unique Issue>
+- 需求对齐：<authoritative Issue and origin, or “未启用；本次仅评估技术范围”>
 - 测试判断：<strongest existing test evidence and the key behavior gaps>
 - 风险结论：<workspace-level pre-test risk; do not invent per-stream attribution>
 
@@ -18,28 +18,18 @@ BIC 质量简报
 - 变更仓库：
 - 是否多仓发生改动：
 
-需求与问题单
-- 发现方式：
-- 扫描状态：<succeeded, scan-failed, partial-scan, or scan-not-run>
-- 受影响仓库 Issue 扫描：
-- 候选初筛：
-- 初筛排除：
-- 正文读取：
-- 候选 Issue：
-- 关联等级：<authoritative, strong-related, reference-hint, thematic-candidate, or mentioned-reference>
-- 一跳引用：<bounded mentioned references; context only>
-- 候选对应分析：
-- 选择依据：
+需求对齐（仅当 requirement_alignment_enabled=true 时出现）
+- 权威来源：<用户明确指定 / 当前 PR 唯一 linked-or-closing Issue>
 - 关联 Issue：
 - 目标：
-- 验收项：
-- 正式对齐资格：<eligible/not-eligible and the provenance reason>
 - 验收项静态证据：
 | 验收项 | 范围 | 实现证据 | 测试状态 | Diff/对象证据 | 测试证据 | 判断 |
 |---|---|---|---|---|---|---|
 | <one eligible item> | in-scope/adjacent/out-of-scope/cannot-determine | static-evidence-found/static-evidence-missing/cannot-verify | asserted/weak-or-disabled/missing/not-applicable/cannot-verify | <exact changed file/object/route/journey> | <exact test/assertion or explicit missing-test statement> | <static pre-test interpretation> |
 - 范围分歧：<narrow-issue-broad-diff, broad-issue-narrow-diff, bidirectional-divergence, none-observed, or cannot-determine>
-- 获取 warning：
+
+需求对齐（当 requirement_alignment_enabled=false 时，用这一行替代上面整个区块）
+- 未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。
 
 模块映射
 - Repo / Module：
@@ -53,17 +43,18 @@ BIC 质量简报
 - 扫描 warning：<skipped symlink/outside-repository/sensitive candidates, if any>
 
 测试前风险矩阵
-| 风险项 | Issue 依据 | Diff 依据 | 测试依据 | 等级 | 判断 |
-|---|---|---|---|---|---|
-| <dimension or acceptance item> | <issue fact> | <changed file/object> | <test fact or missing evidence> | high/medium/low/unassessed | <reason> |
+| 技术风险项 | Diff 依据 | 测试依据 | 等级 | 判断 |
+|---|---|---|---|---|
+| <technical dimension> | <changed file/object> | <test fact or missing evidence> | high/medium/low | <reason> |
+- 需求验收风险：<仅在需求对齐启用时，逐验收项补充；否则整项不出现>
 - 技术风险：
-- 需求对齐：<aligned, partial, conflict, pending-review, insufficient-definition, or unassessed>
+- 需求对齐：<pending-review/insufficient-definition；技术模式下写 not-enabled>
 - 评估完整度：<technical scope, requirement scope, and test execution status>
 - 整体已知风险：<must not be lower than technical risk>
 - 评估阶段：真正测试前（pre-test）
 
 测试缺口
-- 需求验收测试（requirement-traced）：
+- 需求验收测试（requirement-traced）：<仅在需求对齐启用时出现>
 - 技术回归测试（technical-regression）：
 - 探索性风险测试（exploratory）：
 - 暂未发现明显缺口：
@@ -89,7 +80,7 @@ brief concise:
   new conclusion, label, or recommendation there. Name affected repositories and
   core modules, report multi-repository change only as a workspace fact, and do
   not infer one business/contract chain from repository count. Summarize the
-  workspace Issue alignment, strongest existing test evidence, key gaps, and
+  requirement-alignment mode, strongest existing test evidence, key gaps, and
   workspace-level pre-test risk. If changes appear unrelated, state that
   business-flow attribution is unresolved rather than inventing streams or
   assigning global counts to them.
@@ -122,6 +113,12 @@ brief concise:
   symbolic link, outside-repository path, or sensitive path. Do not turn the
   skipped candidate into either positive test evidence or proof of a missing
   test. Sensitive paths and credential values must remain redacted.
+- Use `issue_context.requirement_alignment_enabled` as a hard presentation gate.
+  If false, render only “未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。”
+  Do not render thematic/reference candidates, scan budgets, shortlist or
+  hydration details, Issue lookup warnings, acceptance placeholders, divergence,
+  or requirement-traced guidance in the default brief. Those fields remain in
+  raw JSON for an explicitly requested Issue-matching diagnostic.
 - Start `测试前风险矩阵` with the deterministic rows from
   `assess-risk-matrix.sh`. Add one Issue-alignment row per eligible, in-scope
   acceptance item using semantic reading of Issue, Diff, and tests. Requirement
@@ -133,25 +130,26 @@ brief concise:
   test/assertion or explicitly states that no test was found. Keep adjacent and
   out-of-scope items outside the matrix. Missing Diff or test evidence may raise
   the risk; never lower the deterministic risk floor.
-- Use `unassessed` for requirement alignment when Issue context is
-  missing/unresolved or an acceptance item cannot be compared with concrete
-  evidence. Preserve the technical risk derived from Diff/test facts. This is a
-  pre-test matrix, not a claim about executed verification or residual release
-  risk.
+- Use `not-enabled` for requirement alignment when there is no authoritative
+  Issue. Omit `issue-clarity` and all requirement rows in that mode; the remaining
+  matrix is a complete technical pre-test assessment. Preserve the technical
+  risk derived from Diff/test facts. This is not a claim about executed
+  verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
   Treat an explicit Issue override as authoritative. Auto-detect the current PR
   when available, but do not treat historical PR URLs supplied in conversation
   as analyzer inputs. A unique current-PR
   linked/closing reference may use the authoritative fast path only when exactly
   one affected GitHub repository exists. With multiple affected repositories,
-  scan every repository and keep the current-PR Issue as a repository-local
-  candidate without resolving workspace Issue alignment. Preserve Diff-commit
+  scan every repository and use one unique current-PR linked/closing Issue as an
+  additive requirement overlay without narrowing technical scope. Preserve Diff-commit
   and `issue-123` branch references as shortlist hints that still require
   semantic confirmation. Scan at most 100
   metadata records per affected repository, compare them with multilingual
   module, changed-object, changed-path, and label signals, and retain at most 10
-  ordinary shortlist candidates. Keep at most one no-signal fallback per
-  affected repository and do not fill unused budget with unrelated Issues. Read
+  ordinary shortlist candidates. Exclude no-signal Issues even when their
+  repository is affected, report that repository as unmatched, and do not fill
+  unused budget with unrelated Issues. Read
   every shortlisted body before semantic alignment;
   do not perform a second five-body or metadata-only cutoff. Batch multiple
   bodies into one read-only GraphQL request, then use at most three concurrent
@@ -166,12 +164,11 @@ brief concise:
   Label ordinary search matches `thematic-candidate`; even one unique semantic
   match remains background context, receives no acceptance-item comparison or
   requirement-traced guidance, and cannot supply acceptance rows. Label
-  commit/branch references `reference-hint`; promote one to `strong-related`
-  only when its preserved provenance and hydrated body both agree with concrete
-  changed objects. Follow at most ten repository-contained Issue references
+  commit/branch references `reference-hint`; keep them diagnostic-only until the
+  user explicitly supplies one as `--issue`. Follow at most ten repository-contained Issue references
   from hydrated bodies for one hop and label them `mentioned-reference`; they do
-  not inherit authority. Leave requirement alignment `unassessed` without
-  authoritative or explicitly justified strong-related provenance; do not
+  not inherit authority. Leave requirement alignment `not-enabled` without
+  authoritative provenance; do not
   infer identity from repository membership, a general keyword, or filename
   similarity alone, and do not erase technical risk.
 - Report Issue-to-Diff divergence only when the eligible item evidence supports

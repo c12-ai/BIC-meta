@@ -28,6 +28,12 @@ PLAYWRIGHT_ACTION_RE = re.compile(
     r"(goto|click|fill|type|press|check|uncheck|selectOption|hover|dragTo|"
     r"setInputFiles|reload|goBack|goForward|newPage|newContext|fetch|get|post|put|delete)\s*\("
 )
+PLAYWRIGHT_TEST_FIXTURE_RE = re.compile(
+    r"\b(?:test|it)(?:\.(?:skip|todo|fixme|only))?\s*\("
+    r"(?:(?!\)\s*;).)*?,\s*(?:async\s*)?\(\s*\{[^}]*"
+    r"\b(?:page|context|browser|request)\b",
+    re.DOTALL,
+)
 PLAYWRIGHT_OBSERVATION_RE = re.compile(
     r"(?:\b(?:page|locator|context|response|request)|\))\s*\.\s*"
     r"(screenshot|textContent|innerText|inputValue|isVisible|waitForURL|"
@@ -57,6 +63,19 @@ JS_TEST_RE = re.compile(
     r"\b(describe|test|it)(?:\.(skip|todo|fixme|only))?\s*\(\s*['\"]([^'\"]+)['\"]"
 )
 JS_IDENTIFIER_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b")
+JS_FUNCTION_DECLARATION_RE = re.compile(
+    r"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{"
+)
+JS_RENDER_COMPONENT_RE = re.compile(
+    r"\brender\s*\(\s*<\s*([A-Z][A-Za-z0-9_$]*)\b",
+    re.DOTALL,
+)
+JS_DOM_ASSERTION_RE = re.compile(
+    r"\b(?:screen|within)\s*\."
+    r"|\b(?:get|query|find)By(?:Role|Text|LabelText|TestId|PlaceholderText|Title)\b"
+    r"|\.toBe(?:Visible|InTheDocument)\s*\("
+    r"|\.toHave(?:Attribute|TextContent|Value|Class)\s*\("
+)
 JS_NAMED_IMPORT_RE = re.compile(
     r"import\s+(?:type\s+)?\{(?P<names>[^}]*)\}\s+from",
     re.DOTALL,
@@ -137,18 +156,10 @@ def javascript_import_aliases(content: str) -> dict[str, str]:
     return aliases
 
 
-def js_test_body_range(content: str, start: int) -> tuple[int, int]:
-    """Locate a best-effort callback body for one JS test declaration."""
-    next_declaration = JS_TEST_RE.search(content, start)
-    arrow = content.find("=>", start)
-    if arrow >= 0 and (not next_declaration or arrow < next_declaration.start()):
-        open_brace = content.find("{", arrow + 2)
-    else:
-        open_brace = content.find("{", start)
-    if open_brace < 0 or (next_declaration and next_declaration.start() < open_brace):
-        line_end = content.find("\n", start)
-        end = line_end if line_end >= 0 else len(content)
-        return start, end
+def javascript_braced_body_range(content: str, open_brace: int) -> tuple[int, int]:
+    """Return one balanced JS block body while ignoring strings and comments."""
+    if open_brace < 0 or open_brace >= len(content) or content[open_brace] != "{":
+        return open_brace, open_brace
     depth = 0
     index = open_brace
     quote: str | None = None
@@ -181,9 +192,74 @@ def js_test_body_range(content: str, start: int) -> tuple[int, int]:
     return open_brace + 1, len(content)
 
 
+def js_test_body_range(content: str, start: int) -> tuple[int, int]:
+    """Locate a best-effort callback body for one JS test declaration."""
+    next_declaration = JS_TEST_RE.search(content, start)
+    arrow = content.find("=>", start)
+    if arrow >= 0 and (not next_declaration or arrow < next_declaration.start()):
+        open_brace = content.find("{", arrow + 2)
+    else:
+        open_brace = content.find("{", start)
+    if open_brace < 0 or (next_declaration and next_declaration.start() < open_brace):
+        line_end = content.find("\n", start)
+        end = line_end if line_end >= 0 else len(content)
+        return start, end
+    return javascript_braced_body_range(content, open_brace)
+
+
 def js_test_body(content: str, start: int) -> str:
     body_start, body_end = js_test_body_range(content, start)
     return content[body_start:body_end]
+
+
+def javascript_render_helpers(content: str) -> dict[str, set[str]]:
+    """Map local test helpers to React components they render, transitively."""
+    bodies: dict[str, str] = {}
+    for match in JS_FUNCTION_DECLARATION_RE.finditer(content):
+        body_start, body_end = javascript_braced_body_range(content, match.end() - 1)
+        bodies[match.group(1)] = content[body_start:body_end]
+
+    direct = {
+        name: set(JS_RENDER_COMPONENT_RE.findall(body))
+        for name, body in bodies.items()
+    }
+    helper_names = set(bodies)
+    calls = {
+        name: {
+            helper for helper in helper_names
+            if helper != name and re.search(rf"\b{re.escape(helper)}\s*\(", body)
+        }
+        for name, body in bodies.items()
+    }
+
+    resolved: dict[str, set[str]] = {}
+
+    def visit(name: str, stack: tuple[str, ...] = ()) -> set[str]:
+        if name in resolved:
+            return set(resolved[name])
+        if name in stack:
+            return set()
+        rendered = set(direct.get(name, set()))
+        for helper in calls.get(name, set()):
+            rendered.update(visit(helper, (*stack, name)))
+        resolved[name] = rendered
+        return set(rendered)
+
+    for name in bodies:
+        visit(name)
+    return resolved
+
+
+def javascript_case_rendered_identifiers(
+    body: str,
+    render_helpers: dict[str, set[str]],
+) -> set[str]:
+    """Find components rendered directly or through a local test helper."""
+    rendered = set(JS_RENDER_COMPONENT_RE.findall(body))
+    for helper, components in render_helpers.items():
+        if re.search(rf"\b{re.escape(helper)}\s*\(", body):
+            rendered.update(components)
+    return rendered
 
 
 def mask_javascript_noncode(content: str) -> str:
@@ -932,6 +1008,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     content = path.read_text(encoding="utf-8", errors="ignore")
     test_matches = list(JS_TEST_RE.finditer(content))
     import_aliases = javascript_import_aliases(content)
+    render_helpers = javascript_render_helpers(content)
     executable_code = JS_NONCODE_RE.sub(" ", content)
     test_names = sorted({match.group(3) for match in test_matches if match.group(1) in {"test", "it"}})
     scenario_names = sorted({match.group(3) for match in test_matches})
@@ -975,6 +1052,9 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             assertion_linked_identifiers.update(
                 JS_IDENTIFIER_RE.findall(mask_javascript_noncode(assertion))
             )
+        rendered_identifiers = javascript_case_rendered_identifiers(body, render_helpers)
+        if any(JS_DOM_ASSERTION_RE.search(assertion) for assertion in assertion_snippets):
+            assertion_linked_identifiers.update(rendered_identifiers)
         assignments: list[tuple[str, str]] = []
         for raw_line in body.splitlines():
             assignment = re.search(
@@ -1003,6 +1083,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             "disabled": disabled,
             "referenced_identifiers": sorted(case_identifiers),
             "assertion_linked_identifiers": sorted(assertion_linked_identifiers),
+            "rendered_identifiers": sorted(rendered_identifiers),
             "browser_actions": sorted(browser_actions),
             "browser_observations": sorted(browser_observations),
             "uses_cdp": uses_cdp,
@@ -1036,7 +1117,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     imports = sorted(set(JS_IMPORT_RE.findall(content)))
     uses_cdp = bool(CDP_RE.search(executable_code))
     uses_playwright = any("playwright" in item.lower() for item in imports) or bool(
-        PLAYWRIGHT_ACTION_RE.search(executable_code)
+        PLAYWRIGHT_TEST_FIXTURE_RE.search(executable_code)
     )
     browser_framework = "cdp" if uses_cdp else "playwright" if uses_playwright else None
     return {

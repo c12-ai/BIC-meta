@@ -624,6 +624,17 @@ def assess_quality(
     # The raw inventory is an internal/diagnostic artifact. The Agent-facing
     # assessment only needs the derived correspondence and risk contracts.
     payload.pop("test_inventory", None)
+    issue = payload["context"]["issue_context"]
+    alignment_enabled = bool(issue.get("requirement_alignment_enabled", False))
+    payload["default_report"] = {
+        "mode": "requirement-aligned" if alignment_enabled else "technical-only",
+        "requirement_alignment_enabled": alignment_enabled,
+        "requirement_summary": issue.get("default_report_summary"),
+        "show_issue_candidate_diagnostics": False,
+        "show_acceptance_alignment": alignment_enabled,
+        "show_requirement_traced_guidance": alignment_enabled,
+        "diagnostics_available_in_raw_json": True,
+    }
     return payload
 
 

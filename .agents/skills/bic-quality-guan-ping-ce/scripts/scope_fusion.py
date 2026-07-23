@@ -140,13 +140,18 @@ def build_technical_scope(
 
 def build_requirement_scope(issue: dict[str, Any]) -> dict[str, Any]:
     """Index requirement provenance without turning it into a technical filter."""
-    acceptance_items = issue.get("acceptance_items", [])
+    alignment_enabled = bool(issue.get("requirement_alignment_enabled", False))
+    acceptance_items = issue.get("acceptance_items", []) if alignment_enabled else []
     return {
         "schema_version": 1,
+        "alignment_enabled": alignment_enabled,
+        "alignment_mode": issue.get("requirement_alignment_mode", "technical-only"),
+        "alignment_origin": issue.get("requirement_alignment_origin"),
+        "alignment_reason": issue.get("requirement_alignment_reason", "no-authoritative-issue"),
         "association_status": issue.get("association_status") or issue.get("association") or "unresolved",
-        "resolved": bool(issue.get("resolved")),
-        "acceptance_items_eligible": bool(issue.get("acceptance_items_eligible", False)),
-        "issue_reference": issue.get("reference"),
+        "resolved": bool(issue.get("resolved")) if alignment_enabled else False,
+        "acceptance_items_eligible": alignment_enabled,
+        "issue_reference": issue.get("reference") if alignment_enabled else None,
         "acceptance_item_ids": [
             f"acceptance:{_digest(str(item.get('text') or ''))}"
             for item in acceptance_items

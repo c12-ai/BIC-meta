@@ -26,10 +26,12 @@ Do:
   schema. Never alter a project environment or repository lockfile.
 - After locating affected repositories, scan their open Issues and analyze them
   against changed modules and objects. Treat explicit/current-PR links as
-  authoritative, keep commit/branch references as search hints that still need
-  semantic confirmation, and accept an explicit Issue as an override. Keep an
-  ordinary keyword/module match as a thematic candidate; it is not the change's
-  requirement source and its acceptance items are not risk inputs.
+  authoritative, keep commit/branch references as search hints only, and accept
+  an explicit Issue as an override. Enable requirement alignment only for an
+  explicit Issue or one unique linked/closing Issue from an auto-detected current
+  PR. Keep an ordinary keyword/module match as a diagnostic thematic candidate;
+  it is not the change's requirement source, its acceptance items are not risk
+  inputs, and it stays out of the default brief.
 - Identify the changed repository for every file, map its module when supported,
   and preserve unmapped files without inventing semantics.
 - Explain which existing tests directly, indirectly, or possibly correspond to
@@ -117,9 +119,10 @@ If the user asks to execute tests, state that this skill only provides read-only
    - **1C. Discover and shortlist Issues.** Start only from repositories fixed by
      1A with `change_count > 0`. A unique current-PR linked/closing Issue may use
      the authoritative fast path only when exactly one affected GitHub repository
-     exists. With multiple affected repositories, scan every repository; keep a
-     current-PR Issue as a repository-local candidate, but do not use it to
-     resolve workspace Issue alignment or suppress another repository's scan.
+     exists. With multiple affected repositories, scan every repository, then
+     use one unique current-PR linked/closing Issue as an additive authoritative
+     requirement overlay. It must not suppress another repository's scan or
+     narrow the technical scope. Multiple authoritative Issues remain ambiguous.
      Treat commit and branch references as protected shortlist hints that require
      semantic agreement with the Diff. Repository membership or keyword overlap
      alone cannot select an Issue. Classify Issue evidence as:
@@ -157,12 +160,16 @@ If the user asks to execute tests, state that this skill only provides read-only
    - `references/test-analysis-rules.md` for changed-object and test correspondence rules.
    - `references/risk-model.md` for Issue alignment and pre-test risk rules.
    - `references/deliverables.md` for output format.
-3. From the frozen assessment snapshot, report affected-repository Issue scan
-   status and counts, shortlist/exclusion counts and reasons, hydration
-   attempted/succeeded/failed counts, relevant candidates and their Diff/module
-   correspondence, selection reason, selected Issue metadata and acceptance
-   items, then comparison metadata (`base_ref`, `merge_base`, change sources,
-   and warnings) before module mapping. Do not recollect Issue metadata.
+3. From the frozen assessment snapshot, read
+   `issue_context.requirement_alignment_enabled` as the only default-report
+   gate. When true, report the authoritative Issue, provenance, goal, acceptance
+   items, and their static comparison. When false, print exactly one concise
+   statement that no authoritative Issue was identified and the assessment is
+   technical-only; omit thematic candidates, shortlist/hydration counts, empty
+   acceptance fields, Issue warnings, and requirement tables from the default
+   brief. Do not recollect Issue metadata. Preserve all scan and candidate
+   details in raw JSON and expose them only when the user explicitly asks to
+   diagnose Issue matching.
 4. Use repository identity from Git discovery. Report `affected_repositories`,
    group module evidence under `modules_by_repository`, and expose
    `direct_cross_repository` only as the legacy factual flag that two or more
@@ -215,11 +222,13 @@ If the user asks to execute tests, state that this skill only provides read-only
    missing-test items; risk levels belong only in the Risk Matrix.
 7. Treat `risk_assessment.technical_risk` from the frozen assessment snapshot as
    the deterministic risk floor; do not run the wrapper again. Keep
-   `requirement_alignment` separate. Missing, thematic, or ambiguous Issue
-   context makes requirement alignment `unassessed` and assessment completeness
-   partial, but it cannot erase or lower technical risk. Run requirement
-   verification as a separate pass after technical review, only when
-   `acceptance_items_eligible` is true. For every eligible acceptance item,
+   `requirement_alignment` separate. Missing, thematic, reference-hint, or
+   ambiguous Issue context sets requirement alignment to `not-enabled`; this is
+   a complete technical-only pre-test assessment, not a partial requirement
+   assessment. It cannot erase or lower technical risk. Run requirement
+   verification as a separate pass after technical review only when
+   `requirement_alignment_enabled` and `acceptance_items_eligible` are both true.
+   For every eligible acceptance item,
    report these independent axes instead of collapsing them into one label:
    - `scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`;
    - `implementation`: `static-evidence-found`, `static-evidence-missing`, or
@@ -236,10 +245,9 @@ If the user asks to execute tests, state that this skill only provides read-only
    evidence, use `cannot-determine`/`cannot-verify` rather than guessing. An ordinary
    `thematic-candidate`, even when unique and semantically similar, remains
    background context, receives no acceptance-item comparison, and keeps
-   workspace Issue alignment `unassessed`. A
-   `reference-hint` may become `strong-related` only when its
-   preserved commit/branch/PR provenance and hydrated body both agree with
-   concrete changed objects; then state the promotion evidence explicitly.
+   workspace requirement alignment `not-enabled`. A `reference-hint` remains
+   diagnostic context and never enables requirement alignment automatically;
+   the user can explicitly supply that Issue on a later run.
    Never perform a second Issue body lookup. After item review, report
    `narrow-issue-broad-diff` when concrete technical objects have no mapped
    acceptance item, `broad-issue-narrow-diff` when an in-scope item has
@@ -277,6 +285,7 @@ shared chain or per-stream risk. State the selected base once. State once at the
 end that tests were not executed and static correspondence does not prove
 pass/fail. The Phase 2 manifest is a handoff contract, not a recommendation or
 execution result. Do not add a next-step recommendation field beyond the
-missing-test guidance defined by the template. If Issue context is absent or
-unresolved, state that workspace Issue alignment is unassessed, technical risk
-remains the known pre-test risk, and assessment completeness is partial.
+missing-test guidance defined by the template. If no authoritative Issue is
+available, use the technical-only report mode: show the one-line requirement
+alignment notice, preserve the known technical risk, and omit Issue candidate
+diagnostics and requirement-facing rows from the default brief.

@@ -510,18 +510,18 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertLess(public_template.index("核心结论"), public_template.index("变更集"))
         self.assertIn("影响范围：", public_template)
         self.assertIn("多仓事实：", public_template)
-        self.assertIn("Issue 对齐：", public_template)
+        self.assertIn("需求对齐：", public_template)
         self.assertIn("测试判断：", public_template)
         self.assertIn("风险结论：", public_template)
         self.assertIn("是否多仓发生改动：", public_template)
         self.assertIn("模块映射", public_template)
-        self.assertIn("需求与问题单", public_template)
-        self.assertIn("扫描状态：", public_template)
-        self.assertIn("受影响仓库 Issue 扫描：", public_template)
-        self.assertIn("候选初筛：", public_template)
-        self.assertIn("初筛排除：", public_template)
-        self.assertIn("正文读取：", public_template)
-        self.assertIn("候选对应分析：", public_template)
+        self.assertIn("需求对齐（仅当 requirement_alignment_enabled=true 时出现）", public_template)
+        self.assertIn("未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。", public_template)
+        for diagnostic_field in (
+            "扫描状态：", "受影响仓库 Issue 扫描：", "候选初筛：",
+            "初筛排除：", "正文读取：", "候选对应分析：",
+        ):
+            self.assertNotIn(diagnostic_field, public_template)
         self.assertIn("测试对应性", public_template)
         self.assertIn("直接相关测试：", public_template)
         self.assertIn("间接相关测试：", public_template)
@@ -661,7 +661,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             skill,
         )
         self.assertIn("`thematic-candidate`, even when unique", skill)
-        self.assertIn("`acceptance_items_eligible` is true", skill)
+        self.assertIn("`requirement_alignment_enabled` and `acceptance_items_eligible` are both true", skill)
         self.assertNotIn("--source-pr", skill)
         self.assertIn("issue_cannot_reduce_technical_scope", step_one)
         self.assertIn("`technical_scope`", step_one)
@@ -710,16 +710,24 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         )
         self.assertEqual(
             without_issue["risk_assessment"]["requirement_alignment"],
-            "unassessed",
+            "not-enabled",
         )
         self.assertEqual(
             without_issue["risk_assessment"]["assessment_completeness"],
             {
-                "overall": "partial",
+                "overall": "complete-for-technical-pretest",
                 "technical_scope": "assessed",
-                "requirement_scope": "unassessed",
+                "requirement_scope": "not-enabled",
                 "test_execution": "not-run",
             },
+        )
+        self.assertFalse(without_issue["context"]["issue_context"]["requirement_alignment_enabled"])
+        self.assertEqual(without_issue["requirement_scope"]["alignment_mode"], "technical-only")
+        self.assertEqual(without_issue["default_report"]["mode"], "technical-only")
+        self.assertFalse(without_issue["default_report"]["show_issue_candidate_diagnostics"])
+        self.assertNotIn(
+            "issue-clarity",
+            {item["dimension"] for item in without_issue["risk_assessment"]["risk_matrix"]},
         )
 
         assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
@@ -732,6 +740,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(issue["repository"], "c12-ai/BIC-meta")
         self.assertEqual(issue["item_type"], "issue")
         self.assertEqual(len(issue["acceptance_items"]), 2)
+        self.assertTrue(issue["requirement_alignment_enabled"])
+        self.assertEqual(issue["requirement_alignment_origin"], "explicit")
+        self.assertEqual(assessed["default_report"]["mode"], "requirement-aligned")
+        self.assertTrue(assessed["default_report"]["show_acceptance_alignment"])
         self.assertEqual(risk["assessment_stage"], "pre-test")
         self.assertEqual(risk["overall_risk"], "high")
         self.assertEqual(risk["technical_risk"], "high")
@@ -996,6 +1008,51 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(shortlist["candidates"][0]["association"], "thematic-candidate")
         self.assertFalse(shortlist["candidates"][0]["acceptance_items_eligible"])
 
+    def test_issue_shortlist_ignores_generic_words_and_repository_module_names(self) -> None:
+        repository = "c12-ai/BIC-agent-portal"
+        issues = [
+            {
+                "number": 15,
+                "title": "Feature: Assistant Message Feedback Controls",
+                "url": f"https://github.com/{repository}/issues/15",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2026-07-20T00:00:00Z",
+            },
+            {
+                "number": 16,
+                "title": "Portal state and target support for the current system",
+                "url": f"https://github.com/{repository}/issues/16",
+                "state": "OPEN",
+                "labels": [],
+                "updatedAt": "2026-07-22T00:00:00Z",
+            },
+        ]
+        snapshot = {
+            "affected_repositories": [repository],
+            "strong_candidates": [],
+            "repository_candidates": ISSUE_MODULE.repository_issue_candidates(issues, repository),
+            "repository_issue_counts": {repository: len(issues)},
+            "warnings": [],
+        }
+
+        shortlist = ISSUE_MODULE.shortlist_issue_candidates(
+            snapshot,
+            {"BIC-agent-portal": [{"module_scope": "portal/ui", "name": "Portal UI"}]},
+            [{
+                "repo": "BIC-agent-portal",
+                "path": "BIC-agent-portal/src/pages/chat/Message.tsx",
+                "symbols": [{"name": "MessageFeedbackControls", "kind": "component"}],
+            }],
+        )
+
+        self.assertEqual(
+            [item["reference"] for item in shortlist["candidates"]],
+            [f"{repository}#15"],
+        )
+        self.assertEqual(shortlist["excluded_count"], 1)
+        self.assertEqual(shortlist["exclusion_reasons"], {"no-module-or-object-signal": 1})
+
     def test_issue_body_references_are_one_hop_context_not_authority(self) -> None:
         references = ISSUE_MODULE.mentioned_reference_candidates(
             (
@@ -1170,18 +1227,18 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         self.assertFalse(scanned["resolved"])
         self.assertEqual(scanned["discovery_mode"], "affected-repository-scan")
-        self.assertEqual(scanned["analysis_status"], "semantic-review-required")
+        self.assertEqual(scanned["analysis_status"], "no-candidates")
         self.assertEqual(scanned["repository_issue_counts"], {"c12-ai/BIC-meta": 2})
+        self.assertEqual(scanned["candidates"], [])
+        self.assertEqual(resolve_mock.call_count, 0)
+        self.assertEqual(scanned["issue_scan"]["shortlisted_count"], 0)
+        self.assertEqual(scanned["issue_scan"]["fallback_selected_count"], 0)
         self.assertEqual(
-            [item["reference"] for item in scanned["candidates"]],
-            ["c12-ai/BIC-meta#150"],
+            scanned["issue_scan"]["unmatched_repositories"],
+            ["c12-ai/BIC-meta"],
         )
-        self.assertEqual(scanned["candidates"][0]["labels"], ["quality"])
-        self.assertEqual(resolve_mock.call_count, 1)
-        self.assertEqual(scanned["issue_scan"]["shortlisted_count"], 1)
-        self.assertEqual(scanned["issue_scan"]["fallback_selected_count"], 1)
-        self.assertEqual(scanned["issue_scan"]["hydration_attempted_count"], 1)
-        self.assertEqual(scanned["issue_scan"]["hydration_succeeded_count"], 1)
+        self.assertEqual(scanned["issue_scan"]["hydration_attempted_count"], 0)
+        self.assertEqual(scanned["issue_scan"]["hydration_succeeded_count"], 0)
 
         linked_pr = {
             "url": "https://github.com/c12-ai/BIC-meta/pull/7",
@@ -1435,8 +1492,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             result = ISSUE_MODULE.auto_discover_issue(self.root, repositories)
 
         self.assertEqual(list_mock.call_count, 2)
-        self.assertFalse(result["resolved"])
-        self.assertEqual(result["analysis_status"], "semantic-review-required")
+        self.assertTrue(result["resolved"])
+        self.assertEqual(result["analysis_status"], "strong-link-selected")
+        self.assertTrue(result["requirement_alignment_enabled"])
+        self.assertEqual(result["requirement_alignment_origin"], "current-pr")
+        self.assertEqual(result["reference"], reference)
         self.assertEqual(result["issue_scan"]["scan_status"], "succeeded")
         self.assertFalse(result["issue_scan"]["authoritative_fast_path"])
         self.assertFalse(result["issue_scan"]["authoritative_scope_complete"])
@@ -1710,14 +1770,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             "warnings": [],
         }
         shortlist = ISSUE_MODULE.shortlist_issue_candidates(snapshot)
-        self.assertEqual(shortlist["shortlisted_count"], 2)
-        self.assertEqual(
-            {item["repository"] for item in shortlist["candidates"]},
-            set(repositories),
-        )
-        self.assertEqual(set(shortlist["shortlisted_by_repository"]), set(repositories))
-        self.assertEqual(sum(shortlist["excluded_by_repository"].values()), 14)
-        self.assertEqual(shortlist["fallback_selected_count"], 2)
+        self.assertEqual(shortlist["shortlisted_count"], 0)
+        self.assertEqual(shortlist["candidates"], [])
+        self.assertEqual(shortlist["shortlisted_by_repository"], {})
+        self.assertEqual(shortlist["unmatched_repositories"], repositories)
+        self.assertEqual(sum(shortlist["excluded_by_repository"].values()), 16)
+        self.assertEqual(shortlist["fallback_selected_count"], 0)
 
         strong_snapshot = {
             "affected_repositories": ["c12-ai/repo-a"],
@@ -2354,6 +2412,85 @@ class BrowserEvidenceAndManifestTest(unittest.TestCase):
             self.assertEqual(symbols[0]["route_method"], "POST")
             self.assertEqual(symbols[0]["route_path"], "/experiments")
 
+    def test_fastapi_router_prefix_is_included_in_changed_route_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root / "app/api/routes.py", """from fastapi import APIRouter
+
+router = APIRouter(prefix='/sessions')
+
+@router.delete('/{session_id}/feedback/{target_event_id}', status_code=204)
+async def cancel_feedback(session_id: str, target_event_id: str):
+    return None
+""")
+            result = extract_changed_symbols(root, [{
+                "repo": "BIC-meta",
+                "repo_relative_path": ".",
+                "path": "app/api/routes.py",
+                "change_types": ["untracked"],
+                "diff_hunks": [{
+                    "old_start": 0, "old_end": -1, "old_count": 0,
+                    "new_start": 5, "new_end": 6, "new_count": 2,
+                }],
+            }])
+
+            route = result[0]["symbols"][0]
+            self.assertEqual(route["kind"], "route")
+            self.assertEqual(route["route_method"], "DELETE")
+            self.assertEqual(
+                route["route_path"],
+                "/sessions/{session_id}/feedback/{target_event_id}",
+            )
+
+    def test_modified_symbol_uses_current_declaration_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            init_repo(root)
+            source = root / "src/Message.tsx"
+            write(source, """export function Message() {
+  return <AssistantMessage />
+}
+
+const AssistantMessage = () => <div>old</div>
+""")
+            git(root, "add", ".")
+            git(root, "commit", "-m", "base")
+            base = git(root, "rev-parse", "HEAD")
+            write(source, """const inserted = true
+
+export function Message() {
+  if (inserted) return <AssistantMessage />
+  return null
+}
+
+const AssistantMessage = () => <div>new</div>
+""")
+            hunks, warning = canonical_hunks(
+                root, base, "src/Message.tsx", None, untracked=False,
+            )
+            self.assertIsNone(warning)
+            result = extract_changed_symbols(root, [{
+                "repo": "BIC-meta",
+                "repo_relative_path": ".",
+                "path": "src/Message.tsx",
+                "change_types": ["modified"],
+                "comparison_base": base,
+                "diff_hunks": hunks,
+            }])
+
+            message = next(
+                symbol for symbol in result[0]["symbols"]
+                if symbol["qualified_name"] == "Message"
+            )
+            self.assertEqual(message["start_line"], message["new_start_line"])
+            self.assertEqual(message["end_line"], message["new_end_line"])
+            declaration = "\n".join(
+                source.read_text(encoding="utf-8").splitlines()[
+                    message["start_line"] - 1:message["end_line"]
+                ]
+            )
+            self.assertIn("AssistantMessage", declaration)
+
     def test_deleted_and_pure_renamed_sources_use_base_side_declarations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2437,6 +2574,108 @@ test('observes network', async ({ page, context }) => {
             self.assertIn("screenshot", screenshot_facts["browser_observations"])
             self.assertEqual(cdp_facts["browser_framework"], "cdp")
             self.assertTrue(cdp_facts["uses_cdp"])
+
+    def test_vitest_map_get_is_not_misclassified_as_playwright(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            test_file = Path(directory) / "presentation.test.ts"
+            write(test_file, """import { describe, expect, it } from 'vitest'
+import { derivePresentations } from './presentation'
+
+describe('presentation', () => {
+  it('reads the selected presentation', () => {
+    const presentations = derivePresentations()
+    expect(presentations.get('turn-1')).toBeDefined()
+  })
+})
+""")
+
+            facts = TEST_ASSETS_MODULE.parse_test_file(test_file)
+            self.assertIsNone(facts["browser_framework"])
+            self.assertEqual(TEST_ASSETS_MODULE.javascript_framework(facts), "vitest")
+
+    def test_rendered_component_assertions_reach_changed_nested_components(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            source = workspace / "portal/src/pages/Message.tsx"
+            test_file = workspace / "portal/src/pages/Message.feedback.test.tsx"
+            write(source, """export function Message() {
+  return <AssistantMessage />
+  function AssistantMessage() {
+    return <MessageFeedbackControls />
+  }
+}
+function MessageFeedbackControls() {
+  return <button>Like</button>
+}
+""")
+            write(test_file, """import { render, screen } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { Message } from './Message'
+
+function renderMessage() {
+  return render(<Message />)
+}
+
+describe('feedback', () => {
+  it('shows the feedback control', () => {
+    renderMessage()
+    expect(screen.getByText('Like')).toBeTruthy()
+  })
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(test_file)
+            scope = {
+                "changed_files": [{
+                    "repo": "portal", "path": "portal/src/pages/Message.tsx",
+                    "change_types": ["modified"],
+                }],
+                "file_mappings": [{
+                    "repo": "portal", "path": "portal/src/pages/Message.tsx",
+                    "mapping": {"module_scope": "portal/ui"},
+                }],
+            }
+            changed_symbols = [{
+                "repo": "portal",
+                "path": "portal/src/pages/Message.tsx",
+                "change_types": ["modified"],
+                "symbols": [
+                    {
+                        "name": "Message", "kind": "component",
+                        "start_line": 1, "end_line": 6,
+                    },
+                    {
+                        "name": "AssistantMessage", "kind": "component",
+                        "start_line": 3, "end_line": 5,
+                    },
+                    {
+                        "name": "MessageFeedbackControls", "kind": "component",
+                        "start_line": 7, "end_line": 9,
+                    },
+                ],
+            }]
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                scope,
+                changed_symbols,
+                [{
+                    "repo": "portal",
+                    "path": "portal/src/pages/Message.feedback.test.tsx",
+                    "asset_kind": "test-file",
+                    "framework": "vitest",
+                    "test_facts": facts,
+                }],
+                [],
+            )
+
+            module = correspondence["modules"][0]
+            relation = module["directly_related_tests"][0]
+            self.assertEqual(
+                relation["assertion_linked_symbols"],
+                ["AssistantMessage", "Message", "MessageFeedbackControls"],
+            )
+            self.assertFalse(module["add_tests"])
+            self.assertFalse(module["strengthen_tests"])
+            self.assertEqual(len(module["no_obvious_test_gaps"]), 3)
 
     def test_browser_machine_checks_are_target_linked_and_case_ids_do_not_collide(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -2966,6 +3205,122 @@ test('creates experiment', async ({ request }) => {
             self.assertEqual(possible["browser_evidence"]["framework"], "playwright")
             self.assertTrue(possible["browser_evidence"]["has_machine_check"])
             self.assertTrue(any("Strengthen tests for route create_experiment" in item for item in module["strengthen_tests"]))
+
+    def test_dynamic_frontend_url_template_bridges_prefixed_backend_route(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# route fixture\n")
+            write(workspace / "portal/src/lib/agent-client.ts", """const earlier = `${translate('feedback.label')}: ${value}`
+// The caller's previous state must not confuse literal scanning.
+export type MessageFeedbackRating = 'up' | 'down'
+
+export async function cancelMessageFeedback(sessionId: string, targetEventId: string) {
+  return fetch(
+    `${env.API_BASE_URL}/sessions/${sessionId}/feedback/${encodeURIComponent(targetEventId)}`,
+    { method: 'DELETE' },
+  )
+}
+""")
+            write(workspace / "portal/src/pages/Chat.tsx", """import { cancelMessageFeedback } from '../lib/agent-client'
+export function Chat() { return <button onClick={() => cancelMessageFeedback('s', 'e')}>Cancel</button> }
+""")
+            write(workspace / "portal/src/pages/Unrelated.tsx", """import { submitMessageFeedback } from '../lib/agent-client'
+export function Unrelated() { return <div>Dashboard</div> }
+""")
+            write(workspace / "portal/src/router.tsx", """import { Chat } from './pages/Chat'
+export const routes = <Route path="/" element={<Chat />} />
+""")
+            spec = workspace / "portal/tests/e2e/feedback.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test('opens feedback page', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible()
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+            unrelated_spec = workspace / "portal/tests/e2e/unrelated.spec.ts"
+            write(unrelated_spec, """import { test, expect } from '@playwright/test'
+test('opens dashboard', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.getByRole('heading')).toBeVisible()
+})
+""")
+            unrelated_facts = TEST_ASSETS_MODULE.parse_test_file(unrelated_spec)
+            scope = {
+                "changed_files": [
+                    {
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "change_types": ["modified"],
+                    },
+                    {
+                        "repo": "portal", "path": "portal/src/lib/agent-client.ts",
+                        "change_types": ["modified"],
+                    },
+                ],
+                "file_mappings": [
+                    {
+                        "repo": "backend", "path": "backend/app/routes.py",
+                        "mapping": {"module_scope": "agent/api"},
+                    },
+                    {
+                        "repo": "portal", "path": "portal/src/lib/agent-client.ts",
+                        "mapping": {"module_scope": "portal/api-client"},
+                    },
+                ],
+            }
+            symbols = [
+                {
+                    "repo": "backend", "path": "backend/app/routes.py",
+                    "symbols": [{
+                        "name": "cancel_feedback", "kind": "route",
+                        "route_method": "DELETE",
+                        "route_path": "/sessions/{session_id}/feedback/{target_event_id}",
+                    }],
+                },
+                {
+                    "repo": "portal", "path": "portal/src/lib/agent-client.ts",
+                    "symbols": [{
+                        "name": "cancelMessageFeedback", "kind": "api-client",
+                    }],
+                },
+            ]
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                scope,
+                symbols,
+                [{
+                    "repo": "portal", "path": "portal/tests/e2e/feedback.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": facts,
+                }, {
+                    "repo": "portal", "path": "portal/tests/e2e/unrelated.spec.ts",
+                    "asset_kind": "test-file", "framework": "playwright",
+                    "test_facts": unrelated_facts,
+                }],
+                [],
+            )
+
+            graph = correspondence["user_journey_graph"]
+            self.assertTrue(graph["paths"])
+            self.assertIn(
+                "route-client-literal",
+                {edge["relation"] for edge in graph["edges"]},
+            )
+            route_paths = [
+                path for path in graph["paths"]
+                if "cancel_feedback" in path["anchor"]
+            ]
+            self.assertTrue(route_paths)
+            self.assertTrue(any(path["machine_check"] for path in route_paths))
+            self.assertFalse(any(
+                "unrelated.spec.ts" in path["scenario"]
+                for path in route_paths
+            ))
+            self.assertFalse(any(
+                edge["to"].endswith("portal/src/pages/Unrelated.tsx")
+                for edge in graph["edges"]
+                if edge["from"].endswith("portal/src/lib/agent-client.ts")
+            ))
 
     def test_bounded_user_journey_graph_traces_route_and_shared_contract_to_browser(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
