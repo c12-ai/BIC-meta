@@ -11,6 +11,22 @@ preview is active for **all repos in the c12-ai org** (stacks API `GET
 
 ## Decision rule
 
+0. **Never attach a PR to an existing stack by default** (product-owner ruling
+   2026-07-23, incident lab#162). In a repo with the Stacked PRs preview enabled,
+   `gh pr create` without an explicit base appends the new PR to the top of any
+   open stack AND rebases the remote branch onto that stack — the base can no
+   longer be changed afterwards, and a stack-semantics merge atomically merges
+   every PR below. Therefore:
+   - Always pass `--base main` explicitly when creating a plain (non-stack) PR.
+   - After creating or recreating any PR, verify `--json commits,files` counts
+     match expectations before reporting it ready.
+   - If a PR was accidentally attached to a stack: close it, then rebuild from
+     the local clean commit on a **fresh branch name** (the same-named remote
+     branch may already be rebase-contaminated — never reuse it), and never
+     touch someone else's stack (`gh stack unstack` tears down the whole stack).
+   Joining another author's stack must be an explicit, author-approved decision,
+   never a default.
+
 1. **One topic/issue → ≥2 dependent PRs in the SAME repo** → create them as a
    **stack** (`gh stack`), not as independent PRs. This is the default, not an
    option to offer.
