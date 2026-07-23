@@ -200,3 +200,17 @@ def fixture_manifest(workspace: Path) -> dict[str, object]:
         ],
         "has_skill": (workspace / ".agents/skills/bic-quality-guan-ping-ce/SKILL.md").is_file(),
     }
+
+
+def workspace_state(workspace: Path) -> list[dict[str, str]]:
+    """Capture Git state for every fixture repository before/after an Agent run."""
+    repositories = [workspace, workspace / "BIC-agent-service"]
+    return [
+        {
+            "repository": "." if repo == workspace else repo.name,
+            "head": _git(repo, "rev-parse", "HEAD"),
+            "branch": _git(repo, "branch", "--show-current"),
+            "status": _git(repo, "status", "--porcelain=v1", "--untracked-files=all"),
+        }
+        for repo in repositories
+    ]

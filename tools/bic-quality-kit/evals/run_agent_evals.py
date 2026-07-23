@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fixtures import build_fixture, fixture_manifest
+from fixtures import build_fixture, fixture_manifest, workspace_state
 from grade_agent_eval import grade_results, render_markdown
 
 
@@ -63,12 +63,13 @@ def run_one(
         workspace = Path(temp) / "BIC-meta"
         env_overrides = build_fixture(workspace, case["fixture"], mode, skill_source)
         manifest = fixture_manifest(workspace)
+        initial_workspace_state = workspace_state(workspace)
         command = [
             "codex", "exec",
             "--ephemeral",
             "--ignore-user-config",
             "--ignore-rules",
-            "--sandbox", "read-only",
+            "--sandbox", "workspace-write",
             "--json",
             "--cd", str(workspace),
             "--output-last-message", str(run_dir / "final.md"),
@@ -81,6 +82,7 @@ def run_one(
             "mode": mode,
             "repetition": repetition,
             "fixture_manifest": manifest,
+            "workspace_state_before": initial_workspace_state,
             "forbidden_commands": forbidden_commands,
             "command": command,
             "started_at": datetime.now(timezone.utc).isoformat(),
@@ -116,6 +118,7 @@ def run_one(
                 if not (run_dir / "final.md").exists():
                     (run_dir / "final.md").write_text("", encoding="utf-8")
             metadata["duration_seconds"] = round(time.monotonic() - started, 3)
+        metadata["workspace_state_after"] = workspace_state(workspace)
         (run_dir / "run.json").write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )

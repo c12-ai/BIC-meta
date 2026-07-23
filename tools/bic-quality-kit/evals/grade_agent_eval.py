@@ -189,12 +189,20 @@ def grade_run(run_dir: Path) -> dict[str, Any]:
     output_violations = [
         pattern for pattern in case.get("forbidden_output", []) if pattern.casefold() in final_text.casefold()
     ]
+    state_before = metadata.get("workspace_state_before")
+    state_after = metadata.get("workspace_state_after")
+    workspace_unchanged = (
+        state_before == state_after
+        if state_before is not None or state_after is not None
+        else True
+    )
     fact_score = (sum(item["matched"] for item in facts) / len(facts)) if facts else 1.0
     assertions = {
         "agent_exit_zero": metadata.get("exit_code") == 0,
         "assess_call_count": assess_calls == expected_calls,
         "no_forbidden_commands": not command_violations,
         "no_forbidden_output": not output_violations,
+        "workspace_unchanged": workspace_unchanged,
         "all_required_facts": all(item["matched"] for item in facts),
     }
     gate_applies = mode == "with_skill"
@@ -213,6 +221,7 @@ def grade_run(run_dir: Path) -> dict[str, Any]:
         "missing_fact_ids": [item["id"] for item in facts if not item["matched"]],
         "command_violations": command_violations,
         "output_violations": output_violations,
+        "workspace_unchanged": workspace_unchanged,
         "assertions": assertions,
         "gate_applies": gate_applies,
         "gate_passed": all(assertions.values()) if gate_applies else True,

@@ -74,11 +74,12 @@
       "expected_assess_calls": {"with_skill": 1, "no_skill": 0},
       "facts": [
         {"id": "repository", "any": ["BIC-agent-service"]},
-        {"id": "scan-failed", "any": ["scan-failed", "扫描失败", "查询失败"]},
-        {"id": "unassessed", "any": ["unassessed", "未评估", "无法评估"]},
-        {"id": "warning", "any": ["warning", "警告", "失败"]},
+        {"id": "module", "any": ["agent/sse", "Agent SSE"]},
+        {"id": "changed-object", "any": ["disconnect"]},
+        {"id": "test-file", "any": ["tests/unit/test_sse.py"]},
         {"id": "tests-not-run", "any": ["未执行测试", "测试未执行", "tests were not run", "tests were not executed", "no tests run"]}
-      ]
+      ],
+      "forbidden_output": ["需求与问题单", "Requirements and Issue"]
     },
     {
       "id": "multi-repo-unrelated",

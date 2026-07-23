@@ -35,6 +35,12 @@ class AgentEvalHarnessTest(unittest.TestCase):
             self.assertEqual(set(case["modes"]), set(case["expected_assess_calls"]))
             if "no_skill" in case["modes"]:
                 self.assertIn("with_skill", case["modes"])
+        scan_failed = next(case for case in config["cases"] if case["id"] == "issue-scan-failed")
+        self.assertEqual(
+            {fact["id"] for fact in scan_failed["facts"]},
+            {"repository", "module", "changed-object", "test-file", "tests-not-run"},
+        )
+        self.assertIn("需求与问题单", scan_failed["forbidden_output"])
 
     def test_fixture_only_installs_skill_in_with_skill_mode(self) -> None:
         skill_source = KIT_DIR / "skill/bic-quality-guan-ping-ce"
@@ -61,6 +67,25 @@ class AgentEvalHarnessTest(unittest.TestCase):
                     "with_skill",
                     missing_skill,
                 )
+
+    def test_fixture_workspace_state_detects_business_repository_mutation(self) -> None:
+        skill_source = KIT_DIR / "skill/bic-quality-guan-ping-ce"
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp) / "BIC-meta"
+            FIXTURES.build_fixture(
+                workspace,
+                "resolved_issue",
+                "with_skill",
+                skill_source,
+            )
+            before = FIXTURES.workspace_state(workspace)
+            source = workspace / "BIC-agent-service/app/api/routers/sse.py"
+            source.write_text(
+                source.read_text(encoding="utf-8") + "\n# mutation\n",
+                encoding="utf-8",
+            )
+            after = FIXTURES.workspace_state(workspace)
+        self.assertNotEqual(before, after)
 
     def test_grader_deduplicates_command_events_and_gates_only_with_skill(self) -> None:
         case = {
@@ -98,7 +123,42 @@ class AgentEvalHarnessTest(unittest.TestCase):
             )
             result = GRADER.grade_run(run_dir)
             self.assertEqual(result["assess_calls"], 1)
+            self.assertTrue(result["workspace_unchanged"])
             self.assertTrue(result["gate_passed"])
+
+    def test_grader_rejects_workspace_mutation(self) -> None:
+        case = {
+            "id": "mutation",
+            "expected_assess_calls": {"with_skill": 0},
+            "facts": [],
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp)
+            (run_dir / "events.jsonl").write_text("", encoding="utf-8")
+            (run_dir / "final.md").write_text("", encoding="utf-8")
+            (run_dir / "run.json").write_text(
+                json.dumps({
+                    "case": case,
+                    "mode": "with_skill",
+                    "repetition": 1,
+                    "exit_code": 0,
+                    "duration_seconds": 1.0,
+                    "forbidden_commands": [],
+                    "workspace_state_before": [{"repository": ".", "status": ""}],
+                    "workspace_state_after": [{"repository": ".", "status": " M app.py"}],
+                }),
+                encoding="utf-8",
+            )
+            result = GRADER.grade_run(run_dir)
+        self.assertFalse(result["workspace_unchanged"])
+        self.assertFalse(result["assertions"]["workspace_unchanged"])
+        self.assertFalse(result["gate_passed"])
+
+    def test_real_agent_runner_allows_temp_writes_but_grades_workspace_state(self) -> None:
+        source = (EVAL_DIR / "run_agent_evals.py").read_text(encoding="utf-8")
+        self.assertIn('"--sandbox", "workspace-write"', source)
+        self.assertIn('"workspace_state_before"', source)
+        self.assertIn('"workspace_state_after"', source)
 
     def test_grader_does_not_count_filename_search_as_assessment(self) -> None:
         self.assertFalse(GRADER.is_assessment_invocation("find .. -name assess-risk-matrix.sh"))
