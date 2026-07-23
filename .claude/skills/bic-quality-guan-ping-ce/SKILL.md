@@ -163,14 +163,14 @@ If the user asks to execute tests, state that this skill only provides read-only
    - `references/deliverables.md` for output format.
 3. From the frozen assessment snapshot, read
    `issue_context.requirement_alignment_enabled` as the only default-report
-   gate. When true, report the authoritative Issue, provenance, goal, acceptance
-   items, and their static comparison. When false, print exactly one concise
-   statement that no authoritative Issue was identified and the assessment is
-   technical-only; omit thematic candidates, shortlist/hydration counts, empty
-   acceptance fields, Issue warnings, and requirement tables from the default
-   brief. Do not recollect Issue metadata. Preserve all scan and candidate
-   details in raw JSON and expose them only when the user explicitly asks to
-   diagnose Issue matching.
+   gate. When true, render `需求与问题单` and report the authoritative Issue,
+   provenance, goal, acceptance items, and their static comparison. When false,
+   omit that heading and the entire Issue section from the default brief; also
+   omit a requirement-alignment bullet from `核心结论`. Do not print an empty
+   section or a “not enabled” placeholder. Preserve the technical-only mode,
+   scan state, thematic candidates, shortlist/hydration details, and warnings in
+   raw JSON, and expose them only when the user explicitly asks to diagnose
+   Issue matching. Do not recollect Issue metadata.
 4. Use repository identity from Git discovery. Report `affected_repositories`,
    group module evidence under `modules_by_repository`, and expose
    `direct_cross_repository` only as the legacy factual flag that two or more
@@ -215,21 +215,45 @@ If the user asks to execute tests, state that this skill only provides read-only
    bounded `user_journey_graph` completed and partial paths; its import/literal
    edges are static evidence and always keep `clears_object_gap: false`. Browser steps
    without such a check remain correspondence only and require strengthening.
-6. Keep relation facts separate from test guidance. Report direct and safe
-   indirect relations, possible candidates, tests to add, tests to strengthen,
-   and modules with no obvious static gap. Possible candidates are search clues,
-   not proof of coverage. Generate add/strengthen guidance only for a concrete
+6. Keep relation facts separate from test guidance. Preserve every raw direct,
+   indirect, and possible relation for diagnostics and Phase 2 selection, but
+   use `test_correspondence.public_summary` for the default brief. Show only
+   `object-asserted`, `behavior-asserted`, or partial `contract-asserted`
+   evidence in the public direct view. Public indirect chains require
+   `object-asserted` or `behavior-asserted`, a concrete changed object, and an
+   import/reference reason; keep `related-only` relations diagnostic. Group
+   possible candidates by changed behavior and show at most three candidates
+   per behavior; do not print aggregate raw
+   relation counts such as “1186 indirect” or “88 possible” in the default
+   brief. Possible candidates are search clues, not proof of coverage. Generate
+   add/strengthen guidance only for a concrete
    behavior-level gap: group related changed objects in the same source file,
    name the target behavior, state `test_layer`, recommend a framework, list
    existing weak evidence, and suggest observable assertions. Do not turn a
    file-only object, `__all__`, broad module match, or possible relation into a
-   standalone “strengthen” item. Backend behavior normally maps to pytest,
+   standalone “strengthen” item. Treat an existing test as strengthen-able only
+   when its path, test name, or exact reference reason matches the changed
+   behavior; a broad one-hop class/module import remains raw relation data and
+   does not populate `existing_tests`. Backend behavior normally maps to pytest,
    frontend unit/component behavior to Vitest/React Testing Library, user
    journeys to Playwright, and protocol-level browser diagnostics to CDP.
+   A cross-repository browser recommendation must target the repository that
+   owns the reached browser scenario or frontend journey, not the backend route
+   repository. Strengthen the exact existing scenario file when one is known.
    Do not attach confidence, risk, priority, evidence-type, or
-   coverage-percentage labels to individual relations or guidance.
-7. Read `quality_evidence` from the frozen snapshot; do not run the wrapper
-   again. It is evidence-only and must not contain `technical_risk`,
+   coverage-percentage labels to individual relations or guidance. In the
+   public brief, render `action: add` items under `建议新增` and
+   `action: strengthen` items under `建议加强`; do not wrap them in a
+   `测试缺口` section.
+7. Read `quality_evidence.brief_evidence_matrix` from the frozen snapshot for
+   the public matrix; keep `quality_evidence_matrix` as diagnostic dimension
+   evidence in raw JSON. Do not run the wrapper again. The public matrix is
+   behavior/object-facing: each row states the quality focus, concrete changed
+   objects, strongest matching test case, evidence strength, what remains open,
+   and one concrete recommendation. Never borrow evidence from an unrelated
+   changed object merely because it shares the same module.
+   Do not print an Issue column when no authoritative Issue exists. The
+   assessment is evidence-only and must not contain `technical_risk`,
    `overall_risk`, `risk_floor`, or high/medium/low labels. Keep
    `requirement_alignment` separate. Missing, thematic, reference-hint, or
    ambiguous Issue context sets requirement alignment to `not-enabled`; this is
@@ -262,7 +286,7 @@ If the user asks to execute tests, state that this skill only provides read-only
    acceptance item, `broad-issue-narrow-diff` when an in-scope item has
    `static-evidence-missing`, or `cannot-determine` when the evidence does not
    support either direction. These divergence labels describe unresolved scope
-   evidence but never filter technical scope. Group missing-test guidance as
+   evidence but never filter technical scope. Group test guidance internally as
    `requirement-traced`, `technical-regression`, or `exploratory`; the effective
    guidance is their union, and existing technical guidance must remain present.
    Never infer alignment from keyword overlap alone. This matrix describes
@@ -275,7 +299,13 @@ If the user asks to execute tests, state that this skill only provides read-only
    pre-execution gates. Commands are guidance only. A future executor must
    obtain explicit authority, recompute the fingerprint, and separately
    authorize any reset, seed, migration, cleanup, or other state change.
-9. Produce one `BIC 质量简报`.
+9. Produce one `BIC 质量简报`. Preserve the public section order from
+   `references/deliverables.md`: `核心结论`, `变更集`, optional
+   `需求与问题单`, `模块映射`, `测试对应性`, `测试前质量证据矩阵`,
+   `建议新增`, `建议加强`, and `第二阶段测试执行交接（本阶段不执行）`.
+   Do not remove or rename the non-conditional information sections. Only
+   replace the former risk matrix with the behavior-facing quality evidence
+   matrix and the former test-gap block with the two recommendation sections.
 
 ## Output
 
@@ -294,7 +324,8 @@ shared chain or per-stream verdict. State the selected base once. State once at 
 end that tests were not executed and static correspondence does not prove
 pass/fail. The Phase 2 manifest is a handoff contract, not a recommendation or
 execution result. Do not add a next-step recommendation field beyond the
-missing-test guidance defined by the template. If no authoritative Issue is
-available, use the technical-only report mode: show the one-line requirement
-alignment notice and omit Issue candidate diagnostics and requirement-facing
-rows from the default brief.
+`建议新增` and `建议加强` guidance defined by the template. If no authoritative Issue is
+available, use the technical-only report mode and omit the entire Issue section,
+the requirement-alignment summary bullet, Issue candidate diagnostics, and
+requirement-facing rows from the default brief. The concise executive summary
+does not replace the detailed non-conditional sections.

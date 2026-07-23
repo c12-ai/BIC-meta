@@ -8,7 +8,7 @@ BIC 质量简报
 核心结论
 - 影响范围：<affected repositories, core modules, and change size>
 - 多仓事实：<single/multi-repository only; repository count is not business-chain evidence>
-- 需求对齐：<authoritative Issue and origin, or “未启用；本次仅评估技术范围”>
+- 需求对齐：<仅当 requirement_alignment_enabled=true 时输出 authoritative Issue and origin；false 时整行省略>
 - 测试判断：<strongest existing test evidence and the key behavior gaps>
 - 证据结论：<strongest established fact and most important open evidence; no severity label>
 
@@ -18,7 +18,8 @@ BIC 质量简报
 - 变更仓库：
 - 是否多仓发生改动：
 
-需求对齐（仅当 requirement_alignment_enabled=true 时出现）
+<以下“需求与问题单”区块仅当 requirement_alignment_enabled=true 时输出；false 时连标题一起省略>
+需求与问题单
 - 权威来源：<用户明确指定 / 当前 PR 唯一 linked-or-closing Issue>
 - 关联 Issue：
 - 目标：
@@ -28,34 +29,35 @@ BIC 质量简报
 | <one eligible item> | in-scope/adjacent/out-of-scope/cannot-determine | static-evidence-found/static-evidence-missing/cannot-verify | asserted/weak-or-disabled/missing/not-applicable/cannot-verify | <exact changed file/object/route/journey> | <exact test/assertion or explicit missing-test statement> | <static pre-test interpretation> |
 - 范围分歧：<narrow-issue-broad-diff, broad-issue-narrow-diff, bidirectional-divergence, none-observed, or cannot-determine>
 
-需求对齐（当 requirement_alignment_enabled=false 时，用这一行替代上面整个区块）
-- 未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。
-
 模块映射
 - Repo / Module：
 - 文件证据：
 
 测试对应性
-- 直接相关测试：
-- 间接相关测试：
-- 可能相关测试：
-- 对应依据：
+- 直接相关测试：<从 public_summary 逐条列：测试文件、对应行为、object-asserted/behavior-asserted/contract-asserted 状态>
+- 间接相关测试：<只列能解释且达到 object-asserted 或 behavior-asserted 的 test → source entry → changed object 链>
+- 可能相关测试：<按 changed behavior 分组，每组最多 3 个候选；逐个写候选文件和命中原因>
+- 对应依据：<AST changed object、exact import/reference、test name、assertion linkage、browser target>
 - 扫描 warning：<skipped symlink/outside-repository/sensitive candidates, if any>
 
 测试前质量证据矩阵
-| 检查面 | 发现 | Issue 依据 | Diff 依据 | 测试依据 | 未闭合证据 |
+| 质量关注点 | 本次具体改动 | 已有测试证明了什么 | 证据强度 | 还没有证明什么 | 建议 |
 |---|---|---|---|---|---|
-| <quality dimension> | <static finding> | <authoritative requirement fact or not-enabled> | <changed file/object> | <test fact or missing evidence> | <runtime/human evidence still needed> |
+| <behavior/object focus> | <exact changed route/object/path> | <specific matching test case/assertion, or none found> | object-asserted/behavior-asserted/contract-asserted/none | <specific missing assertion/runtime evidence> | <none or one concrete add/strengthen target> |
 - 决策方式：evidence-only（不输出 high/medium/low、技术风险或整体风险）
-- 需求对齐：<pending-review/insufficient-definition；技术模式下写 not-enabled>
-- 评估完整度：<technical scope, requirement scope, and test execution status>
-- 评估阶段：真正测试前（pre-test）
+- 同模块但不对应本行 changed object/behavior 的测试不得进入“已有测试证明了什么”。
 
-测试缺口
-- 需求验收测试（requirement-traced）：<仅在需求对齐启用时出现；列行为、测试层、框架、断言>
-- 技术回归测试（technical-regression）：<列 add/strengthen、目标行为、测试层、推荐框架、已有弱证据、建议断言>
-- 探索性测试（exploratory）：<列无法静态闭合的旅程或运行时行为及合适测试层>
-- 暂未发现明显缺口：
+建议新增
+| 要补什么 | 建议放在哪里 | 用什么测 | 为什么要补 | 关键断言 |
+|---|---|---|---|---|
+| <plain behavior description plus exact object> | <suggested_test_target> | <pytest/Vitest+RTL/Playwright/CDP and layer> | <why no effective assertion exists> | <observable outcomes> |
+- 无建议新增时：未发现需要新增的行为级测试。
+
+建议加强
+| 要加强什么 | 改哪个现有测试 | 当前没有证明什么 | 关键断言 |
+|---|---|---|---|
+| <plain behavior description plus exact object> | <suggested_test_target; optionally mention other relevant tests> | <disabled, skipped, assertion-free, or not target-linked> | <observable outcomes> |
+- 无建议加强时：未发现需要加强的现有测试。
 
 第二阶段测试执行交接（本阶段不执行）
 - 变更指纹：
@@ -73,6 +75,15 @@ BIC 质量简报
 Repeat module and test evidence for every affected repository/module. Keep the
 brief concise:
 
+- Preserve the public report structure. Render these non-conditional headings
+  exactly once and in this order: `核心结论`, `变更集`, `模块映射`,
+  `测试对应性`, `测试前质量证据矩阵`, `建议新增`, `建议加强`,
+  `第二阶段测试执行交接（本阶段不执行）`, then the final static-analysis
+  statement. Insert `需求与问题单` between `变更集` and `模块映射` only when
+  `requirement_alignment_enabled=true`. Do not collapse or rename the
+  non-conditional sections merely to shorten the brief. The two intentional replacements from the earlier report are:
+  `测试前风险矩阵` → `测试前质量证据矩阵`, and `测试缺口` →
+  the separate `建议新增` plus `建议加强` sections.
 - Write `核心结论` first as a three-to-five-bullet executive summary. Derive every
   statement from evidence repeated in the detailed sections; do not introduce a
   new conclusion, label, or recommendation there. Name affected repositories and
@@ -84,11 +95,16 @@ brief concise:
   assigning global counts to them.
 - Do not print `mapping_source`; it is raw diagnostic metadata. If the module is
   unmapped, write `功能模块：暂未识别` and cite the changed files.
-- Keep direct, indirect, and possible relations in their own fields. Cite the
-  concrete import, call, reference, scenario, assertion, disabled state, or
-  explicit relation that produced each conclusion.
-- Possible candidates remain visible search clues but never count as proof that
-  a changed behavior has an existing test.
+- Keep direct, indirect, and possible relations in their own fields. Render the
+  bounded `test_correspondence.public_summary`, not the raw module arrays. Cite
+  the concrete import, call, reference, scenario, assertion, disabled state, or
+  explicit relation that produced each conclusion. An indirect entry must name
+  the test, changed object, and import/reference chain; otherwise omit it from
+  the default brief while retaining it in raw JSON. Group possible candidates
+  by changed behavior, show no more than three candidates per behavior, and
+  explain each candidate's filename/scenario/token match. Do not print raw
+  aggregate relation counts. Possible candidates remain search clues and never
+  count as proof that a changed behavior has an existing test.
 - For Playwright/CDP evidence, distinguish actions and observations from active
   target-linked machine checks. A request check must consume that request's
   result; a page check must inspect the page/locator after the action; standalone
@@ -112,15 +128,18 @@ brief concise:
   skipped candidate into either positive test evidence or proof of a missing
   test. Sensitive paths and credential values must remain redacted.
 - Use `issue_context.requirement_alignment_enabled` as a hard presentation gate.
-  If false, render only “未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。”
-  Do not render thematic/reference candidates, scan budgets, shortlist or
+  If the gate is false, omit the entire `需求与问题单` section and the
+  requirement-alignment bullet in `核心结论`; do not render an empty section or
+  a “not enabled” placeholder. Do not render thematic/reference candidates, scan budgets, shortlist or
   hydration details, Issue lookup warnings, acceptance placeholders, divergence,
   or requirement-traced guidance in the default brief. Those fields remain in
   raw JSON for an explicitly requested Issue-matching diagnostic.
-- Start `测试前质量证据矩阵` with the evidence-only rows from
-  `assess-risk-matrix.sh`. Add one Issue-alignment row per eligible, in-scope
-  acceptance item using semantic reading of Issue, Diff, and tests. Requirement
-  review is a separate pass after technical review. For each item, report
+- Render `测试前质量证据矩阵` from
+  `quality_evidence.brief_evidence_matrix`, using the four behavior-facing
+  columns in the template. Keep the generic diagnostic dimension rows in raw
+  JSON. Add requirement comparison only inside `需求与问题单`, not as an Issue
+  column in the technical matrix. Requirement review is a separate pass after
+  technical review. For each eligible item, report
   independent `scope`, `implementation`, and `test_status` values exactly as
   defined in `references/risk-model.md`; never replace them with one blanket
   verdict for several items. A positive implementation statement cites one
@@ -128,9 +147,10 @@ brief concise:
   test/assertion or explicitly states that no test was found. Keep adjacent and
   out-of-scope items outside the matrix. Report missing evidence explicitly;
   never translate it into a severity label.
-- Use `not-enabled` for requirement alignment when there is no authoritative
-  Issue. Omit `issue-clarity` and all requirement rows in that mode; the remaining
-  matrix is a complete technical pre-test assessment. This is not a claim about
+- Keep `not-enabled` in raw JSON for requirement alignment when there is no
+  authoritative Issue, but do not print it in the default brief. Omit
+  `issue-clarity` and all requirement rows in that mode; the remaining matrix is
+  a complete technical pre-test assessment. This is not a claim about
   executed verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
   Treat an explicit Issue override as authoritative. Auto-detect the current PR
@@ -172,13 +192,18 @@ brief concise:
   it. Preserve technical objects and recommendations that an Issue does not
   mention. If attribution is incomplete, use `cannot-determine` instead of
   treating absence as proof of out-of-scope work.
-- Group test guidance as `requirement-traced`, `technical-regression`, and
-  `exploratory`. The effective guidance is their union. A single asset may carry
-  multiple labels but is described once; Issue alignment never removes or
-  downgrades technical-regression guidance.
+- Group test guidance internally as `requirement-traced`,
+  `technical-regression`, and `exploratory`; the effective guidance is their
+  union. In the public brief, route every `action: add` item to `建议新增` and
+  every `action: strengthen` item to `建议加强`. A single asset may carry
+  multiple internal labels but is described once; Issue alignment never removes
+  or downgrades technical-regression guidance.
 - Render every add/strengthen item as an actionable behavior-level suggestion:
-  include action, target behavior, test layer, recommended framework, existing
-  weak evidence, and suggested observable assertions. Group related private
+  use plain language first, then cite the exact changed object. Include
+  `suggested_test_target`, test layer, recommended framework, concrete gap, and
+  suggested observable assertions. For strengthen items, show only existing
+  tests whose path, case name, or exact reference chain matches the behavior;
+  broad class/module imports stay out of the public suggestion. Group related private
   helpers in the same source file instead of printing one item per symbol.
   Show no more than five weak test paths in one guidance item and report the
   total/overflow count; keep the full path set in raw correspondence evidence.

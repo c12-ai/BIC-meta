@@ -110,6 +110,32 @@ when its direct/helper return value flows into an asserted expression. An
 unrelated assertion such as `target(); assert True` retains the relation but
 requires strengthening.
 
+Classify assertion evidence independently from direct/indirect reachability:
+
+- `object-asserted`: the case directly consumes the changed object's result or
+  asserted state;
+- `behavior-asserted`: the case enters through a public object, statically
+  reaches the changed helper, and its substantive result/state assertion names
+  the same behavior;
+- `contract-asserted`: the case pins only a declaration contract such as route
+  method/path/status, without exercising its downstream behavior;
+- `related-only`: an import, call chain, module relation, or assertion exists,
+  but no changed-object/behavior assertion is established.
+
+Only `object-asserted` and `behavior-asserted` close an object gap.
+`contract-asserted` remains visible evidence but generates a focused
+strengthening recommendation. `related-only` stays diagnostic and must not be
+shown as proof in the public matrix.
+
+For a large changed function/class whose diff touches only a small part of its
+line range, require the relevant case/assertion to overlap identifiers from the
+changed lines. A test of an unrelated branch in the same container does not
+close the gap.
+
+When a broad frontend store factory is selected only as the outer container of
+a changed store action, do not emit a second container-level gap after that
+exact action already has object-level evidence.
+
 ## User-journey graph
 
 Build bounded reverse-import paths from changed backend routes and shared
@@ -128,6 +154,13 @@ node list contains only nodes referenced by an edge or completed/partial path;
 the complete source scan count remains visible without serializing disconnected
 scan-only nodes.
 
+For browser guidance, keep the changed backend route as the behavior source but
+place the suggested Playwright test in the browser-owning repository. When a
+completed static path reaches an existing scenario, strengthen that exact
+scenario file. Otherwise, if a partial path reaches a frontend repository,
+create the suggested `tests/*.spec.ts` target there. Fall back to the source
+repository only when no frontend or browser repository can be identified.
+
 ## Add-test guidance
 
 Keep correspondence facts separate from the need to add tests:
@@ -140,6 +173,12 @@ Keep correspondence facts separate from the need to add tests:
 - State that no obvious static gap was found when an active direct,
   safe-one-hop, or explicitly object-mapped test contains an assertion for the
   changed object or behavior.
+
+Before emitting `add`, check whether the source-paired test file already exists.
+If it exists, emit `strengthen`. Prefer an existing source-paired test over an
+alphabetically earlier module candidate. Repository behavior must target a
+repository/persistence test; a service test backed by a fake repository cannot
+stand in for real SQL evidence.
 
 Broad module/scenario candidates, file-only objects, `__all__`, and possible
 relations remain diagnostic search context. They neither clear an object-level
@@ -160,7 +199,12 @@ contains:
 Keep guidance concise: show at most five existing weak test paths together with
 `existing_test_count` and `existing_test_overflow`. The complete untruncated
 relation evidence remains available in the direct/indirect correspondence
-fields.
+fields. Before treating a weak relation as something to strengthen, require a
+concrete behavior match from the test path, case name, exact referenced
+identifier, or assertion-linked object. A test that merely imports a class or
+module whose declaration contains the changed method remains raw indirect
+evidence; do not list a whole suite of unrelated tests as strengthening targets.
+Every guidance item also names one `suggested_test_target`.
 
 Choose the test layer from the behavior under change:
 
@@ -185,9 +229,23 @@ alone because it may define runtime behavior.
 
 ## Public brief
 
-Report module mapping, direct relations, safe indirect relations, possible
-candidates, relation evidence, and missing-test guidance as separate fields.
-Possible candidates remain visible search clues but never count as coverage.
+Preserve raw module relations for diagnostics and Phase 2 selection. Build a
+separate bounded `public_summary` for the default brief:
+
+- direct tests retain the strongest object/assertion-linked evidence;
+- indirect tests require a concrete changed object and an explainable
+  test → source entry → changed object import/reference chain;
+- possible tests are grouped by changed behavior with at most three candidates
+  per behavior and an explicit match reason.
+
+The public quality matrix is behavior/object scoped, not module scoped. Each row
+shows the exact changed objects, the strongest matching test case, evidence
+strength, the remaining unproved behavior, and one concrete recommendation.
+Never borrow a test from another changed object merely because both belong to
+the same module.
+
+Do not print raw aggregate relation counts in the default brief. Possible
+candidates remain visible search clues but never count as coverage.
 Do not print `mapping_source`; when a module is unmapped, say only that the
 functional module is not yet identified and cite the changed files. Do not add
 a general next-step recommendation field. Do not recommend tests for

@@ -38,6 +38,7 @@ if SCRIPTS_DIR not in sys.path:
 from content_safety import REDACTED_PATH, REDACTED_SECRET, safe_repository_file, sanitize_for_output
 from diff_hunks import canonical_hunks
 from symbol_extraction import extract_changed_symbols
+import risk_assessment as RISK_ASSESSMENT_MODULE
 
 ISSUE_SPEC = importlib.util.spec_from_file_location("bic_quality_issue_context", ISSUE_CONTEXT)
 assert ISSUE_SPEC and ISSUE_SPEC.loader
@@ -414,6 +415,20 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         suggested = self.analyze("suggest")
         correspondence = suggested["test_correspondence"]
+        self.assertIn("public_summary", correspondence)
+        self.assertLessEqual(
+            len(correspondence["public_summary"]["directly_related_tests"]),
+            TEST_RELATIONS_MODULE.MAX_PUBLIC_DIRECT_TESTS,
+        )
+        self.assertTrue(all(
+            item["changed_objects"]
+            for item in correspondence["public_summary"]["indirectly_related_tests"]
+        ))
+        self.assertTrue(all(
+            len(group["candidates"])
+            <= TEST_RELATIONS_MODULE.MAX_PUBLIC_POSSIBLE_PER_BEHAVIOR
+            for group in correspondence["public_summary"]["possibly_related_test_groups"]
+        ))
         modules = {(item["repo"], item["module_scope"]): item for item in correspondence["modules"]}
         agent_sse = modules[("BIC-agent-service", "agent/sse")]
         self.assertTrue(any(item["path"].endswith("test_sse.py") for item in agent_sse["directly_related_tests"]))
@@ -530,8 +545,9 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("证据结论：", public_template)
         self.assertIn("是否多仓发生改动：", public_template)
         self.assertIn("模块映射", public_template)
-        self.assertIn("需求对齐（仅当 requirement_alignment_enabled=true 时出现）", public_template)
-        self.assertIn("未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。", public_template)
+        self.assertEqual(public_template.count("\n需求与问题单\n"), 1)
+        self.assertIn("仅当 requirement_alignment_enabled=true 时输出", public_template)
+        self.assertNotIn("未发现权威关联 Issue，本次仅评估技术范围；需求对齐未启用。", public_template)
         for diagnostic_field in (
             "扫描状态：", "受影响仓库 Issue 扫描：", "候选初筛：",
             "初筛排除：", "正文读取：", "候选对应分析：",
@@ -542,10 +558,28 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("间接相关测试：", public_template)
         self.assertIn("可能相关测试：", public_template)
         self.assertIn("对应依据：", public_template)
-        self.assertIn("测试缺口", public_template)
+        self.assertNotIn("\n测试缺口\n", public_template)
         self.assertIn("测试前质量证据矩阵", public_template)
+        self.assertEqual(public_template.count("\n建议新增\n"), 1)
+        self.assertEqual(public_template.count("\n建议加强\n"), 1)
+        self.assertIn("| 要补什么 | 建议放在哪里 | 用什么测 | 为什么要补 | 关键断言 |", public_template)
+        self.assertIn("| 要加强什么 | 改哪个现有测试 | 当前没有证明什么 | 关键断言 |", public_template)
+        self.assertIn("| 质量关注点 | 本次具体改动 | 已有测试证明了什么 | 还没有证明什么 |", public_template)
         self.assertIn("决策方式：evidence-only", public_template)
         self.assertNotIn("| 技术风险项 |", public_template)
+        ordered_headings = [
+            "核心结论",
+            "变更集",
+            "需求与问题单",
+            "模块映射",
+            "测试对应性",
+            "测试前质量证据矩阵",
+            "建议新增",
+            "建议加强",
+            "第二阶段测试执行交接（本阶段不执行）",
+        ]
+        positions = [public_template.index(heading) for heading in ordered_headings]
+        self.assertEqual(positions, sorted(positions))
         for english_heading in (
             "BIC Quality Brief",
             "Change Set",
@@ -564,6 +598,13 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertNotIn("direct business or contract chain", deliverables)
         self.assertIn("do not print it in the default brief", skill)
         self.assertIn("Start with the concise `核心结论`", skill)
+        normalized_skill = " ".join(skill.split())
+        self.assertIn(
+            "Do not remove or rename the non-conditional information sections",
+            normalized_skill,
+        )
+        self.assertIn("does not replace the detailed non-conditional sections", normalized_skill)
+        self.assertIn("omit the entire Issue section", normalized_skill)
         self.assertIn("one workspace-level Issue context", skill)
         self.assertIn("Never use repository count alone", skill)
         self.assertNotIn("Report risk separately for independent change streams", skill)
@@ -673,7 +714,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         self.assertIn("From the frozen assessment snapshot", skill)
         self.assertIn("Do not recollect Issue metadata", skill)
-        self.assertIn("Read `quality_evidence` from the frozen snapshot", skill)
+        self.assertIn(
+            "Read `quality_evidence.brief_evidence_matrix` from the frozen snapshot",
+            skill,
+        )
         self.assertIn("must not contain `technical_risk`", skill)
         self.assertIn("`thematic-candidate`, even when unique", skill)
         self.assertIn("`requirement_alignment_enabled` and `acceptance_items_eligible` are both true", skill)
@@ -691,7 +735,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         self.assertLess(
             skill.index("**1B. Freeze the technical scope.**"),
-            skill.index("7. Read `quality_evidence`"),
+            skill.index("7. Read `quality_evidence.brief_evidence_matrix`"),
         )
         for value in (
             "`scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`",
@@ -740,6 +784,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertFalse(without_issue["context"]["issue_context"]["requirement_alignment_enabled"])
         self.assertEqual(without_issue["requirement_scope"]["alignment_mode"], "technical-only")
         self.assertEqual(without_issue["default_report"]["mode"], "technical-only")
+        self.assertFalse(without_issue["default_report"]["show_issue_section"])
         self.assertFalse(without_issue["default_report"]["show_issue_candidate_diagnostics"])
         self.assertNotIn(
             "requirement-definition",
@@ -760,6 +805,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(issue["requirement_alignment_origin"], "explicit")
         self.assertEqual(assessed["default_report"]["mode"], "requirement-aligned")
         self.assertTrue(assessed["default_report"]["show_acceptance_alignment"])
+        self.assertTrue(assessed["default_report"]["show_issue_section"])
         self.assertEqual(evidence["assessment_stage"], "pre-test")
         self.assertEqual(evidence["decision_model"], "evidence-only")
         self.assertEqual(evidence["requirement_alignment"], "pending-review")
@@ -798,6 +844,14 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertTrue(all(
             "risk_level" not in item
             for item in evidence["quality_evidence_matrix"]
+        ))
+        self.assertTrue(evidence["brief_evidence_matrix"])
+        self.assertTrue(all(
+            {
+                "quality_focus", "changed_behavior",
+                "existing_test_evidence", "open_evidence",
+            } == set(item)
+            for item in evidence["brief_evidence_matrix"]
         ))
 
     def test_analyzed_content_is_untrusted_data_not_workflow_instruction(self) -> None:
@@ -2495,6 +2549,653 @@ raise SystemExit(2)
         self.assertEqual(len(capped["existing_tests"]), 5)
         self.assertEqual(capped["existing_test_overflow"], 2)
 
+    def test_guidance_ignores_broad_import_noise_and_names_one_test_target(self) -> None:
+        symbols = [{
+            "name": "MessageFeedbackRepo.delete_for_target",
+            "kind": "method",
+        }]
+        broad = {
+            "path": "BIC-agent-service/tests/unit/test_session_list.py",
+            "test_names": ["test_lists_sessions"],
+            "relation_reasons": [
+                "imports SessionService which imports the changed file via MessageFeedbackRepo"
+            ],
+            "related_symbols": ["MessageFeedbackRepo.delete_for_target"],
+            "assertion_linked_symbols": [],
+            "assertions": ["assert sessions"],
+        }
+        guidance = TEST_RELATIONS_MODULE.grouped_guidance(
+            "strengthen",
+            "BIC-agent-service",
+            "agent/database",
+            "BIC-agent-service/app/repositories/message_feedback_repo.py",
+            symbols,
+            [broad],
+            [],
+        )
+        self.assertEqual(guidance["action"], "add")
+        self.assertEqual(guidance["existing_tests"], [])
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "BIC-agent-service/tests/unit/test_persistence_repo_message_feedback.py",
+        )
+
+        specific = {
+            **broad,
+            "path": "BIC-agent-service/tests/unit/test_session_service_feedback.py",
+            "test_names": [
+                "test_cancel_feedback_deletes_only_the_requested_target"
+            ],
+            "relation_reasons": [
+                "references delete_for_target from the imported changed file"
+            ],
+            "has_active_test_with_assertion": True,
+            "assertion_linked_symbols": ["an_unrelated_symbol"],
+        }
+        guidance = TEST_RELATIONS_MODULE.grouped_guidance(
+            "strengthen",
+            "BIC-agent-service",
+            "agent/database",
+            "BIC-agent-service/app/repositories/message_feedback_repo.py",
+            symbols,
+            [broad, specific],
+            [],
+        )
+        self.assertEqual(guidance["action"], "add")
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "BIC-agent-service/tests/unit/test_persistence_repo_message_feedback.py",
+        )
+        self.assertEqual(
+            TEST_RELATIONS_MODULE.browser_scenario_test_path(
+                "scenario:BIC-agent-portal:"
+                "BIC-agent-portal/tests/feedback-flow.spec.ts:1:feedback-flow"
+            ),
+            "BIC-agent-portal/tests/feedback-flow.spec.ts",
+        )
+
+    def test_behavior_asserted_instance_method_closes_gap_without_accepting_assert_true(self) -> None:
+        workspace = Path(self.temp.name) / "behavior-asserted-method"
+        write(
+            workspace / "app/service.py",
+            "class SessionService:\n"
+            "    async def cancel_feedback(self, repo):\n"
+            "        await repo.delete_for_target()\n",
+        )
+        write(
+            workspace / "tests/test_service.py",
+            "from app.service import SessionService\n"
+            "async def test_cancel_feedback_deletes_requested_target():\n"
+            "    service = SessionService()\n"
+            "    repo = type('Repo', (), {'delete_for_target': lambda self: None})()\n"
+            "    await service.cancel_feedback(repo)\n"
+            "    assert service is not None\n"
+            "async def test_unrelated_truth():\n"
+            "    await SessionService().cancel_feedback(None)\n"
+            "    assert True\n",
+        )
+        facts = TEST_ASSETS_MODULE.parse_python_test(
+            workspace / "tests/test_service.py",
+        )
+        correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace,
+            {
+                "changed_files": [{
+                    "repo": "BIC-meta",
+                    "path": "app/service.py",
+                    "change_types": ["modified"],
+                }],
+                "file_mappings": [{
+                    "repo": "BIC-meta",
+                    "path": "app/service.py",
+                    "mapping": {"module_scope": "meta/tooling"},
+                }],
+            },
+            [{
+                "repo": "BIC-meta",
+                "path": "app/service.py",
+                "symbols": [{
+                    "name": "SessionService.cancel_feedback",
+                    "kind": "method",
+                    "start_line": 2,
+                    "end_line": 3,
+                }],
+            }],
+            [{
+                "repo": "BIC-meta",
+                "path": "tests/test_service.py",
+                "asset_kind": "test-file",
+                "framework": "pytest",
+                "test_facts": facts,
+            }],
+            [],
+        )
+        module = correspondence["modules"][0]
+        relation = module["directly_related_tests"][0]
+        self.assertEqual(relation["evidence_level"], "behavior-asserted")
+        self.assertEqual(
+            relation["behavior_test_cases"],
+            ["test_cancel_feedback_deletes_requested_target"],
+        )
+        self.assertFalse(module["test_guidance"])
+        self.assertTrue(any(
+            "SessionService.cancel_feedback" in item
+            for item in module["no_obvious_test_gaps"]
+        ))
+
+    def test_public_entrypoint_assertion_covers_reachable_changed_private_helpers(self) -> None:
+        workspace = Path(self.temp.name) / "reachable-private-helper"
+        write(
+            workspace / "app/phoenix.py",
+            "class PhoenixFeedbackSync:\n"
+            "    async def sync_feedback(self, repo):\n"
+            "        value = await self._sync_feedback(repo)\n"
+            "        return self._mark_state(value)\n"
+            "    async def _sync_feedback(self, repo):\n"
+            "        return repo.value\n"
+            "    def _mark_state(self, value):\n"
+            "        return {'status': value}\n",
+        )
+        test_path = workspace / "tests/test_phoenix.py"
+        write(
+            test_path,
+            "from app.phoenix import PhoenixFeedbackSync\n"
+            "async def test_phoenix_feedback_sync_marks_state():\n"
+            "    repo = type('Repo', (), {'value': 'synced'})()\n"
+            "    result = await PhoenixFeedbackSync().sync_feedback(repo)\n"
+            "    assert result == {'status': 'synced'}\n",
+        )
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace,
+            {
+                "changed_files": [{
+                    "repo": "BIC-meta",
+                    "path": "app/phoenix.py",
+                    "change_types": ["modified"],
+                }],
+                "file_mappings": [{
+                    "repo": "BIC-meta",
+                    "path": "app/phoenix.py",
+                    "mapping": {"module_scope": "meta/tooling"},
+                }],
+            },
+            [{
+                "repo": "BIC-meta",
+                "path": "app/phoenix.py",
+                "symbols": [
+                    {
+                        "name": "PhoenixFeedbackSync._sync_feedback",
+                        "kind": "method",
+                        "start_line": 5,
+                        "end_line": 6,
+                    },
+                    {
+                        "name": "PhoenixFeedbackSync._mark_state",
+                        "kind": "method",
+                        "start_line": 7,
+                        "end_line": 8,
+                    },
+                ],
+            }],
+            [{
+                "repo": "BIC-meta",
+                "path": "tests/test_phoenix.py",
+                "asset_kind": "test-file",
+                "framework": "pytest",
+                "test_facts": TEST_ASSETS_MODULE.parse_python_test(test_path),
+            }],
+            [],
+        )["modules"][0]
+        relation = module["directly_related_tests"][0]
+        self.assertEqual(
+            set(relation["behavior_asserted_symbols"]),
+            {
+                "PhoenixFeedbackSync._sync_feedback",
+                "PhoenixFeedbackSync._mark_state",
+            },
+        )
+        self.assertFalse(module["test_guidance"])
+
+    def test_large_container_evidence_must_match_the_changed_lines(self) -> None:
+        workspace = Path(self.temp.name) / "large-container-diff"
+        body = ["async def lifespan(app):"]
+        body.extend(f"    value_{index} = {index}" for index in range(1, 89))
+        body.append("    shutdown_tracing(app.state.tracer_provider)")
+        write(workspace / "app/lifespan.py", "\n".join(body) + "\n")
+        mind_test = workspace / "tests/test_mind.py"
+        trace_test = workspace / "tests/test_tracing.py"
+        write(
+            mind_test,
+            "from app.lifespan import lifespan\n"
+            "def test_lifespan_wires_minio_client():\n"
+            "    source = lifespan\n"
+            "    assert source is not None\n",
+        )
+        write(
+            trace_test,
+            "from app.lifespan import lifespan\n"
+            "def test_lifespan_shutdowns_tracing_provider():\n"
+            "    source = lifespan\n"
+            "    assert source is not None\n",
+        )
+        module = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace,
+            {
+                "changed_files": [{
+                    "repo": "BIC-meta",
+                    "path": "app/lifespan.py",
+                    "change_types": ["modified"],
+                    "diff_hunks": [{
+                        "new_start": 90,
+                        "new_end": 90,
+                    }],
+                }],
+                "file_mappings": [{
+                    "repo": "BIC-meta",
+                    "path": "app/lifespan.py",
+                    "mapping": {"module_scope": "meta/tooling"},
+                }],
+            },
+            [{
+                "repo": "BIC-meta",
+                "path": "app/lifespan.py",
+                "symbols": [{
+                    "name": "lifespan",
+                    "kind": "function",
+                    "start_line": 1,
+                    "end_line": 90,
+                    "new_start_line": 1,
+                    "new_end_line": 90,
+                }],
+            }],
+            [
+                {
+                    "repo": "BIC-meta",
+                    "path": "tests/test_mind.py",
+                    "asset_kind": "test-file",
+                    "framework": "pytest",
+                    "test_facts": TEST_ASSETS_MODULE.parse_python_test(mind_test),
+                },
+                {
+                    "repo": "BIC-meta",
+                    "path": "tests/test_tracing.py",
+                    "asset_kind": "test-file",
+                    "framework": "pytest",
+                    "test_facts": TEST_ASSETS_MODULE.parse_python_test(trace_test),
+                },
+            ],
+            [],
+        )["modules"][0]
+        by_path = {
+            relation["path"]: relation
+            for relation in module["directly_related_tests"]
+        }
+        self.assertEqual(by_path["tests/test_mind.py"]["evidence_level"], "related-only")
+        self.assertEqual(
+            by_path["tests/test_tracing.py"]["evidence_level"],
+            "object-asserted",
+        )
+
+    def test_route_contract_is_partial_and_strengthens_existing_route_test(self) -> None:
+        workspace = Path(self.temp.name) / "route-contract-guidance"
+        write(workspace / "app/routes.py", "router = object()\n")
+        test_path = workspace / "tests/unit/test_session_route_dto_contract.py"
+        unrelated_path = workspace / "tests/unit/test_routes.py"
+        write(
+            test_path,
+            "from app.routes import router\n"
+            "def test_cancel_feedback_route_is_delete_no_content_contract():\n"
+            "    route = router\n"
+            "    assert route is not None\n"
+            "    assert {'DELETE'} == {'DELETE'}\n",
+        )
+        write(
+            unrelated_path,
+            "def test_lists_unrelated_routes():\n"
+            "    assert ['health']\n",
+        )
+        correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace,
+            {
+                "changed_files": [{
+                    "repo": "BIC-meta",
+                    "path": "app/routes.py",
+                    "change_types": ["modified"],
+                }],
+                "file_mappings": [{
+                    "repo": "BIC-meta",
+                    "path": "app/routes.py",
+                    "mapping": {"module_scope": "agent/api"},
+                }],
+            },
+            [{
+                "repo": "BIC-meta",
+                "path": "app/routes.py",
+                "symbols": [{
+                    "name": "cancel_feedback",
+                    "kind": "route",
+                    "route_method": "DELETE",
+                    "route_path": "/sessions/{session_id}/feedback/{target_event_id}",
+                }],
+            }],
+            [
+                {
+                    "repo": "BIC-meta",
+                    "path": "tests/unit/test_session_route_dto_contract.py",
+                    "asset_kind": "test-file",
+                    "framework": "pytest",
+                    "test_facts": TEST_ASSETS_MODULE.parse_python_test(test_path),
+                },
+                {
+                    "repo": "BIC-meta",
+                    "path": "tests/unit/test_routes.py",
+                    "asset_kind": "test-file",
+                    "framework": "pytest",
+                    "test_facts": TEST_ASSETS_MODULE.parse_python_test(unrelated_path),
+                },
+            ],
+            [],
+        )
+        module = correspondence["modules"][0]
+        relation = module["directly_related_tests"][0]
+        self.assertEqual(relation["evidence_level"], "contract-asserted")
+        guidance = module["test_guidance"][0]
+        self.assertEqual(guidance["action"], "strengthen")
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "tests/unit/test_session_route_dto_contract.py",
+        )
+
+    def test_guidance_prefers_existing_source_paired_test_over_service_noise(self) -> None:
+        source = "BIC-agent-service/app/session/feedback_context_snapshot.py"
+        existing = [
+            "BIC-agent-service/tests/unit/test_session_service_feedback.py",
+            "BIC-agent-service/tests/unit/test_feedback_context_snapshot.py",
+        ]
+        guidance = TEST_RELATIONS_MODULE.grouped_guidance(
+            "strengthen",
+            "BIC-agent-service",
+            "agent/session",
+            source,
+            [{"name": "attach_feedback_target", "kind": "function"}],
+            [{
+                "path": existing[0],
+                "test_names": ["test_submit_feedback_context"],
+                "relation_reasons": ["reaches attach_feedback_target"],
+                "related_symbols": ["attach_feedback_target"],
+                "assertion_linked_symbols": [],
+                "assertions": ["assert context"],
+            }],
+            [],
+            existing,
+        )
+        self.assertEqual(guidance["action"], "strengthen")
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "BIC-agent-service/tests/unit/test_feedback_context_snapshot.py",
+        )
+
+    def test_guidance_does_not_recommend_an_unrelated_weak_test_file(self) -> None:
+        guidance = TEST_RELATIONS_MODULE.grouped_guidance(
+            "strengthen",
+            "BIC-agent-service",
+            "agent/runtime",
+            "BIC-agent-service/app/main.py",
+            [{"name": "lifespan", "kind": "function"}],
+            [{
+                "path": "BIC-agent-service/tests/unit/test_mind_url_shim.py",
+                "test_names": ["test_mind_url_uses_configured_base"],
+                "relation_reasons": ["imports the changed file"],
+                "related_symbols": ["lifespan"],
+                "assertion_linked_symbols": [],
+                "assertions": ["assert configured_url"],
+            }],
+            [],
+            ["BIC-agent-service/tests/unit/test_mind_url_shim.py"],
+        )
+        self.assertEqual(guidance["action"], "add")
+        self.assertEqual(guidance["existing_tests"], [])
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "BIC-agent-service/tests/unit/test_main.py",
+        )
+
+    def test_large_component_behavior_uses_changed_line_terms(self) -> None:
+        case = {
+            "name": "shows feedback on every persisted text segment after turn end",
+            "assertions": ["expect(screen.getByLabelText('like')).toBeTruthy()"],
+            "rendered_identifiers": ["Message"],
+            "referenced_identifiers": ["Message"],
+        }
+        matched = TEST_RELATIONS_MODULE.behavior_case_names(
+            {
+                "path": "portal/src/pages/chat/Message.tsx",
+                "name": "AssistantMessage",
+                "kind": "component",
+                "diff_tokens": [
+                    "feedback",
+                    "persisted",
+                    "text",
+                    "segment",
+                    "turn",
+                ],
+                "requires_diff_overlap": True,
+            },
+            [case],
+            reachable_from_import=True,
+        )
+        self.assertEqual(
+            matched,
+            {"shows feedback on every persisted text segment after turn end"},
+        )
+
+    def test_large_container_ignores_generic_changed_line_terms(self) -> None:
+        matched = TEST_RELATIONS_MODULE.behavior_case_names(
+            {
+                "path": "app/core/lifespan.py",
+                "name": "lifespan",
+                "kind": "function",
+                "diff_tokens": [
+                    "key",
+                    "none",
+                    "provider",
+                    "setup",
+                    "shutdown",
+                    "tracer",
+                    "tracing",
+                ],
+                "requires_diff_overlap": True,
+            },
+            [{
+                "name": "test_none_url_and_no_minio_pass_through",
+                "assertions": ["assert reissue_mind_s3_url(None, None) is None"],
+                "referenced_identifiers": ["lifespan", "KEY"],
+                "assertion_linked_identifiers": ["KEY", "reissue_mind_s3_url"],
+            }],
+            reachable_from_import=True,
+        )
+        self.assertFalse(matched)
+
+    def test_covered_store_action_suppresses_broad_store_container_gap(self) -> None:
+        symbols = [
+            {
+                "path": "portal/src/stores/chatStore.ts",
+                "name": "ChatState.clearMessageFeedback",
+                "kind": "store-or-action",
+            },
+            {
+                "path": "portal/src/stores/chatStore.ts",
+                "name": "useChatStore",
+                "kind": "hook",
+                "diff_tokens": [
+                    "clear",
+                    "event",
+                    "feedback",
+                    "key",
+                    "message",
+                    "return",
+                    "set",
+                ],
+                "requires_diff_overlap": True,
+            },
+        ]
+        self.assertTrue(
+            TEST_RELATIONS_MODULE.asserted_store_action_covers_container(
+                symbols[1],
+                symbols,
+                {"ChatState.clearMessageFeedback"},
+            )
+        )
+        self.assertFalse(
+            TEST_RELATIONS_MODULE.asserted_store_action_covers_container(
+                symbols[1],
+                symbols,
+                set(),
+            )
+        )
+
+    def test_brief_matrix_does_not_borrow_unrelated_module_evidence(self) -> None:
+        correspondence = {
+            "modules": [{
+                "repo": "BIC-agent-service",
+                "module_scope": "agent/api",
+                "changed_symbols": [{
+                    "path": "BIC-agent-service/app/api/routers/sessions.py",
+                    "name": "cancel_feedback",
+                    "kind": "route",
+                }],
+                "directly_related_tests": [
+                    {
+                        "path": "BIC-agent-service/tests/unit/test_materials_route.py",
+                        "related_files": [
+                            "BIC-agent-service/app/api/routers/sessions.py",
+                        ],
+                        "related_symbols": ["reconcile_materials"],
+                        "assertion_linked_symbols": ["reconcile_materials"],
+                        "behavior_asserted_symbols": [],
+                        "contract_asserted_symbols": [],
+                        "test_names": ["test_reconcile_materials"],
+                        "evidence_level": "object-asserted",
+                    },
+                    {
+                        "path": "BIC-agent-service/tests/unit/test_session_route_dto_contract.py",
+                        "related_files": [
+                            "BIC-agent-service/app/api/routers/sessions.py",
+                        ],
+                        "related_symbols": ["cancel_feedback"],
+                        "assertion_linked_symbols": [],
+                        "behavior_asserted_symbols": [],
+                        "contract_asserted_symbols": ["cancel_feedback"],
+                        "contract_test_cases": ["test_cancel_feedback_route_contract"],
+                        "test_names": ["test_cancel_feedback_route_contract"],
+                        "evidence_level": "contract-asserted",
+                    },
+                ],
+                "indirectly_related_tests": [],
+                "test_guidance": [{
+                    "path": "BIC-agent-service/app/api/routers/sessions.py",
+                    "symbols": ["cancel_feedback"],
+                    "target_behavior": "DELETE /sessions/{session_id}/feedback/{target_event_id}",
+                    "action": "strengthen",
+                    "recommended_framework": "pytest",
+                    "suggested_test_target": (
+                        "BIC-agent-service/tests/unit/"
+                        "test_session_route_dto_contract.py"
+                    ),
+                    "evidence_gaps": ["route-to-service delegation is not asserted"],
+                }],
+            }],
+            "browser_test_guidance": [],
+        }
+        matrix = RISK_ASSESSMENT_MODULE.build_brief_evidence_matrix(
+            correspondence,
+        )
+        self.assertEqual(len(matrix), 1)
+        evidence = matrix[0]["existing_test_evidence"]
+        self.assertTrue(any("test_session_route_dto_contract.py" in item for item in evidence))
+        self.assertFalse(any("test_materials_route.py" in item for item in evidence))
+        self.assertEqual(matrix[0]["evidence_strength"], ["contract-asserted"])
+        self.assertEqual(
+            matrix[0]["recommendation"],
+            [
+                "strengthen pytest at "
+                "BIC-agent-service/tests/unit/test_session_route_dto_contract.py"
+            ],
+        )
+
+    def test_public_test_summary_hides_broad_relations_and_groups_possible_candidates(self) -> None:
+        base_relation = {
+            "repo": "repo-a",
+            "framework": "pytest",
+            "related_files": ["repo-a/app/feedback.py"],
+            "assertion_linked_files": [],
+            "assertion_linked_symbols": [],
+            "test_names": [],
+            "selected_test_cases": [],
+            "assertions": [],
+            "disabled_tests": [],
+            "has_active_test_with_assertion": False,
+            "browser_evidence": None,
+        }
+        broad = {
+            **base_relation,
+            "path": "repo-a/tests/test_session_list.py",
+            "relation_reasons": ["configured module relation unit"],
+            "related_symbols": [],
+        }
+        explainable = {
+            **base_relation,
+            "path": "repo-a/tests/test_feedback.py",
+            "relation_reasons": [
+                "imports feedback_service reaches app/feedback_service.py, "
+                "which imports the changed file via delete_feedback"
+            ],
+            "related_symbols": ["delete_feedback"],
+            "test_names": ["test_delete_feedback"],
+        }
+        possible = {
+            **base_relation,
+            "path": "repo-a/tests/test_feedback_ui.py",
+            "relation_reasons": ["shares filename terms: feedback"],
+            "related_symbols": [],
+            "test_names": ["test_feedback_button"],
+        }
+        summary = TEST_RELATIONS_MODULE.build_public_test_summary([{
+            "repo": "repo-a",
+            "module_scope": "app/feedback",
+            "directly_related_tests": [],
+            "indirectly_related_tests": [broad, explainable],
+            "possibly_related_tests": [possible],
+        }])
+        self.assertEqual(summary["indirectly_related_tests"], [])
+        self.assertEqual(len(summary["possibly_related_test_groups"]), 1)
+        self.assertEqual(
+            summary["possibly_related_test_groups"][0]["candidates"][0]["path"],
+            "repo-a/tests/test_feedback_ui.py",
+        )
+        self.assertEqual(summary["raw_relation_counts"]["indirect"], 2)
+
+        direct_and_possible = TEST_RELATIONS_MODULE.build_public_test_summary([{
+            "repo": "repo-a",
+            "module_scope": "app/feedback",
+            "directly_related_tests": [{
+                **possible,
+                "relation_reasons": [
+                    "references delete_feedback from the imported changed file"
+                ],
+                "related_symbols": ["delete_feedback"],
+                "assertion_linked_symbols": ["delete_feedback"],
+                "has_active_test_with_assertion": True,
+            }],
+            "indirectly_related_tests": [],
+            "possibly_related_tests": [possible],
+        }])
+        self.assertTrue(direct_and_possible["directly_related_tests"])
+        self.assertEqual(
+            direct_and_possible["possibly_related_test_groups"],
+            [],
+        )
+
 
 class BrowserEvidenceAndManifestTest(unittest.TestCase):
     def test_diff_hunk_selects_route_method_instead_of_container_class(self) -> None:
@@ -3324,6 +4025,11 @@ test('creates experiment', async ({ request }) => {
             self.assertEqual(browser_guidance["action"], "strengthen")
             self.assertEqual(browser_guidance["recommended_framework"], "playwright")
             self.assertEqual(browser_guidance["alternative_frameworks"], [])
+            self.assertEqual(browser_guidance["test_repo"], "portal")
+            self.assertEqual(
+                browser_guidance["suggested_test_target"],
+                "portal/tests/e2e/experiments.spec.ts",
+            )
 
     def test_streaming_route_guidance_uses_playwright_with_optional_cdp(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -3363,6 +4069,50 @@ test('creates experiment', async ({ request }) => {
             self.assertEqual(guidance["alternative_frameworks"], ["cdp"])
             self.assertEqual(guidance["test_layer"], "browser-user-journey")
             self.assertTrue(guidance["suggested_assertions"])
+
+    def test_partial_cross_repo_journey_adds_playwright_in_frontend_repo(self) -> None:
+        guidance = TEST_RELATIONS_MODULE.browser_journey_guidance(
+            [{
+                "repo": "backend",
+                "path": "backend/app/routes.py",
+                "symbols": [{
+                    "name": "cancel_feedback",
+                    "kind": "route",
+                    "route_method": "DELETE",
+                    "route_path": "/sessions/{id}/feedback/{event_id}",
+                }],
+            }],
+            {
+                "nodes": [
+                    {
+                        "id": "changed:backend:backend/app/routes.py:cancel_feedback",
+                        "repo": "backend",
+                        "path": "backend/app/routes.py",
+                        "layer": "backend-route",
+                    },
+                    {
+                        "id": "source:portal:portal/src/pages/Chat.tsx",
+                        "repo": "portal",
+                        "path": "portal/src/pages/Chat.tsx",
+                        "layer": "page",
+                    },
+                ],
+                "paths": [],
+                "partial_paths": [{
+                    "anchor": "changed:backend:backend/app/routes.py:cancel_feedback",
+                    "nodes": [
+                        "changed:backend:backend/app/routes.py:cancel_feedback",
+                        "source:portal:portal/src/pages/Chat.tsx",
+                    ],
+                }],
+            },
+        )[0]
+        self.assertEqual(guidance["action"], "add")
+        self.assertEqual(guidance["test_repo"], "portal")
+        self.assertEqual(
+            guidance["suggested_test_target"],
+            "portal/tests/routes.spec.ts",
+        )
 
     def test_dynamic_frontend_url_template_bridges_prefixed_backend_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -3479,6 +4229,12 @@ test('opens dashboard', async ({ page }) => {
                 for edge in graph["edges"]
                 if edge["from"].endswith("portal/src/lib/agent-client.ts")
             ))
+            browser_guidance = correspondence["browser_test_guidance"][0]
+            self.assertEqual(browser_guidance["test_repo"], "portal")
+            self.assertEqual(
+                browser_guidance["suggested_test_target"],
+                "portal/tests/e2e/feedback.spec.ts",
+            )
 
     def test_bounded_user_journey_graph_traces_route_and_shared_contract_to_browser(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

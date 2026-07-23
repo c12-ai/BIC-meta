@@ -36,6 +36,19 @@ MAX_JOURNEY_PATHS = 40
 MAX_JOURNEY_PATH_DEPTH = 7
 MAX_JOURNEY_OUTPUT_NODES = MAX_JOURNEY_EDGES * 2 + MAX_JOURNEY_PATHS
 MAX_GUIDANCE_EXISTING_TESTS = 5
+MAX_PUBLIC_DIRECT_TESTS = 12
+MAX_PUBLIC_INDIRECT_TESTS = 8
+MAX_PUBLIC_POSSIBLE_GROUPS = 5
+MAX_PUBLIC_POSSIBLE_PER_BEHAVIOR = 3
+BEHAVIOR_STOPWORDS = TOKEN_STOPWORDS | {
+    "behavior", "repository", "repo", "router", "route", "session", "state",
+    "handler", "helper", "manager", "model", "context", "result", "target",
+}
+PUBLIC_GENERIC_BEHAVIOR_TOKENS = {
+    "active", "build", "chat", "clear", "create", "delete", "event", "find",
+    "get", "key", "load", "message", "none", "payload", "props", "remove",
+    "set", "state", "store", "submit", "turn", "update", "use",
+}
 
 
 def guidance_applicability(path: str, module_scope: str) -> tuple[bool, str | None]:
@@ -126,6 +139,288 @@ def suggested_assertions(
     ]
 
 
+def identifier_tokens(value: str) -> set[str]:
+    """Split paths, snake_case, camelCase, and qualified names into useful terms."""
+    separated = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
+    tokens = set(re.findall(r"[A-Za-z0-9]+", separated.lower()))
+    return {
+        token for token in tokens
+        if len(token) > 2 and token not in BEHAVIOR_STOPWORDS
+    }
+
+
+def behavior_tokens(path: str, symbols: Iterable[dict[str, Any]]) -> set[str]:
+    tokens = identifier_tokens(Path(path).stem)
+    for symbol in symbols:
+        tokens.update(identifier_tokens(str(symbol.get("name") or "")))
+        tokens.update(identifier_tokens(str(symbol.get("route_path") or "")))
+    return tokens
+
+
+def asserted_store_action_covers_container(
+    symbol: dict[str, Any],
+    symbols: Iterable[dict[str, Any]],
+    asserted_symbol_names: set[str],
+) -> bool:
+    """Avoid a duplicate gap for a broad store factory around a covered action."""
+    if (
+        symbol.get("kind") != "hook"
+        or not symbol.get("requires_diff_overlap")
+    ):
+        return False
+    changed_tokens = set(symbol.get("diff_tokens", []))
+    path = str(symbol.get("path") or "")
+    for candidate in symbols:
+        name = str(candidate.get("name") or "")
+        if (
+            candidate is symbol
+            or candidate.get("kind") != "store-or-action"
+            or str(candidate.get("path") or "") != path
+            or name not in asserted_symbol_names
+        ):
+            continue
+        action_name = name.rsplit(".", 1)[-1]
+        action_tokens = identifier_tokens(action_name)
+        if len(action_tokens) >= 2 and action_tokens <= changed_tokens:
+            return True
+    return False
+
+
+def substantive_case_assertion(case: dict[str, Any]) -> bool:
+    """Return whether a case asserts something more specific than ``assert True``."""
+    return bool(
+        not case.get("disabled")
+        and case.get("assertions")
+        and (
+            case.get("assertion_linked_identifiers")
+            or case.get("rendered_identifiers")
+            or case.get("machine_checks")
+        )
+    )
+
+
+def behavior_case_names(
+    symbol: dict[str, Any],
+    test_cases: Iterable[dict[str, Any]],
+    *,
+    reachable_from_import: bool,
+    contract_only: bool = False,
+) -> set[str]:
+    """Find cases whose assertions describe the changed behavior.
+
+    This is deliberately stricter than "the file imports the module and has an
+    assertion".  The case must contain a substantive assertion and its name or
+    asserted state must overlap the changed object's concrete behavior.
+    """
+    symbol_name = str(symbol.get("name") or "")
+    identifier = symbol_identifier(symbol)
+    target_tokens = behavior_tokens(str(symbol.get("path") or ""), [symbol])
+    target_tokens.update(identifier_tokens(symbol_name))
+    diff_tokens = set(symbol.get("diff_tokens", []))
+    matched: set[str] = set()
+    for case in test_cases:
+        if not substantive_case_assertion(case):
+            continue
+        referenced = set(case.get("referenced_identifiers", []))
+        asserted = set(case.get("assertion_linked_identifiers", []))
+        asserted.update(case.get("rendered_identifiers", []))
+        case_tokens = identifier_tokens(str(case.get("name") or ""))
+        assertion_tokens = set().union(*(
+            identifier_tokens(str(value)) for value in asserted
+        )) if asserted else set()
+        overlap = target_tokens & (case_tokens | assertion_tokens)
+        diff_overlap = diff_tokens & (case_tokens | assertion_tokens)
+        direct_reference = bool(identifier and identifier in referenced)
+        route_contract = (
+            symbol.get("kind") == "route"
+            and "router" in referenced
+            and len(overlap) >= 2
+        )
+        if symbol.get("requires_diff_overlap"):
+            reachable_match = (
+                reachable_from_import
+                and len(
+                    diff_overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS
+                ) >= 2
+            )
+        else:
+            reachable_match = (
+                reachable_from_import
+                and (
+                    len(overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS) >= 2
+                    or bool(
+                        (overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS)
+                        & assertion_tokens
+                    )
+                )
+            )
+        direct_match = (
+            direct_reference
+            and bool(overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS)
+        )
+        matched_case = (
+            route_contract
+            if contract_only
+            else direct_match or reachable_match
+        )
+        if (
+            matched_case
+            and symbol.get("requires_diff_overlap")
+            and not (diff_overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS)
+        ):
+            matched_case = False
+        if matched_case:
+            name = str(case.get("name") or "")
+            if name:
+                matched.add(name)
+    return matched
+
+
+def relation_relevance_score(
+    relation: dict[str, Any],
+    path: str,
+    symbols: Iterable[dict[str, Any]],
+) -> int:
+    """Rank weak relations by concrete behavior overlap, not module proximity."""
+    symbols_list = list(symbols)
+    target_tokens = behavior_tokens(path, symbols_list)
+    test_tokens = identifier_tokens(str(relation.get("path") or ""))
+    for value in relation.get("test_names", []):
+        test_tokens.update(identifier_tokens(str(value)))
+    overlap = target_tokens & test_tokens
+    score = len(overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS) * 18
+    symbol_names = {
+        str(symbol.get("name") or "")
+        for symbol in symbols_list if symbol.get("name")
+    }
+    linked = symbol_names & set(relation.get("assertion_linked_symbols", []))
+    if linked:
+        score += 100
+    reasons = " ".join(relation.get("relation_reasons", [])).lower()
+    for symbol in symbols_list:
+        identifier = symbol_identifier(symbol)
+        if identifier and (
+            f"references {identifier.lower()}" in reasons
+            or f"reaches {identifier.lower()}" in reasons
+        ):
+            score += 45
+    if relation.get("related_symbols"):
+        score += 5
+    if reasons and all(
+        reason.startswith("configured module relation")
+        for reason in relation.get("relation_reasons", [])
+    ):
+        score -= 30
+    return score
+
+
+def relevant_weak_relations(
+    relations: Iterable[dict[str, Any]],
+    path: str,
+    symbols: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return only weak tests a human could reasonably strengthen for this behavior."""
+    symbols_list = list(symbols)
+    ranked = sorted(
+        (
+            (relation_relevance_score(relation, path, symbols_list), relation)
+            for relation in relations
+        ),
+        key=lambda item: (-item[0], str(item[1].get("path") or "")),
+    )
+    return [relation for score, relation in ranked if score >= 18]
+
+
+def suggested_test_target(
+    repo: str,
+    path: str,
+    framework: str,
+    existing_tests: list[str],
+    *,
+    symbols: Iterable[dict[str, Any]] = (),
+    available_tests: Iterable[str] = (),
+) -> str:
+    """Propose one concrete place to add or strengthen the test."""
+    local_path = repo_local(path, repo)
+    source = Path(local_path)
+    prefix = "" if repo == "BIC-meta" else f"{repo}/"
+    symbol_list = list(symbols)
+    available = sorted(set(available_tests))
+    preferred: list[str] = []
+    if framework == "playwright":
+        stem = re.sub(r"[^a-z0-9]+", "-", source.stem.lower()).strip("-")
+        preferred.append(f"{prefix}tests/{stem or 'changed-behavior'}.spec.ts")
+    if source.suffix.lower() in {".ts", ".tsx", ".js", ".jsx"}:
+        preferred.append(
+            f"{prefix}{source.with_name(source.stem + '.test' + source.suffix).as_posix()}"
+        )
+    if source.suffix.lower() == ".py":
+        if "/repositories/" in f"/{local_path}":
+            entity = source.stem.removesuffix("_repo")
+            preferred.append(
+                f"{prefix}tests/unit/test_persistence_repo_{entity}.py"
+            )
+        preferred.append(f"{prefix}tests/unit/test_{source.stem}.py")
+
+    exact_available = [candidate for candidate in preferred if candidate in available]
+    if exact_available:
+        return exact_available[0]
+    if "/repositories/" in f"/{local_path}" and preferred:
+        return preferred[0]
+
+    ranked_existing = sorted(
+        (
+            (
+                relation_relevance_score(
+                    {
+                        "path": candidate,
+                        "test_names": [],
+                        "relation_reasons": [],
+                        "related_symbols": [],
+                        "assertion_linked_symbols": [],
+                    },
+                    path,
+                    symbol_list,
+                ),
+                candidate,
+            )
+            for candidate in set(existing_tests)
+        ),
+        key=lambda item: (
+            -item[0],
+            item[1],
+        ),
+    )
+    relevant_existing = [
+        candidate for score, candidate in ranked_existing if score >= 18
+    ]
+    if relevant_existing:
+        return relevant_existing[0]
+
+    target_tokens = behavior_tokens(path, symbol_list)
+    nearby = sorted(
+        available,
+        key=lambda candidate: (
+            -len(target_tokens & identifier_tokens(candidate)),
+            candidate,
+        ),
+    )
+    if nearby and len(target_tokens & identifier_tokens(nearby[0])) >= 2:
+        return nearby[0]
+    if preferred:
+        return preferred[0]
+    return f"{prefix}{local_path}"
+
+
+def browser_scenario_test_path(value: str) -> str | None:
+    match = re.search(
+        r"(?:^|:)([^:]+\.(?:spec|test)\.(?:js|jsx|ts|tsx))(?:[:]|$)",
+        value,
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
 def relation_weakness(relation: dict[str, Any]) -> str:
     """Describe a concrete test defect, not mere structural proximity."""
     if relation.get("disabled_tests"):
@@ -146,8 +441,10 @@ def grouped_guidance(
     symbols: list[dict[str, Any]],
     weak_relations: list[dict[str, Any]],
     missing_relation_symbols: list[str],
+    available_tests: Iterable[str] = (),
 ) -> dict[str, Any]:
     layer, framework, alternatives = guidance_profile(repo, module_scope, path, symbols)
+    weak_relations = relevant_weak_relations(weak_relations, path, symbols)
     symbol_names = sorted({str(symbol.get("name") or "") for symbol in symbols if symbol.get("name")})
     route = next((symbol for symbol in symbols if symbol.get("kind") == "route"), None)
     if route:
@@ -155,8 +452,18 @@ def grouped_guidance(
             f"{route.get('route_method', '')} {route.get('route_path', '')}".strip()
             or route.get("name")
         )
+    elif len(symbol_names) == 1 and "component" in {
+        str(symbol.get("kind") or "") for symbol in symbols
+    }:
+        behavior = f"{symbol_names[0]} user interaction"
+    elif symbol_names and len(symbol_names) <= 2:
+        behavior = " / ".join(symbol_names)
     else:
-        behavior = f"{Path(path).stem.replace('_', ' ')} behavior"
+        behavior = (
+            f"{Path(path).stem.replace('_', ' ')}: "
+            + ", ".join(symbol_names[:3])
+            + (f" (+{len(symbol_names) - 3})" if len(symbol_names) > 3 else "")
+        )
     all_existing_tests = sorted({
         str(relation.get("path"))
         for relation in weak_relations
@@ -171,10 +478,46 @@ def grouped_guidance(
             "no object-specific test relation was found for: "
             + ", ".join(sorted(set(missing_relation_symbols)))
         )
+    available = set(available_tests)
+    partial_evidence_targets = sorted({
+        str(relation.get("path"))
+        for relation in weak_relations
+        if relation.get("path")
+        and (
+            relation.get("contract_asserted_symbols")
+            or relation.get("evidence_level") == "contract-asserted"
+        )
+    })
+    target = (
+        partial_evidence_targets[0]
+        if partial_evidence_targets
+        else suggested_test_target(
+            repo,
+            path,
+            framework,
+            all_existing_tests,
+            symbols=symbols,
+            available_tests=available,
+        )
+    )
+    target_exists = target in available
     if action == "add":
         evidence_gaps = ["no active direct or safe-indirect test asserts this changed behavior"]
+    effective_action = (
+        "strengthen"
+        if target_exists or target in all_existing_tests
+        else "add"
+    )
+    if effective_action == "add":
+        evidence_gaps = ["no active direct or safe-indirect test asserts this changed behavior"]
+    elif target_exists and target not in all_existing_tests:
+        all_existing_tests.append(target)
+        all_existing_tests.sort()
+        evidence_gaps = [
+            "the existing test file has no active object- or behavior-linked assertion"
+        ]
     return {
-        "action": action,
+        "action": effective_action,
         "repo": repo,
         "module_scope": module_scope,
         "path": path,
@@ -190,6 +533,7 @@ def grouped_guidance(
         ),
         "evidence_gaps": evidence_gaps,
         "suggested_assertions": suggested_assertions(path, symbols),
+        "suggested_test_target": target,
     }
 
 
@@ -207,9 +551,17 @@ def browser_journey_guidance(
     journey_graph: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Recommend browser evidence separately from object-level unit guidance."""
+    nodes_by_id = {
+        str(node.get("id") or ""): node
+        for node in journey_graph.get("nodes", [])
+        if node.get("id")
+    }
     completed_by_anchor: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for path in journey_graph.get("paths", []):
         completed_by_anchor[str(path.get("anchor") or "")].append(path)
+    partial_by_anchor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for path in journey_graph.get("partial_paths", []):
+        partial_by_anchor[str(path.get("anchor") or "")].append(path)
     guidance: list[dict[str, Any]] = []
     for source in changed_symbols:
         for symbol in source.get("symbols", []):
@@ -224,6 +576,18 @@ def browser_journey_guidance(
                 for path in completed
                 if path.get("scenario")
             })
+            scenario_nodes = sorted(
+                (
+                    nodes_by_id[scenario]
+                    for scenario in scenarios
+                    if scenario in nodes_by_id
+                    and nodes_by_id[scenario].get("path")
+                ),
+                key=lambda node: (
+                    str(node.get("repo") or ""),
+                    str(node.get("path") or ""),
+                ),
+            )
             action = "strengthen" if completed else "add"
             method_path = (
                 f"{symbol.get('route_method', '')} {symbol.get('route_path', '')}".strip()
@@ -240,9 +604,39 @@ def browser_journey_guidance(
                 if protocol_terms & {"sse", "stream", "streaming", "websocket", "console"}
                 else []
             )
+            source_repo = str(source.get("repo") or "")
+            target_repo = source_repo
+            target_path: str | None = None
+            if scenario_nodes:
+                target_repo = str(scenario_nodes[0].get("repo") or source_repo)
+                target_path = str(scenario_nodes[0].get("path") or "")
+            else:
+                frontend_layers = {
+                    "api-client", "component", "frontend-module", "hook",
+                    "page", "store",
+                }
+                frontend_nodes = [
+                    nodes_by_id[node_id]
+                    for path in partial_by_anchor.get(anchor, [])
+                    for node_id in reversed(path.get("nodes", []))
+                    if node_id in nodes_by_id
+                    and nodes_by_id[node_id].get("repo")
+                    and nodes_by_id[node_id].get("repo") != source_repo
+                    and nodes_by_id[node_id].get("layer") in frontend_layers
+                ]
+                if frontend_nodes:
+                    target_repo = str(frontend_nodes[0].get("repo") or source_repo)
+            if not target_path:
+                target_path = suggested_test_target(
+                    target_repo,
+                    str(source.get("path") or ""),
+                    "playwright",
+                    [],
+                )
             guidance.append({
                 "action": action,
                 "repo": source.get("repo"),
+                "test_repo": target_repo,
                 "module_scope": "cross-stack-user-journey",
                 "path": source.get("path"),
                 "symbols": [symbol.get("name")],
@@ -251,6 +645,8 @@ def browser_journey_guidance(
                 "recommended_framework": "playwright",
                 "alternative_frameworks": alternatives,
                 "existing_tests": scenarios,
+                "existing_test_count": len(scenarios),
+                "existing_test_overflow": 0,
                 "evidence_gaps": [
                     (
                         "a static browser path exists, but its machine check is not tied to "
@@ -264,8 +660,372 @@ def browser_journey_guidance(
                     "assert the user-visible success state after the action",
                     "assert failure state and persistence after reload when applicable",
                 ],
+                "suggested_test_target": target_path,
             })
     return guidance
+
+
+def useful_public_symbol(value: str) -> bool:
+    name = value.rsplit(".", 1)[-1]
+    return bool(
+        value
+        and name != "__all__"
+        and not re.search(r"\.(?:json|ya?ml|md|rst|adoc)$", value, re.IGNORECASE)
+    )
+
+
+def public_test_tokens(relation: dict[str, Any]) -> set[str]:
+    tokens = identifier_tokens(str(relation.get("path") or ""))
+    for value in (
+        *relation.get("test_names", []),
+        *relation.get("selected_test_cases", []),
+        *relation.get("behavior_test_cases", []),
+        *relation.get("contract_test_cases", []),
+    ):
+        tokens.update(identifier_tokens(str(value)))
+    return tokens
+
+
+def explained_public_symbols(relation: dict[str, Any]) -> list[str]:
+    """Keep only objects named by the chain or meaningfully matched by the test."""
+    reasons = " ".join(relation.get("relation_reasons", [])).lower()
+    test_tokens = public_test_tokens(relation)
+    test_text = " ".join((
+        str(relation.get("path") or ""),
+        *[str(value) for value in relation.get("test_names", [])],
+        *[str(value) for value in relation.get("selected_test_cases", [])],
+        *[str(value) for value in relation.get("behavior_test_cases", [])],
+        *[str(value) for value in relation.get("contract_test_cases", [])],
+    )).lower()
+    explained: list[str] = []
+    for raw_symbol in relation.get("related_symbols", []):
+        symbol = str(raw_symbol)
+        if not useful_public_symbol(symbol):
+            continue
+        identifier = symbol.rsplit(".", 1)[-1]
+        symbol_tokens = identifier_tokens(identifier)
+        exact_reason = bool(identifier and identifier.lower() in reasons)
+        overlap = symbol_tokens & test_tokens
+        exact_case = bool(
+            identifier
+            and identifier.lower() in test_text
+            and (
+                identifier.lower() not in PUBLIC_GENERIC_BEHAVIOR_TOKENS
+                or "." in symbol
+            )
+        )
+        behavior_match = bool(
+            exact_case
+            or (overlap - PUBLIC_GENERIC_BEHAVIOR_TOKENS)
+            or len(overlap) >= 2
+        )
+        if exact_reason or behavior_match:
+            explained.append(symbol)
+    return explained
+
+
+def relevant_public_cases(
+    relation: dict[str, Any],
+    explained_symbols: Iterable[str],
+) -> list[str]:
+    symbols = [str(symbol) for symbol in explained_symbols]
+    selected = list(
+        relation.get("behavior_test_cases")
+        or relation.get("contract_test_cases")
+        or
+        relation.get("selected_test_cases")
+        or relation.get("test_names", [])
+    )
+    matched: list[str] = []
+    for case in selected:
+        case_text = str(case)
+        case_tokens = identifier_tokens(case_text)
+        if any(
+            (
+                (
+                    symbol.rsplit(".", 1)[-1].lower() in case_text.lower()
+                    and (
+                        symbol.rsplit(".", 1)[-1].lower()
+                        not in PUBLIC_GENERIC_BEHAVIOR_TOKENS
+                        or "." in symbol
+                    )
+                )
+                or bool(
+                    (
+                        identifier_tokens(symbol.rsplit(".", 1)[-1])
+                        & case_tokens
+                    ) - PUBLIC_GENERIC_BEHAVIOR_TOKENS
+                )
+                or len(
+                    identifier_tokens(symbol.rsplit(".", 1)[-1])
+                    & case_tokens
+                ) >= 2
+            )
+            for symbol in symbols
+        ):
+            matched.append(case_text)
+    if matched:
+        return matched[:3]
+    all_cases = list(relation.get("test_names", []))
+    if selected and all_cases and len(selected) < len(all_cases):
+        return [str(case) for case in selected[:3]]
+    return []
+
+
+def test_or_document_path(path: str) -> bool:
+    lowered = f"/{path.lower()}"
+    return bool(
+        "/tests/" in lowered
+        or re.search(r"\.(?:test|spec)\.[^.]+$", lowered)
+        or "/docs/" in lowered
+        or "/.trellis/" in lowered
+        or Path(path).suffix.lower() in DOCUMENTATION_SUFFIXES
+    )
+
+
+def relation_public_score(
+    relation: dict[str, Any],
+    relation_type: str,
+    explained_symbols: Iterable[str],
+) -> int:
+    score = 0
+    if relation.get("assertion_linked_symbols"):
+        score += 100
+    elif relation.get("assertion_linked_files"):
+        score += 55
+    elif relation.get("behavior_asserted_symbols"):
+        score += 75
+    elif relation.get("contract_asserted_symbols"):
+        score += 35
+    if relation.get("has_active_test_with_assertion"):
+        score += 20
+    useful_symbols = list(explained_symbols)
+    score += min(len(useful_symbols), 3) * 12
+    reasons = relation.get("relation_reasons", [])
+    if any("references " in reason or "statically reaches " in reason for reason in reasons):
+        score += 30
+    if any("which imports the changed file via" in reason for reason in reasons):
+        score += 10
+    if reasons and all(reason.startswith("configured module relation") for reason in reasons):
+        score -= 40
+    if relation_type == "possible":
+        target_tokens = set().union(*(
+            identifier_tokens(str(path)) for path in relation.get("related_files", [])
+        ))
+        candidate_tokens = public_test_tokens(relation)
+        score += len(target_tokens & candidate_tokens) * 18
+        if relation.get("path") in relation.get("related_files", []):
+            score -= 100
+    return score
+
+
+def public_assertion_status(relation: dict[str, Any]) -> str:
+    if relation.get("disabled_tests"):
+        return "disabled-or-skipped"
+    evidence_level = relation_evidence_level(relation)
+    if evidence_level != "related-only":
+        return evidence_level
+    if relation.get("assertions"):
+        return "related-only"
+    return "no-active-evidence"
+
+
+def relation_evidence_level(relation: dict[str, Any]) -> str:
+    """Return the strongest evidence level, including legacy/manual fixtures."""
+    if relation.get("assertion_linked_symbols"):
+        return "object-asserted"
+    if relation.get("behavior_asserted_symbols") or relation.get("behavior_asserted_files"):
+        return "behavior-asserted"
+    if relation.get("contract_asserted_symbols"):
+        return "contract-asserted"
+    if relation.get("assertion_linked_files") and not relation.get("related_symbols"):
+        return "object-asserted"
+    return "related-only"
+
+
+def public_behavior_label(relation: dict[str, Any]) -> str:
+    useful_symbols = explained_public_symbols(relation)
+    if useful_symbols:
+        return ", ".join(useful_symbols[:3])
+    related_files = [str(path) for path in relation.get("related_files", [])]
+    if related_files:
+        return Path(related_files[0]).stem
+    return "unresolved changed behavior"
+
+
+def public_relation_record(
+    relation: dict[str, Any],
+    relation_type: str,
+    explained_symbols: list[str] | None = None,
+) -> dict[str, Any]:
+    browser = relation.get("browser_evidence") or {}
+    useful_symbols = (
+        explained_public_symbols(relation)
+        if explained_symbols is None else explained_symbols
+    )
+    relevant_cases = relevant_public_cases(relation, useful_symbols)
+    return {
+        "relation_type": relation_type,
+        "repo": relation.get("repo"),
+        "path": relation.get("path"),
+        "framework": relation.get("framework"),
+        "target_behavior": (
+            ", ".join(useful_symbols[:3])
+            if useful_symbols else public_behavior_label(relation)
+        ),
+        "changed_objects": useful_symbols[:5],
+        "why_related": list(relation.get("relation_reasons", []))[:3],
+        "relevant_test_cases": relevant_cases,
+        "assertion_status": public_assertion_status(relation),
+        "evidence_level": relation_evidence_level(relation),
+        "browser_evidence": (
+            {
+                "framework": browser.get("framework"),
+                "actions": list(browser.get("actions", []))[:5],
+                "observations": list(browser.get("observations", []))[:5],
+                "has_machine_check": bool(browser.get("has_machine_check")),
+            }
+            if browser else None
+        ),
+    }
+
+
+def dedupe_public_relations(
+    items: Iterable[tuple[int, dict[str, Any]]],
+    limit: int,
+) -> list[dict[str, Any]]:
+    chosen: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for _score, item in sorted(
+        items,
+        key=lambda pair: (
+            -pair[0],
+            str(pair[1].get("repo") or ""),
+            str(pair[1].get("path") or ""),
+        ),
+    ):
+        key = (
+            str(item.get("repo") or ""),
+            str(item.get("path") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append(item)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
+def build_public_test_summary(
+    module_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a bounded, explainable view while preserving all raw relations."""
+    direct_ranked: list[tuple[int, dict[str, Any]]] = []
+    indirect_ranked: list[tuple[int, dict[str, Any]]] = []
+    possible_by_behavior: dict[str, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
+    raw_counts = {"direct": 0, "indirect": 0, "possible": 0}
+    module_summaries: list[dict[str, Any]] = []
+
+    for module in module_results:
+        module_public: dict[str, Any] = {
+            "repo": module.get("repo"),
+            "module_scope": module.get("module_scope"),
+            "direct": [],
+            "indirect": [],
+            "possible": [],
+        }
+        for relation_type, field in (
+            ("direct", "directly_related_tests"),
+            ("indirect", "indirectly_related_tests"),
+            ("possible", "possibly_related_tests"),
+        ):
+            relations = module.get(field, [])
+            raw_counts[relation_type] += len(relations)
+            ranked: list[tuple[int, dict[str, Any]]] = []
+            for relation in relations:
+                explained_symbols = explained_public_symbols(relation)
+                score = relation_public_score(
+                    relation, relation_type, explained_symbols,
+                )
+                record = public_relation_record(
+                    relation, relation_type, explained_symbols,
+                )
+                evidence_level = relation_evidence_level(relation)
+                if (
+                    relation_type == "direct"
+                    and explained_symbols
+                    and evidence_level != "related-only"
+                    and score >= 20
+                ):
+                    direct_ranked.append((score, record))
+                    ranked.append((score, record))
+                elif (
+                    relation_type == "indirect"
+                    and explained_symbols
+                    and evidence_level in {"object-asserted", "behavior-asserted"}
+                    and record["relevant_test_cases"]
+                    and score >= 22
+                ):
+                    indirect_ranked.append((score, record))
+                    ranked.append((score, record))
+                elif (
+                    relation_type == "possible"
+                    and not all(
+                        test_or_document_path(str(path))
+                        for path in relation.get("related_files", [])
+                    )
+                    and score >= 18
+                ):
+                    possible_by_behavior[record["target_behavior"]].append((score, record))
+                    ranked.append((score, record))
+            module_public[relation_type] = dedupe_public_relations(ranked, 3)
+        module_summaries.append(module_public)
+
+    direct = dedupe_public_relations(direct_ranked, MAX_PUBLIC_DIRECT_TESTS)
+    indirect = dedupe_public_relations(indirect_ranked, MAX_PUBLIC_INDIRECT_TESTS)
+    established_paths = {
+        (str(item.get("repo") or ""), str(item.get("path") or ""))
+        for item in [*direct, *indirect]
+    }
+    possible_groups = [
+        {
+            "target_behavior": behavior,
+            "candidates": [
+                item for item in dedupe_public_relations(
+                    ranked, MAX_PUBLIC_POSSIBLE_PER_BEHAVIOR
+                )
+                if (
+                    str(item.get("repo") or ""),
+                    str(item.get("path") or ""),
+                ) not in established_paths
+            ],
+        }
+        for behavior, ranked in sorted(
+            possible_by_behavior.items(),
+            key=lambda item: (-max(score for score, _record in item[1]), item[0]),
+        )[:MAX_PUBLIC_POSSIBLE_GROUPS]
+    ]
+    possible_groups = [
+        group for group in possible_groups if group["candidates"]
+    ]
+    return {
+        "selection_rule": (
+            "Only bounded relations with concrete changed objects, explainable import/"
+            "reference chains, or meaningful behavior terms are shown. Raw relations remain "
+            "available for diagnostics and Phase 2 candidate construction."
+        ),
+        "raw_relation_counts": raw_counts,
+        "displayed_relation_counts": {
+            "direct": len(direct),
+            "indirect": len(indirect),
+            "possible": sum(len(group["candidates"]) for group in possible_groups),
+        },
+        "directly_related_tests": direct,
+        "indirectly_related_tests": indirect,
+        "possibly_related_test_groups": possible_groups,
+        "modules": module_summaries,
+    }
 
 
 def repo_local(path: str, repo: str) -> str:
@@ -614,16 +1374,56 @@ def declaration_reachable_changed_symbols(
         if identifier:
             by_identifier[identifier].append(symbol)
 
-    pending = [str(root) for root in roots if str(root) in by_identifier]
-    reachable: set[str] = set()
     safe_path, _ = safe_repository_file(path, repository_root)
+    reachable: set[str] = set()
     if safe_path is None:
         return reachable
     try:
-        lines = safe_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        content = safe_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return reachable
 
+    if safe_path.suffix == ".py":
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            tree = None
+        if tree is not None:
+            declarations: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = defaultdict(list)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    declarations[node.name].append(node)
+            pending = [
+                str(root) for root in roots
+                if str(root) in declarations or str(root) in by_identifier
+            ]
+            seen_identifiers: set[str] = set()
+            while pending:
+                identifier = pending.pop()
+                if identifier in seen_identifiers:
+                    continue
+                seen_identifiers.add(identifier)
+                reachable.update(
+                    str(symbol["name"])
+                    for symbol in by_identifier.get(identifier, [])
+                )
+                referenced: set[str] = set()
+                for declaration in declarations.get(identifier, []):
+                    for node in ast.walk(declaration):
+                        if isinstance(node, ast.Name):
+                            referenced.add(node.id)
+                        elif isinstance(node, ast.Attribute):
+                            referenced.add(node.attr)
+                pending.extend(sorted(
+                    (
+                        referenced
+                        & (set(declarations) | set(by_identifier))
+                    ) - seen_identifiers
+                ))
+            return reachable
+
+    lines = content.splitlines()
+    pending = [str(root) for root in roots if str(root) in by_identifier]
     seen_identifiers: set[str] = set()
     while pending:
         identifier = pending.pop()
@@ -717,6 +1517,11 @@ def relation_record(
     related_case_names: Iterable[str] | None = None,
     assertion_linked_symbols: Iterable[str] | None = None,
     assertion_linked_files: Iterable[str] | None = None,
+    behavior_asserted_symbols: Iterable[str] | None = None,
+    behavior_asserted_files: Iterable[str] | None = None,
+    behavior_case_names: Iterable[str] | None = None,
+    contract_asserted_symbols: Iterable[str] | None = None,
+    contract_case_names: Iterable[str] | None = None,
     related_browser_target_ids: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     facts = asset.get("test_facts", {})
@@ -771,6 +1576,11 @@ def relation_record(
         set(related_files_set) if assertion_linked_files is None
         else set(assertion_linked_files)
     )
+    behavior_symbols = set(behavior_asserted_symbols or [])
+    behavior_files = set(behavior_asserted_files or [])
+    behavior_cases = set(behavior_case_names or [])
+    contract_symbols = set(contract_asserted_symbols or [])
+    contract_cases = set(contract_case_names or [])
     if not has_active_assertion:
         linked_symbols.clear()
         linked_files.clear()
@@ -821,6 +1631,22 @@ def relation_record(
         "related_symbols": sorted(related_symbols_set),
         "assertion_linked_files": sorted(linked_files),
         "assertion_linked_symbols": sorted(linked_symbols),
+        "behavior_asserted_files": sorted(behavior_files),
+        "behavior_asserted_symbols": sorted(behavior_symbols),
+        "behavior_test_cases": sorted(behavior_cases),
+        "contract_asserted_symbols": sorted(contract_symbols),
+        "contract_test_cases": sorted(contract_cases),
+        "evidence_level": (
+            "object-asserted"
+            if linked_symbols
+            else "behavior-asserted"
+            if behavior_symbols or behavior_files
+            else "contract-asserted"
+            if contract_symbols
+            else "object-asserted"
+            if linked_files and not related_symbols_set
+            else "related-only"
+        ),
         "imports": facts.get("imports", []),
         "test_names": test_names,
         "scenario_names": scenario_names,
@@ -1453,6 +2279,62 @@ def analyze_test_relations(
         tuple[Path, Path, tuple[str, ...], tuple[tuple[str, int | None, int | None], ...]],
         set[str],
     ] = {}
+    changed_file_by_path = {
+        str(item.get("path") or ""): item
+        for item in scope.get("changed_files", [])
+    }
+    source_lines_cache: dict[str, list[str]] = {}
+
+    def enrich_symbol_diff(
+        repo: str,
+        repo_root: Path,
+        path: str,
+        symbol: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Attach changed-line terms for large container attribution."""
+        changed_file = changed_file_by_path.get(path, {})
+        start = symbol.get("new_start_line") or symbol.get("start_line")
+        end = symbol.get("new_end_line") or symbol.get("end_line")
+        if not isinstance(start, int) or not isinstance(end, int):
+            return symbol
+        if path not in source_lines_cache:
+            source_path, _ = safe_repository_file(
+                workspace_root / path,
+                repo_root,
+            )
+            source_lines_cache[path] = (
+                source_path.read_text(
+                    encoding="utf-8",
+                    errors="ignore",
+                ).splitlines()
+                if source_path is not None
+                else []
+            )
+        lines = source_lines_cache[path]
+        changed_lines: set[int] = set()
+        for hunk in changed_file.get("diff_hunks", []):
+            hunk_start = hunk.get("new_start")
+            hunk_end = hunk.get("new_end")
+            if not isinstance(hunk_start, int) or not isinstance(hunk_end, int):
+                continue
+            if hunk_end < hunk_start:
+                continue
+            for line_number in range(max(start, hunk_start), min(end, hunk_end) + 1):
+                changed_lines.add(line_number)
+        tokens: set[str] = set()
+        for line_number in changed_lines:
+            if 1 <= line_number <= len(lines):
+                tokens.update(identifier_tokens(lines[line_number - 1]))
+        span = max(1, end - start + 1)
+        return {
+            **symbol,
+            "diff_tokens": sorted(tokens),
+            "requires_diff_overlap": bool(
+                span >= 80
+                and changed_lines
+                and len(changed_lines) <= max(8, span // 5)
+            ),
+        }
 
     def reachable_symbols(
         path: Path,
@@ -1496,7 +2378,21 @@ def analyze_test_relations(
         repo, module = key
         repo_root = workspace_root if repo == "BIC-meta" else workspace_root / repo
         changed = module_files[key]
-        module_symbol_items = [symbols_by_path[item["path"]] for item in changed if item["path"] in symbols_by_path]
+        module_symbol_items = [
+            {
+                **symbols_by_path[item["path"]],
+                "symbols": [
+                    enrich_symbol_diff(
+                        repo,
+                        repo_root,
+                        item["path"],
+                        symbol,
+                    )
+                    for symbol in symbols_by_path[item["path"]]["symbols"]
+                ],
+            }
+            for item in changed if item["path"] in symbols_by_path
+        ]
         flattened_symbols = [
             {**symbol, "path": item["path"], "change_types": item.get("change_types", [])}
             for item in module_symbol_items for symbol in item["symbols"]
@@ -1524,6 +2420,11 @@ def analyze_test_relations(
             direct_assertion_cases: set[str] = set()
             direct_assertion_files: set[str] = set()
             direct_assertion_symbols: set[str] = set()
+            direct_behavior_cases: set[str] = set()
+            direct_behavior_files: set[str] = set()
+            direct_behavior_symbols: set[str] = set()
+            direct_contract_cases: set[str] = set()
+            direct_contract_symbols: set[str] = set()
             configured_entries = [
                 entry for entry in inventory_by_asset[asset["path"]]
                 if key in configured_targets(entry)
@@ -1574,7 +2475,7 @@ def analyze_test_relations(
                         linked_root_identifiers = source_identifiers & linked_identifiers
                         reachable_names = (
                             reachable_changed_declarations(
-                                source_path, source["symbols"], source_root_identifiers,
+                                source_path, source["symbols"], identifiers,
                                 repository_root=repo_root,
                             )
                             if source_path is not None
@@ -1590,22 +2491,52 @@ def analyze_test_relations(
                         )
                         for symbol in source["symbols"]:
                             identifier = symbol_identifier(symbol)
-                            if identifier and (
+                            symbol_is_reachable = bool(identifier and (
                                 identifier in source_root_identifiers
                                 or str(symbol["name"]) in reachable_names
-                            ):
+                            ))
+                            behavior_cases = behavior_case_names(
+                                {**symbol, "path": source["path"]},
+                                facts.get("test_cases", []),
+                                reachable_from_import=symbol_is_reachable,
+                            )
+                            contract_cases = (
+                                behavior_case_names(
+                                    {**symbol, "path": source["path"]},
+                                    facts.get("test_cases", []),
+                                    reachable_from_import=False,
+                                    contract_only=True,
+                                )
+                                if symbol.get("kind") == "route"
+                                else set()
+                            )
+                            if symbol_is_reachable or behavior_cases or contract_cases:
                                 related_symbols.add(symbol["name"])
-                                if identifier in source_root_identifiers:
+                                if identifier and identifier in source_root_identifiers:
                                     reasons.append(f"references {identifier} from the imported changed file")
-                                else:
+                                elif identifier and symbol_is_reachable:
                                     reasons.append(
                                         f"reaches {identifier} from a referenced declaration in the imported changed file"
                                     )
                                 if (
+                                    identifier
+                                    and (
                                     identifier in linked_root_identifiers
                                     or str(symbol["name"]) in assertion_reachable_names
+                                    )
+                                    and (
+                                        not symbol.get("requires_diff_overlap")
+                                        or behavior_cases
+                                    )
                                 ):
                                     direct_assertion_symbols.add(symbol["name"])
+                                if behavior_cases:
+                                    direct_behavior_symbols.add(symbol["name"])
+                                    direct_behavior_files.add(source["path"])
+                                    direct_behavior_cases.update(behavior_cases)
+                                if contract_cases:
+                                    direct_contract_symbols.add(symbol["name"])
+                                    direct_contract_cases.update(contract_cases)
 
                     matching_targets = [
                         target for target in target_calls
@@ -1653,6 +2584,11 @@ def analyze_test_relations(
                     assertion_linked_files=(
                         direct_assertion_files if has_assertion_linkage_facts else None
                     ),
+                    behavior_asserted_symbols=direct_behavior_symbols,
+                    behavior_asserted_files=direct_behavior_files,
+                    behavior_case_names=direct_behavior_cases,
+                    contract_asserted_symbols=direct_contract_symbols,
+                    contract_case_names=direct_contract_cases,
                 ))
 
             asset_has_indirect_relation = False
@@ -1853,6 +2789,18 @@ def analyze_test_relations(
         diagnostic_test_guidance: list[dict[str, Any]] = []
         no_gaps: list[str] = []
         non_testable_changes: dict[str, str] = {}
+        asserted_symbol_names = {
+            str(name)
+            for relation in [*direct, *indirect]
+            for name in [
+                *(
+                    relation.get("assertion_linked_symbols", [])
+                    if relation.get("has_active_test_with_assertion")
+                    else []
+                ),
+                *relation.get("behavior_asserted_symbols", []),
+            ]
+        }
         for symbol in flattened_symbols:
             applicable, exclusion_reason = guidance_applicability(symbol["path"], module)
             if not applicable:
@@ -1872,19 +2820,25 @@ def analyze_test_relations(
                 if name in relation["related_symbols"]
             ]
             active_direct = any(
-                relation["has_active_test_with_assertion"]
-                and (
+                (
+                    relation["has_active_test_with_assertion"]
+                    and (
                     name in relation["assertion_linked_symbols"]
                     or (
                         symbol["kind"] in {"file", "changed-file", "module-scope"}
                         and symbol["path"] in relation["assertion_linked_files"]
                     )
+                    )
                 )
+                or name in relation.get("behavior_asserted_symbols", [])
                 for relation in direct_for_object
             )
             active_indirect = any(
-                relation["has_active_test_with_assertion"]
-                and name in relation["assertion_linked_symbols"]
+                (
+                    relation["has_active_test_with_assertion"]
+                    and name in relation["assertion_linked_symbols"]
+                )
+                or name in relation.get("behavior_asserted_symbols", [])
                 for relation in indirect_for_object
             )
             if "added" in symbol.get("change_types", []):
@@ -1896,6 +2850,16 @@ def analyze_test_relations(
             subject = f"{symbol['kind']} {name} in {symbol['path']} ({observation})"
             if active_direct or active_indirect:
                 no_gaps.append(f"No obvious static gap for {subject}: an active object-related test contains an assertion.")
+                continue
+            if asserted_store_action_covers_container(
+                symbol,
+                flattened_symbols,
+                asserted_symbol_names,
+            ):
+                no_gaps.append(
+                    f"No standalone static gap for {subject}: the changed store "
+                    "action inside this broad container has object-level evidence."
+                )
                 continue
             if symbol["kind"] in FILE_ONLY_GUIDANCE_KINDS or name == "__all__":
                 diagnostic_test_guidance.append({
@@ -1911,7 +2875,22 @@ def analyze_test_relations(
             weak_relations = [
                 relation
                 for relation in [*direct_for_object, *indirect_for_object]
-                if not relation.get("has_active_test_with_assertion")
+                if not (
+                    (
+                        relation.get("has_active_test_with_assertion")
+                        and (
+                        name in relation.get("assertion_linked_symbols", [])
+                        or (
+                            symbol["kind"] in {
+                                "file", "changed-file", "module-scope"
+                            }
+                            and symbol["path"]
+                            in relation.get("assertion_linked_files", [])
+                        )
+                        )
+                    )
+                    or name in relation.get("behavior_asserted_symbols", [])
+                )
             ]
             group = guidance_groups.setdefault(
                 symbol["path"],
@@ -1939,6 +2918,11 @@ def analyze_test_relations(
                 group["symbols"],
                 group["weak_relations"],
                 group["missing_relation_symbols"],
+                [
+                    str(asset.get("path"))
+                    for asset in test_assets
+                    if asset.get("path")
+                ],
             )
             for _key, group in sorted(guidance_groups.items())
         ]
@@ -1989,6 +2973,7 @@ def analyze_test_relations(
     ] + browser_guidance
     return {
         "modules": module_results,
+        "public_summary": build_public_test_summary(module_results),
         "user_journey_graph": journey_graph,
         "test_guidance": all_guidance,
         "browser_test_guidance": browser_guidance,

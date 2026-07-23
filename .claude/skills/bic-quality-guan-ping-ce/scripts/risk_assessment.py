@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+PUBLIC_NON_SOURCE_MODULES = {"portal/tests", "agent/tests", "meta/docs", "meta/test-config"}
 
 
 def evidence_row(
@@ -31,6 +35,274 @@ def module_names(scope: dict[str, Any]) -> set[str]:
         for module in modules
         if module.get("module_scope")
     }
+
+
+def changed_behavior_summary(module: dict[str, Any]) -> list[str]:
+    """Describe concrete changed routes/objects without dumping every declaration."""
+    descriptions: list[str] = []
+    for symbol in module.get("changed_symbols", []):
+        kind = str(symbol.get("kind") or "")
+        if kind in {"file", "changed-file", "module-scope"}:
+            continue
+        if kind == "route" and symbol.get("route_path"):
+            value = (
+                f"{symbol.get('route_method', '')} {symbol.get('route_path', '')}"
+            ).strip()
+        else:
+            value = str(symbol.get("name") or "")
+        if value and value != "__all__" and value not in descriptions:
+            descriptions.append(value)
+    if descriptions:
+        return descriptions[:6]
+    paths = [
+        str(item.get("path") or "")
+        for item in module.get("changed_files", [])
+        if item.get("path")
+    ]
+    return paths[:3]
+
+
+def relation_evidence_summary(item: dict[str, Any]) -> str:
+    cases = (
+        item.get("relevant_test_cases")
+        or item.get("behavior_test_cases")
+        or item.get("contract_test_cases")
+        or item.get("selected_test_cases")
+        or item.get("test_names")
+        or []
+    )
+    assertion = item.get("evidence_level") or item.get("assertion_status")
+    suffix = f"；{assertion}" if assertion else ""
+    if cases:
+        return f"{item.get('path')}（{cases[0]}{suffix}）"
+    return f"{item.get('path')}{suffix}"
+
+
+def unique_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def build_brief_evidence_matrix(
+    correspondence: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Create object/behavior rows without borrowing evidence from a whole module."""
+
+    def terms(value: str) -> set[str]:
+        separated = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
+        return {
+            token for token in re.findall(r"[A-Za-z0-9]+", separated.lower())
+            if len(token) > 2
+            and token not in {
+                "app", "src", "test", "tests", "unit", "service", "session",
+                "state", "target", "result", "helper", "manager",
+            }
+        }
+
+    def supports(
+        relation: dict[str, Any],
+        path: str,
+        symbols: set[str],
+    ) -> tuple[str | None, set[str]]:
+        related = set(relation.get("related_symbols", []))
+        object_linked = symbols & set(relation.get("assertion_linked_symbols", []))
+        behavior_linked = symbols & set(relation.get("behavior_asserted_symbols", []))
+        contract_linked = symbols & set(relation.get("contract_asserted_symbols", []))
+        if object_linked:
+            return "object-asserted", object_linked
+        if behavior_linked:
+            return "behavior-asserted", behavior_linked
+        if contract_linked:
+            return "contract-asserted", contract_linked
+        if not symbols and path in relation.get("assertion_linked_files", []):
+            return "object-asserted", set()
+        if symbols & related:
+            return None, symbols & related
+        return None, set()
+
+    def evidence_for(
+        module: dict[str, Any],
+        path: str,
+        symbols: set[str],
+    ) -> list[dict[str, Any]]:
+        ranked: list[tuple[int, dict[str, Any]]] = []
+        for relation in [
+            *module.get("directly_related_tests", []),
+            *module.get("indirectly_related_tests", []),
+        ]:
+            level, linked = supports(relation, path, symbols)
+            if level is None:
+                continue
+            score = {
+                "object-asserted": 300,
+                "behavior-asserted": 220,
+                "contract-asserted": 140,
+            }[level]
+            score += len(linked) * 10
+            score += len(relation.get("behavior_test_cases", [])) * 8
+            if path in relation.get("related_files", []):
+                score += 20
+            behavior_terms = set().union(*(terms(name) for name in symbols))
+            cases = (
+                relation.get("behavior_test_cases")
+                or relation.get("contract_test_cases")
+                or relation.get("selected_test_cases")
+                or relation.get("test_names")
+                or []
+            )
+            ranked_cases = sorted(
+                (str(case) for case in cases),
+                key=lambda case: (
+                    -len(behavior_terms & terms(case)),
+                    case,
+                ),
+            )
+            best_case_overlap = (
+                len(behavior_terms & terms(ranked_cases[0]))
+                if ranked_cases else 0
+            )
+            score += best_case_overlap * 25
+            ranked.append((
+                score,
+                {
+                    **relation,
+                    "evidence_level": level,
+                    "relevant_test_cases": ranked_cases[:3],
+                },
+            ))
+        ranked.sort(key=lambda item: (-item[0], str(item[1].get("path") or "")))
+        if not ranked:
+            return []
+        best = ranked[0][0]
+        return [
+            item for score, item in ranked
+            if score >= best - 15
+        ][:2]
+
+    rows: list[dict[str, Any]] = []
+    for module in correspondence.get("modules", []):
+        repo = str(module.get("repo") or "")
+        module_scope = str(module.get("module_scope") or "")
+        if module_scope in PUBLIC_NON_SOURCE_MODULES:
+            continue
+        symbols_by_path: dict[str, list[dict[str, Any]]] = {}
+        for symbol in module.get("changed_symbols", []):
+            if symbol.get("kind") in {"file", "changed-file", "module-scope"}:
+                continue
+            if symbol.get("name") == "__all__":
+                continue
+            symbols_by_path.setdefault(str(symbol.get("path") or ""), []).append(symbol)
+        guidance_by_path = {
+            str(item.get("path") or ""): item
+            for item in module.get("test_guidance", [])
+        }
+        for path, path_symbols in symbols_by_path.items():
+            guidance = guidance_by_path.get(path)
+            requested_names = set(
+                guidance.get("symbols", []) if guidance else []
+            )
+            groups: list[tuple[list[dict[str, Any]], dict[str, Any] | None]] = []
+            if guidance:
+                uncovered = [
+                    symbol for symbol in path_symbols
+                    if str(symbol.get("name") or "") in requested_names
+                ]
+                if uncovered:
+                    groups.append((uncovered, guidance))
+            covered = [
+                symbol for symbol in path_symbols
+                if str(symbol.get("name") or "") not in requested_names
+            ]
+            if covered:
+                groups.append((covered, None))
+            for group_symbols, group_guidance in groups:
+                names = {
+                    str(symbol.get("name") or "")
+                    for symbol in group_symbols if symbol.get("name")
+                }
+                relations = evidence_for(module, path, names)
+                existing = unique_strings([
+                    relation_evidence_summary(item) for item in relations
+                ])
+                levels = unique_strings([
+                    str(item.get("evidence_level") or "related-only")
+                    for item in relations
+                ])
+                open_items = (
+                    list(group_guidance.get("evidence_gaps", []))
+                    if group_guidance
+                    else ["no obvious static test gap was identified for this behavior"]
+                )
+                recommendations = (
+                    [
+                        (
+                            f"{group_guidance.get('action')} "
+                            f"{group_guidance.get('recommended_framework')} at "
+                            f"{group_guidance.get('suggested_test_target')}"
+                        )
+                    ]
+                    if group_guidance else ["none"]
+                )
+                behavior = [
+                    str(symbol.get("name") or "")
+                    for symbol in group_symbols if symbol.get("name")
+                ]
+                focus = (
+                    str(group_guidance.get("target_behavior") or "")
+                    if group_guidance
+                    else " / ".join(behavior[:2])
+                )
+                rows.append({
+                    "quality_focus": focus or f"{repo} / {module_scope}",
+                    "changed_behavior": behavior,
+                    "existing_test_evidence": (
+                        existing
+                        or ["no object- or behavior-linked active test evidence"]
+                    ),
+                    "evidence_strength": levels or ["none"],
+                    "open_evidence": open_items,
+                    "recommendation": recommendations,
+                })
+
+    browser_guidance = correspondence.get("browser_test_guidance", [])
+    if browser_guidance:
+        journey = correspondence.get("user_journey_graph", {})
+        rows.append({
+            "quality_focus": "browser user journey",
+            "changed_behavior": [
+                str(item.get("target_behavior") or "") for item in browser_guidance
+            ],
+            "existing_test_evidence": [
+                test
+                for item in browser_guidance
+                for test in item.get("existing_tests", [])
+            ] or ["no completed static browser path reaches this behavior"],
+            "evidence_strength": ["static-browser-path"],
+            "open_evidence": [
+                (
+                    f"{item.get('action')} {item.get('recommended_framework')} at "
+                    f"{item.get('suggested_test_target')}；"
+                    f"{'; '.join(item.get('evidence_gaps', []))}"
+                )
+                for item in browser_guidance
+            ] + [
+                (
+                    f"static paths: {len(journey.get('paths', []))} completed, "
+                    f"{len(journey.get('partial_paths', []))} partial; not executed"
+                )
+            ],
+            "recommendation": [
+                (
+                    f"{item.get('action')} {item.get('recommended_framework')} at "
+                    f"{item.get('suggested_test_target')}"
+                )
+                for item in browser_guidance
+            ],
+        })
+    return rows[:20]
 
 
 def assess_pretest_evidence(
@@ -263,6 +535,7 @@ def assess_pretest_evidence(
             "test_execution": "not-run",
         },
         "quality_evidence_matrix": rows,
+        "brief_evidence_matrix": build_brief_evidence_matrix(correspondence),
         "open_evidence_items": open_items,
         "requires_semantic_issue_alignment": alignment_enabled,
         "issue_acceptance_items": acceptance_items,

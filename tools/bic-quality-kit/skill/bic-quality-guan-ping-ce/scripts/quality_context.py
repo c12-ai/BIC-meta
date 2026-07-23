@@ -630,6 +630,7 @@ def assess_quality(
         "mode": "requirement-aligned" if alignment_enabled else "technical-only",
         "requirement_alignment_enabled": alignment_enabled,
         "requirement_summary": issue.get("default_report_summary"),
+        "show_issue_section": alignment_enabled,
         "show_issue_candidate_diagnostics": False,
         "show_acceptance_alignment": alignment_enabled,
         "show_requirement_traced_guidance": alignment_enabled,
