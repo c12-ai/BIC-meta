@@ -121,7 +121,9 @@ def configured_cdp_argv(
         except ValueError:
             continue
         if argv[:2] == ["pnpm", "run"] and len(argv) == 3:
-            return argv, "configured-package-script"
+            return [
+                "npm", "run", "--silent", argv[2],
+            ], "configured-package-script"
     return None, "command-resolution-required"
 
 
@@ -134,23 +136,29 @@ def command_for_case(
     repo = str(record.get("repo") or "")
     local_path = repo_local_path(path, repo)
     framework = str(record.get("framework") or "")
+    asset = inventory_assets(inventory).get((repo, path))
+    facts = case_facts(asset, case_name) or {}
+    selector = str(facts.get("selector") or case_name)
     if framework == "pytest":
-        asset = inventory_assets(inventory).get((repo, path))
-        facts = case_facts(asset, case_name) or {}
         selector = str(facts.get("selector") or case_name)
         return [
-            "uv", "run", "pytest", f"{local_path}::{selector}", "-q",
+            "uv", "run", "--no-sync", "pytest",
+            f"{local_path}::{selector}", "-q",
         ], "derived-case-command", selector
     if framework == "vitest":
         return [
-            "pnpm", "exec", "vitest", "run", local_path,
-            "-t", exact_name_pattern(case_name),
-        ], "derived-case-command", case_name
+            "node", "node_modules/vitest/vitest.mjs", "run", local_path,
+            "-t", exact_name_pattern(selector),
+        ], "derived-case-command", selector
     if framework == "playwright":
+        start_line = facts.get("start_line")
+        if not isinstance(start_line, int) or start_line < 1:
+            return None, "case-location-required", selector
+        location = f"{local_path}:{start_line}"
         return [
-            "pnpm", "exec", "playwright", "test", local_path,
-            "-g", exact_name_pattern(case_name), "--workers=1",
-        ], "derived-case-command", case_name
+            "node", "node_modules/@playwright/test/cli.js", "test",
+            location, "--workers=1",
+        ], "derived-case-command", location
     if framework == "cdp":
         argv, source = configured_cdp_argv(repo, inventory)
         return argv, source, case_name

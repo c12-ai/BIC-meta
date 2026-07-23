@@ -26,13 +26,17 @@ from execution_manifest import repository_records, workspace_fingerprint
 FOUNDATION_LAYERS = {"backend", "frontend"}
 LAYER_ORDER = ("backend", "frontend", "browser", "browser-diagnostic")
 ALLOWED_PREFIXES = {
-    "pytest": ("uv", "run", "pytest"),
-    "vitest": ("pnpm", "exec", "vitest"),
-    "playwright": ("pnpm", "exec", "playwright"),
-    "cdp": ("pnpm", "run"),
+    "pytest": ("uv", "run", "--no-sync", "pytest"),
+    "vitest": ("node", "node_modules/vitest/vitest.mjs"),
+    "playwright": ("node", "node_modules/@playwright/test/cli.js"),
+    "cdp": ("npm", "run", "--silent"),
 }
 SKIPPED_RE = re.compile(
     r"\b[1-9]\d*\s+(?:skipped|skip|pending)\b",
+    re.IGNORECASE,
+)
+PASSED_RE = re.compile(
+    r"\b[1-9]\d*\s+passed\b",
     re.IGNORECASE,
 )
 NO_TESTS_RE = re.compile(
@@ -120,31 +124,42 @@ def validate_candidate(
     if allowed is None or tuple(argv[:len(allowed)]) != allowed:
         return None, f"command argv is not allowed for {framework or 'unknown framework'}"
     case_name = str(candidate.get("test_case") or "")
+    selector = str(candidate.get("test_selector") or case_name)
     if not case_name:
         return None, "manifest test case is missing"
     if framework == "pytest":
-        selector = str(candidate.get("test_selector") or case_name)
         expected = [
-            "uv", "run", "pytest", f"{local_path}::{selector}", "-q",
+            "uv", "run", "--no-sync", "pytest",
+            f"{local_path}::{selector}", "-q",
         ]
         if argv != expected:
             return None, "pytest argv does not exactly select the manifest test case"
+        if not (root / ".venv/bin/pytest").is_file():
+            return None, "pytest environment is missing; phase 2 will not install dependencies"
     elif framework == "vitest":
         expected = [
-            "pnpm", "exec", "vitest", "run", local_path,
-            "-t", f"^{re.escape(case_name)}$",
+            "node", "node_modules/vitest/vitest.mjs", "run", local_path,
+            "-t", f"^{re.escape(selector)}$",
         ]
         if argv != expected:
             return None, "Vitest argv does not exactly select the manifest test case"
+        if not (root / "node_modules/vitest/vitest.mjs").is_file():
+            return None, "Vitest dependency is missing; phase 2 will not install dependencies"
     elif framework == "playwright":
+        location = str(candidate.get("test_selector") or "")
         expected = [
-            "pnpm", "exec", "playwright", "test", local_path,
-            "-g", f"^{re.escape(case_name)}$", "--workers=1",
+            "node", "node_modules/@playwright/test/cli.js", "test",
+            location, "--workers=1",
         ]
-        if argv != expected:
+        if (
+            argv != expected
+            or re.fullmatch(rf"{re.escape(local_path)}:[1-9]\d*", location) is None
+        ):
             return None, "Playwright argv does not exactly select the manifest test case"
+        if not (root / "node_modules/@playwright/test/cli.js").is_file():
+            return None, "Playwright dependency is missing; phase 2 will not install dependencies"
     elif framework == "cdp":
-        if len(argv) != 3 or not re.fullmatch(r"[A-Za-z0-9:_-]+", argv[2]):
+        if len(argv) != 4 or not re.fullmatch(r"[A-Za-z0-9:_-]+", argv[3]):
             return None, "CDP argv must select one repository-owned CDP package script"
         package_path = root / "package.json"
         if not package_path.is_file() or package_path.is_symlink():
@@ -153,11 +168,17 @@ def validate_candidate(
             package = json.loads(package_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None, "repository package.json for the CDP command is invalid"
-        script_value = package.get("scripts", {}).get(argv[2])
+        script_value = package.get("scripts", {}).get(argv[3])
         if not isinstance(script_value, str):
             return None, "CDP package script is no longer configured"
-        if "cdp" not in f"{argv[2]} {script_value}".lower():
+        if "cdp" not in f"{argv[3]} {script_value}".lower():
             return None, "configured package script is not a CDP diagnostic"
+        if re.search(
+            r"\b(?:pnpm|npm|yarn|npx|bunx)\s+(?:install|add|i|dlx)\b",
+            script_value,
+            re.IGNORECASE,
+        ):
+            return None, "CDP package script may install dependencies"
     if shutil.which(argv[0]) is None:
         return None, f"required executable {argv[0]!r} is not installed"
     return root, None
@@ -183,6 +204,8 @@ def command_status(returncode: int, stdout: str, stderr: str) -> str:
     combined = f"{stdout}\n{stderr}"
     if returncode != 0:
         return "blocked" if NO_TESTS_RE.search(combined) else "failed"
+    if PASSED_RE.search(combined):
+        return "passed"
     if SKIPPED_RE.search(combined):
         return "skipped"
     return "passed"

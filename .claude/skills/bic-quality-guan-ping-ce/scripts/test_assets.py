@@ -1027,11 +1027,18 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     executable_code = JS_NONCODE_RE.sub(" ", content)
     test_names = sorted({match.group(3) for match in test_matches if match.group(1) in {"test", "it"}})
     scenario_names = sorted({match.group(3) for match in test_matches})
-    disabled_suite_ranges = [
-        js_test_body_range(content, match.end())
-        for match in test_matches
-        if match.group(1) == "describe" and match.group(2) in {"skip", "todo", "fixme"}
-    ]
+    suite_ranges = []
+    for match in test_matches:
+        if match.group(1) != "describe":
+            continue
+        body_start, body_end = js_test_body_range(content, match.end())
+        suite_ranges.append({
+            "name": match.group(3),
+            "start": body_start,
+            "end": body_end,
+            "declaration_start": match.start(),
+            "disabled": match.group(2) in {"skip", "todo", "fixme"},
+        })
     test_cases: list[dict[str, Any]] = []
 
     def browser_case(
@@ -1039,6 +1046,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
         body: str,
         *,
         case_index: int,
+        title_path: list[str],
         disabled: bool,
         start_line: int,
         end_line: int,
@@ -1096,6 +1104,10 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             case_assertions.append(f"explicit CDP pass/fail condition in {name}")
         return {
             "name": name,
+            # Vitest's testNamePattern matches suite/test titles joined by a
+            # single space, even though its reporters render them with `>`.
+            "selector": " ".join(title_path),
+            "title_path": title_path,
             "start_line": start_line,
             "end_line": end_line,
             "assertions": case_assertions,
@@ -1116,12 +1128,23 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             continue
         body_start, body_end = js_test_body_range(content, match.end())
         body = content[body_start:body_end]
+        containing_suites = sorted(
+            (
+                suite for suite in suite_ranges
+                if suite["start"] <= match.start() <= suite["end"]
+            ),
+            key=lambda suite: suite["declaration_start"],
+        )
         test_cases.append(browser_case(
             match.group(3),
             body,
             case_index=case_index,
+            title_path=[
+                *(str(suite["name"]) for suite in containing_suites),
+                match.group(3),
+            ],
             disabled=match.group(2) in {"skip", "todo", "fixme"} or any(
-                start <= match.start() <= end for start, end in disabled_suite_ranges
+                bool(suite["disabled"]) for suite in containing_suites
             ),
             start_line=content.count("\n", 0, match.start()) + 1,
             end_line=content.count("\n", 0, body_end) + 1,
@@ -1136,6 +1159,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
             "standalone-cdp",
             content,
             case_index=1,
+            title_path=["standalone-cdp"],
             disabled=False,
             start_line=1,
             end_line=max(1, content.count("\n") + 1),
@@ -1148,7 +1172,7 @@ def parse_javascript_test(path: Path) -> dict[str, Any]:
     uses_playwright = any("playwright" in item.lower() for item in imports) or bool(
         PLAYWRIGHT_TEST_FIXTURE_RE.search(executable_code)
     )
-    browser_framework = "cdp" if uses_cdp else "playwright" if uses_playwright else None
+    browser_framework = "playwright" if uses_playwright else "cdp" if uses_cdp else None
     return {
         "imports": imports,
         "referenced_identifiers": sorted(set(JS_IDENTIFIER_RE.findall(executable_code))),

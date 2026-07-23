@@ -335,6 +335,13 @@ layer gating, skipped tests, and behavior result aggregation. Re-run the known
 feedback worktree case only after focused tests pass; do not run the slow full
 verification chain during iteration.
 
+Runtime correction validation: preserve nested Vitest suite names, select
+Playwright by file and declaration line, classify Playwright-owned CDP sessions
+as Playwright cases, block missing runtimes before subprocess execution, and run
+`tools/bic-quality-kit/tests/runtime_phase2_smoke.py` to prove one real
+Playwright case plus one real standalone Chromium CDP session pass through the
+executor without installing dependencies.
+
 ### 2026-07-22 quality-gap closure
 
 - `test_correspondence.user_journey_graph` schema version 1 now exposes bounded

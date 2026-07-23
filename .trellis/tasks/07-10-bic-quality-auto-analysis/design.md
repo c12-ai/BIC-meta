@@ -347,6 +347,15 @@ unresolved required command stops browser execution. Results are mapped back to
 changed behavior and retain explicit passed/failed/skipped/blocked/not-run
 states.
 
+Framework identity follows the runtime's actual selector contract. Python keeps
+the pytest node id; Vitest keeps the nested suite and case title path using its
+space-joined matcher form; Playwright uses the parsed declaration file and line
+instead of grep text. A Playwright case may use CDP APIs without changing its
+runner identity. Standalone CDP diagnostics remain repository-script driven.
+The executor checks for an existing `.venv` or repository-local JavaScript CLI
+before spawning a command, disables uv dependency synchronization, and rejects
+CDP scripts that request dependency installation.
+
 ## Real-Agent Evaluation
 
 Agent evals live outside the runtime Skill under `tools/bic-quality-kit/evals`.

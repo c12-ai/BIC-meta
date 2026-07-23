@@ -432,3 +432,12 @@ install dependencies, start the complete BIC live bench, reset data, invoke
 - [x] A positive conclusion is emitted only when every must-run behavior has
       executed evidence and no required test failed, skipped, or remained
       unresolved.
+- [x] Vitest selection preserves nested suite titles and distinguishes a passed
+      selected case from sibling cases skipped by the name filter.
+- [x] Playwright selection uses a concrete file/line location; a Playwright
+      case that opens a CDP session remains executable through Playwright.
+- [x] Missing `.venv` or `node_modules` runtimes block before command execution;
+      pytest disables dependency sync and JavaScript runners do not invoke
+      package-manager installation.
+- [x] A real runtime smoke executes one Playwright case and one standalone CDP
+      Chromium session through the phase-two executor.

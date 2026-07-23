@@ -352,9 +352,12 @@ blocked or not runnable; it does not authorize setup or cleanup.
    argv when safely derivable; and expanded completed/partial browser journey
    paths. `must_run` is the smallest set needed to exercise behavior backed by
    strong static evidence. `recommended` is opt-in regression breadth, not an
-   automatic hundreds-of-tests queue. Pytest, Vitest, and Playwright commands
-   select a concrete test case. CDP is runnable only through a real
-   repository-owned package script; otherwise it stays `not_runnable`.
+   automatic hundreds-of-tests queue. Pytest uses its exact node id, Vitest uses
+   the parsed suite-plus-case title path, and Playwright uses the concrete
+   declaration file and line. A Playwright test that opens a CDP session remains
+   a Playwright case; only a standalone CDP diagnostic uses the CDP layer. CDP
+   is runnable only through a real repository-owned package script; otherwise
+   it stays `not_runnable`.
 9. Produce one `BIC 质量简报`. Preserve the public section order from
    `references/deliverables.md`: `核心结论`, `变更集`, optional
    `需求与问题单`, `模块映射`, `测试对应性`, `测试前质量证据矩阵`,
@@ -371,8 +374,12 @@ blocked or not runnable; it does not authorize setup or cleanup.
     layers in this order: pytest backend, Vitest frontend, Playwright browser,
     then configured CDP diagnostics. If a required backend or frontend case
     fails, skips, is blocked, or cannot run, do not start the browser layers.
-    Never auto-install dependencies, start services, reset/seed data, invoke
-    `bic-e2e-runner`, or query Phoenix. Return the executor's result as a
+    Require an existing `.venv` or `node_modules` runtime before execution.
+    Run pytest with dependency sync disabled and invoke repository-local
+    Vitest/Playwright CLIs directly. Run a standalone CDP package script without
+    a package-manager install step and reject scripts that request dependency
+    installation. Never auto-install dependencies, start services, reset/seed
+    data, invoke `bic-e2e-runner`, or query Phoenix. Return the executor's result as a
     `BIC 分层测试执行报告`; do not reinterpret a partial run as passing.
 
 ## Output

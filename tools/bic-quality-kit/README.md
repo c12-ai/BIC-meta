@@ -47,10 +47,12 @@ Phase 1 is intentionally read-only:
   invoke E2E.
 
 Phase 2 requires explicit authorization. It verifies the frozen change
-fingerprint, then runs exact pytest, Vitest, Playwright, and
-repository-configured CDP cases in layers. It never installs dependencies,
-starts the live bench, resets data, invokes `bic-e2e-runner`, or queries
-Phoenix.
+fingerprint, then runs exact pytest node ids, Vitest suite/case title paths,
+Playwright file/line locations, and repository-configured standalone CDP cases
+in layers. It requires the existing project runtime, disables pytest dependency
+sync, invokes repository-local JavaScript CLIs directly, and rejects
+dependency-installing CDP scripts. It never installs dependencies, starts the
+live bench, resets data, invokes `bic-e2e-runner`, or queries Phoenix.
 
 ## Repository Availability
 

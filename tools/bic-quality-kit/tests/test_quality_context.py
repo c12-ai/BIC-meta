@@ -3722,7 +3722,7 @@ test('observes network', async ({ page, context }) => {
             self.assertIn("pending browser path", checked_facts["disabled_tests"])
             self.assertFalse(screenshot_facts["browser_scenario_has_machine_check"])
             self.assertIn("screenshot", screenshot_facts["browser_observations"])
-            self.assertEqual(cdp_facts["browser_framework"], "cdp")
+            self.assertEqual(cdp_facts["browser_framework"], "playwright")
             self.assertTrue(cdp_facts["uses_cdp"])
 
     def test_vitest_map_get_is_not_misclassified_as_playwright(self) -> None:
@@ -4299,6 +4299,33 @@ test('creates', async () => {
             self.assertEqual(checked_case["machine_checks"][0]["kind"], "cdp-pass-fail")
             self.assertFalse(throw_case["has_machine_check"])
 
+    def test_javascript_cases_keep_suite_selector_and_playwright_owns_embedded_cdp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spec = Path(directory) / "nested.spec.ts"
+            write(spec, """import { test, expect } from '@playwright/test'
+test.describe('outer suite', () => {
+  test.describe('inner suite', () => {
+    test('reads the CDP runtime', async ({ page }) => {
+      const client = await page.context().newCDPSession(page)
+      const result = await client.send('Runtime.evaluate', { expression: '6 * 7' })
+      expect(result.result.value).toBe(42)
+    })
+  })
+})
+""")
+            facts = TEST_ASSETS_MODULE.parse_test_file(spec)
+        case = facts["test_cases"][0]
+        self.assertEqual(
+            case["selector"],
+            "outer suite inner suite reads the CDP runtime",
+        )
+        self.assertEqual(
+            case["title_path"],
+            ["outer suite", "inner suite", "reads the CDP runtime"],
+        )
+        self.assertEqual(facts["browser_framework"], "playwright")
+        self.assertTrue(facts["uses_cdp"])
+
     def test_standalone_cdp_scenario_is_discovered_but_not_claimed_as_asserted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "portal"
@@ -4702,6 +4729,8 @@ test('creates experiment', async ({ page }) => {
                 "test_facts": {
                     "test_cases": [{
                         "name": "flow",
+                        "selector": "browser suite > flow",
+                        "start_line": 17,
                         "assertions": ["expect in flow"],
                         "disabled": False,
                         "has_machine_check": True,
@@ -4717,8 +4746,8 @@ test('creates experiment', async ({ page }) => {
         self.assertEqual(
             manifest["required_candidates"][0]["command_argv"],
             [
-                "pnpm", "exec", "playwright", "test",
-                "tests/e2e/flow.spec.ts", "-g", "^flow$", "--workers=1",
+                "node", "node_modules/@playwright/test/cli.js", "test",
+                "tests/e2e/flow.spec.ts:17", "--workers=1",
             ],
         )
         self.assertTrue(manifest["required_candidates"][0]["command_ready"])
@@ -4726,6 +4755,88 @@ test('creates experiment', async ({ page }) => {
             "configured browser runtime",
             manifest["required_candidates"][0]["environment_prerequisites"],
         )
+
+    def test_framework_commands_use_real_case_identity_without_installing(self) -> None:
+        inventory = {
+            "discovered_assets": [
+                {
+                    "repo": "portal",
+                    "path": "portal/src/nested.test.ts",
+                    "test_facts": {"test_cases": [{
+                        "name": "works",
+                        "selector": "outer inner works",
+                        "start_line": 9,
+                    }]},
+                },
+                {
+                    "repo": "portal",
+                    "path": "portal/tests/nested.spec.ts",
+                    "test_facts": {"test_cases": [{
+                        "name": "works",
+                        "selector": "outer inner works",
+                        "start_line": 27,
+                    }]},
+                },
+                {
+                    "repo": "portal",
+                    "path": "portal/package.json",
+                    "asset_kind": "test-command",
+                    "id": "discovered:portal/package.json:script:cdp:probe",
+                    "reason": "package.json script 'cdp:probe'",
+                    "command_hint": "pnpm run cdp:probe",
+                },
+            ],
+        }
+        vitest_argv, _, vitest_selector = EXECUTION_MANIFEST_MODULE.command_for_case(
+            {
+                "repo": "portal",
+                "path": "portal/src/nested.test.ts",
+                "framework": "vitest",
+            },
+            "works",
+            inventory,
+        )
+        playwright_argv, _, playwright_selector = (
+            EXECUTION_MANIFEST_MODULE.command_for_case(
+                {
+                    "repo": "portal",
+                    "path": "portal/tests/nested.spec.ts",
+                    "framework": "playwright",
+                },
+                "works",
+                inventory,
+            )
+        )
+        self.assertEqual(vitest_selector, "outer inner works")
+        self.assertEqual(
+            vitest_argv,
+            [
+                "node", "node_modules/vitest/vitest.mjs", "run",
+                "src/nested.test.ts", "-t", r"^outer\ inner\ works$",
+            ],
+        )
+        self.assertEqual(playwright_selector, "tests/nested.spec.ts:27")
+        self.assertEqual(
+            playwright_argv,
+            [
+                "node", "node_modules/@playwright/test/cli.js", "test",
+                "tests/nested.spec.ts:27", "--workers=1",
+            ],
+        )
+        cdp_argv, cdp_source, _ = EXECUTION_MANIFEST_MODULE.command_for_case(
+            {
+                "repo": "portal",
+                "path": "portal/tests/cdp-probe.cjs",
+                "framework": "cdp",
+            },
+            "standalone-cdp",
+            inventory,
+        )
+        self.assertEqual(
+            cdp_argv,
+            ["npm", "run", "--silent", "cdp:probe"],
+        )
+        self.assertEqual(cdp_source, "configured-package-script")
 
     def test_execution_manifest_uses_strict_behavior_cases_not_raw_relations(self) -> None:
         context = {
@@ -4965,6 +5076,9 @@ test('creates experiment', async ({ page }) => {
             write(workspace / "tests/test_backend.py", "def test_backend(): pass\n")
             write(workspace / "src/frontend.test.ts", "test('frontend', () => {})\n")
             write(workspace / "tests/browser.spec.ts", "test('browser', () => {})\n")
+            write(workspace / ".venv/bin/pytest", "")
+            write(workspace / "node_modules/vitest/vitest.mjs", "")
+            write(workspace / "node_modules/@playwright/test/cli.js", "")
 
             def candidate(
                 framework: str,
@@ -4990,17 +5104,23 @@ test('creates experiment', async ({ page }) => {
                 "must_run": [
                     candidate(
                         "pytest", "backend", "tests/test_backend.py", "backend",
-                        ["uv", "run", "pytest", "tests/test_backend.py::backend", "-q"],
+                        [
+                            "uv", "run", "--no-sync", "pytest",
+                            "tests/test_backend.py::backend", "-q",
+                        ],
                     ),
                     candidate(
                         "vitest", "frontend", "src/frontend.test.ts", "frontend",
-                        ["pnpm", "exec", "vitest", "run", "src/frontend.test.ts", "-t", "^frontend$"],
+                        [
+                            "node", "node_modules/vitest/vitest.mjs", "run",
+                            "src/frontend.test.ts", "-t", "^frontend$",
+                        ],
                     ),
                     candidate(
                         "playwright", "browser", "tests/browser.spec.ts", "browser",
                         [
-                            "pnpm", "exec", "playwright", "test",
-                            "tests/browser.spec.ts", "-g", "^browser$", "--workers=1",
+                            "node", "node_modules/@playwright/test/cli.js", "test",
+                            "tests/browser.spec.ts:1", "--workers=1",
                         ],
                     ),
                 ],
@@ -5011,7 +5131,11 @@ test('creates experiment', async ({ page }) => {
 
             def fake_runner(argv: list[str], _cwd: Path, _timeout: int) -> dict[str, object]:
                 calls.append(argv)
-                status = "failed" if "vitest" in argv else "passed"
+                status = (
+                    "failed"
+                    if any("vitest" in value for value in argv)
+                    else "passed"
+                )
                 return {
                     "status": status,
                     "returncode": 1 if status == "failed" else 0,
@@ -5057,6 +5181,71 @@ test('creates experiment', async ({ page }) => {
                 )
         self.assertEqual(report["execution_status"], "blocked")
         self.assertIn("重新运行第一阶段", report["final_conclusion"])
+
+    def test_layered_executor_blocks_missing_runtime_without_running_command(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(
+                workspace / "src/nested.test.ts",
+                "test('works', () => { expect(true).toBe(true) })\n",
+            )
+            calls = []
+
+            def fake_runner(*args: object) -> dict[str, object]:
+                calls.append(args)
+                raise AssertionError("missing runtime must block before command execution")
+
+            manifest = {
+                "workspace_change_fingerprint": "same",
+                "repositories": [{"repo": "repo", "relative_path": "."}],
+                "must_run": [{
+                    "repo": "repo",
+                    "path": "src/nested.test.ts",
+                    "framework": "vitest",
+                    "execution_layer": "frontend",
+                    "test_case": "works",
+                    "test_selector": "suite works",
+                    "changed_behaviors": ["works"],
+                    "selection_tier": "must-run",
+                    "required": True,
+                    "command_argv": [
+                        "node", "node_modules/vitest/vitest.mjs", "run",
+                        "src/nested.test.ts", "-t", r"^suite\ works$",
+                    ],
+                }],
+                "recommended": [],
+                "not_runnable": [],
+            }
+            with mock.patch.object(
+                TEST_EXECUTOR_MODULE.shutil, "which", return_value="/bin/node",
+            ):
+                report = TEST_EXECUTOR_MODULE.execute_manifest(
+                    manifest,
+                    workspace,
+                    verify_fingerprint=False,
+                    command_runner=fake_runner,
+                )
+        self.assertEqual(calls, [])
+        self.assertEqual(report["results"][0]["status"], "blocked")
+        self.assertIn("will not install dependencies", report["results"][0]["failure_reason"])
+
+    def test_executor_prefers_selected_pass_over_filtered_sibling_skips(self) -> None:
+        output = """
+ Test Files  1 passed (1)
+      Tests  1 passed | 2 skipped (3)
+"""
+        self.assertEqual(
+            TEST_EXECUTOR_MODULE.command_status(0, output, ""),
+            "passed",
+        )
+        self.assertEqual(
+            TEST_EXECUTOR_MODULE.command_status(
+                0,
+                "Test Files 1 skipped (1)\nTests 3 skipped (3)",
+                "",
+            ),
+            "skipped",
+        )
 
     def test_python_manifest_uses_exact_class_method_nodeid(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -5107,7 +5296,7 @@ class TestFeedback:
         self.assertEqual(
             manifest["must_run"][0]["command_argv"],
             [
-                "uv", "run", "pytest",
+                "uv", "run", "--no-sync", "pytest",
                 "tests/test_feedback.py::TestFeedback::test_cancel", "-q",
             ],
         )
@@ -5116,6 +5305,7 @@ class TestFeedback:
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             write(workspace / "tests/test_ok.py", "def test_ok(): assert True\n")
+            write(workspace / ".venv/bin/pytest", "")
             manifest = {
                 "workspace_change_fingerprint": "same",
                 "repositories": [{"repo": "repo", "relative_path": "."}],
@@ -5131,7 +5321,8 @@ class TestFeedback:
                     "intended_tier": "must-run",
                     "required": True,
                     "command_argv": [
-                        "uv", "run", "pytest", "tests/test_ok.py::test_ok", "-q",
+                        "uv", "run", "--no-sync", "pytest",
+                        "tests/test_ok.py::test_ok", "-q",
                     ],
                 }],
                 "recommended": [],
@@ -5187,7 +5378,7 @@ class TestFeedback:
                 "selection_tier": "must-run",
                 "required": True,
                 "command_argv": [
-                    "uv", "run", "pytest", "tests/test_feedback.py",
+                    "uv", "run", "--no-sync", "pytest", "tests/test_feedback.py",
                     "--basetemp=/tmp/untrusted",
                 ],
             }
