@@ -89,6 +89,19 @@ def guidance_profile(
     return "executable-contract", "project-native", []
 
 
+def public_test_method(layer: str, framework: str) -> str:
+    """Return a stable, user-facing tool name without internal layer jargon."""
+    if framework == "vitest" and layer == "frontend-component":
+        return "Vitest + React Testing Library"
+    return {
+        "pytest": "pytest",
+        "vitest": "Vitest",
+        "playwright": "Playwright",
+        "cdp": "CDP",
+        "project-native": "项目原生测试命令",
+    }.get(framework, framework)
+
+
 def suggested_assertions(
     path: str,
     symbols: list[dict[str, Any]],
@@ -525,6 +538,7 @@ def grouped_guidance(
         "target_behavior": behavior,
         "test_layer": layer,
         "recommended_framework": framework,
+        "public_test_method": public_test_method(layer, framework),
         "alternative_frameworks": alternatives,
         "existing_test_count": len(all_existing_tests),
         "existing_tests": all_existing_tests[:MAX_GUIDANCE_EXISTING_TESTS],
@@ -541,7 +555,7 @@ def guidance_summary(item: dict[str, Any]) -> str:
     verb = "Add" if item["action"] == "add" else "Strengthen"
     symbols = ", ".join(item.get("symbols") or []) or item["target_behavior"]
     return (
-        f"{verb} {item['recommended_framework']} {item['test_layer']} tests for "
+        f"{verb} {item['public_test_method']} tests for "
         f"{item['target_behavior']} in {item['path']} covering: {symbols}."
     )
 
@@ -643,6 +657,7 @@ def browser_journey_guidance(
                 "target_behavior": f"end-to-end user behavior for {method_path}",
                 "test_layer": "browser-user-journey",
                 "recommended_framework": "playwright",
+                "public_test_method": "Playwright",
                 "alternative_frameworks": alternatives,
                 "existing_tests": scenarios,
                 "existing_test_count": len(scenarios),
@@ -819,17 +834,6 @@ def relation_public_score(
     return score
 
 
-def public_assertion_status(relation: dict[str, Any]) -> str:
-    if relation.get("disabled_tests"):
-        return "disabled-or-skipped"
-    evidence_level = relation_evidence_level(relation)
-    if evidence_level != "related-only":
-        return evidence_level
-    if relation.get("assertions"):
-        return "related-only"
-    return "no-active-evidence"
-
-
 def relation_evidence_level(relation: dict[str, Any]) -> str:
     """Return the strongest evidence level, including legacy/manual fixtures."""
     if relation.get("assertion_linked_symbols"):
@@ -853,6 +857,31 @@ def public_behavior_label(relation: dict[str, Any]) -> str:
     return "unresolved changed behavior"
 
 
+def public_relation_explanation(
+    relation_type: str,
+    target_behavior: str,
+    relevant_cases: list[str],
+    reasons: list[str],
+) -> str:
+    """Create one stable sentence for the human-facing test list."""
+    case_note = (
+        f"; matching case: {relevant_cases[0]}"
+        if relevant_cases else ""
+    )
+    reason = reasons[0] if reasons else "a concrete changed-object relation"
+    if relation_type == "direct":
+        return f"Exercises {target_behavior}{case_note}."
+    if relation_type == "indirect":
+        return (
+            f"Exercises {target_behavior} through {reason}{case_note}; "
+            "the path passes through another source entry."
+        )
+    return (
+        f"May relate to {target_behavior} because {reason}{case_note}; "
+        "use it only as a search clue."
+    )
+
+
 def public_relation_record(
     relation: dict[str, Any],
     relation_type: str,
@@ -864,20 +893,26 @@ def public_relation_record(
         if explained_symbols is None else explained_symbols
     )
     relevant_cases = relevant_public_cases(relation, useful_symbols)
+    target_behavior = (
+        ", ".join(useful_symbols[:3])
+        if useful_symbols else public_behavior_label(relation)
+    )
+    reasons = list(relation.get("relation_reasons", []))[:3]
     return {
         "relation_type": relation_type,
         "repo": relation.get("repo"),
         "path": relation.get("path"),
         "framework": relation.get("framework"),
-        "target_behavior": (
-            ", ".join(useful_symbols[:3])
-            if useful_symbols else public_behavior_label(relation)
+        "target_behavior": target_behavior,
+        "public_explanation": public_relation_explanation(
+            relation_type,
+            target_behavior,
+            relevant_cases,
+            reasons,
         ),
         "changed_objects": useful_symbols[:5],
-        "why_related": list(relation.get("relation_reasons", []))[:3],
+        "why_related": reasons,
         "relevant_test_cases": relevant_cases,
-        "assertion_status": public_assertion_status(relation),
-        "evidence_level": relation_evidence_level(relation),
         "browser_evidence": (
             {
                 "framework": browser.get("framework"),

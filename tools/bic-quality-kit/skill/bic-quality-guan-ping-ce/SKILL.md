@@ -219,7 +219,11 @@ If the user asks to execute tests, state that this skill only provides read-only
    indirect, and possible relation for diagnostics and Phase 2 selection, but
    use `test_correspondence.public_summary` for the default brief. Show only
    `object-asserted`, `behavior-asserted`, or partial `contract-asserted`
-   evidence in the public direct view. Public indirect chains require
+   evidence in the public direct selection. In the brief, render each selected
+   test as its repository-qualified file path followed by its
+   `public_explanation` sentence. Do not print
+   `assertion_status`, `evidence_level`, a separate `对应` field, or a separate
+   `状态` field. Public indirect chains require
    `object-asserted` or `behavior-asserted`, a concrete changed object, and an
    import/reference reason; keep `related-only` relations diagnostic. Group
    possible candidates by changed behavior and show at most three candidates
@@ -237,6 +241,13 @@ If the user asks to execute tests, state that this skill only provides read-only
    does not populate `existing_tests`. Backend behavior normally maps to pytest,
    frontend unit/component behavior to Vitest/React Testing Library, user
    journeys to Playwright, and protocol-level browser diagnostics to CDP.
+   Keep `test_layer`, `recommended_framework`, and
+   `alternative_frameworks` as internal structured metadata. For the public
+   brief use `public_test_method`, which may contain only a real tool name:
+   `pytest`, `Vitest`, `Vitest + React Testing Library`, `Playwright`, `CDP`, or
+   `项目原生测试命令`. Never append internal layer values such as
+   `frontend-component`, `repository`, `service-unit`, `backend-route`, or
+   `browser-user-journey` to a public recommendation.
    A cross-repository browser recommendation must target the repository that
    owns the reached browser scenario or frontend journey, not the backend route
    repository. Strengthen the exact existing scenario file when one is known.
@@ -248,9 +259,12 @@ If the user asks to execute tests, state that this skill only provides read-only
 7. Read `quality_evidence.brief_evidence_matrix` from the frozen snapshot for
    the public matrix; keep `quality_evidence_matrix` as diagnostic dimension
    evidence in raw JSON. Do not run the wrapper again. The public matrix is
-   behavior/object-facing: each row states the quality focus, concrete changed
-   objects, strongest matching test case, evidence strength, what remains open,
-   and one concrete recommendation. Never borrow evidence from an unrelated
+   behavior/object-facing: combine the quality focus and concrete changed
+   objects into one `检查内容` cell, then state what the strongest matching test
+   case proves, what remains open, and one concrete recommendation. Do not
+   expose internal assertion-level labels such as `object-asserted`,
+   `behavior-asserted`, or `contract-asserted` as a separate public matrix
+   column or inside the evidence prose. Never borrow evidence from an unrelated
    changed object merely because it shares the same module.
    Do not print an Issue column when no authoritative Issue exists. The
    assessment is evidence-only and must not contain `technical_risk`,

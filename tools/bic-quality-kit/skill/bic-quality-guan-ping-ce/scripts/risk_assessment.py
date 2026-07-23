@@ -71,11 +71,9 @@ def relation_evidence_summary(item: dict[str, Any]) -> str:
         or item.get("test_names")
         or []
     )
-    assertion = item.get("evidence_level") or item.get("assertion_status")
-    suffix = f"；{assertion}" if assertion else ""
     if cases:
-        return f"{item.get('path')}（{cases[0]}{suffix}）"
-    return f"{item.get('path')}{suffix}"
+        return f"{item.get('path')}（{cases[0]}）"
+    return str(item.get("path") or "")
 
 
 def unique_strings(values: list[str]) -> list[str]:
@@ -227,10 +225,6 @@ def build_brief_evidence_matrix(
                 existing = unique_strings([
                     relation_evidence_summary(item) for item in relations
                 ])
-                levels = unique_strings([
-                    str(item.get("evidence_level") or "related-only")
-                    for item in relations
-                ])
                 open_items = (
                     list(group_guidance.get("evidence_gaps", []))
                     if group_guidance
@@ -262,7 +256,6 @@ def build_brief_evidence_matrix(
                         existing
                         or ["no object- or behavior-linked active test evidence"]
                     ),
-                    "evidence_strength": levels or ["none"],
                     "open_evidence": open_items,
                     "recommendation": recommendations,
                 })
@@ -280,7 +273,6 @@ def build_brief_evidence_matrix(
                 for item in browser_guidance
                 for test in item.get("existing_tests", [])
             ] or ["no completed static browser path reaches this behavior"],
-            "evidence_strength": ["static-browser-path"],
             "open_evidence": [
                 (
                     f"{item.get('action')} {item.get('recommended_framework')} at "

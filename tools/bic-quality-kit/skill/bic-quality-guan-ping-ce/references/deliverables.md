@@ -34,27 +34,28 @@ BIC 质量简报
 - 文件证据：
 
 测试对应性
-- 直接相关测试：<从 public_summary 逐条列：测试文件、对应行为、object-asserted/behavior-asserted/contract-asserted 状态>
-- 间接相关测试：<只列能解释且达到 object-asserted 或 behavior-asserted 的 test → source entry → changed object 链>
-- 可能相关测试：<按 changed behavior 分组，每组最多 3 个候选；逐个写候选文件和命中原因>
-- 对应依据：<AST changed object、exact import/reference、test name、assertion linkage、browser target>
-- 扫描 warning：<skipped symlink/outside-repository/sensitive candidates, if any>
+- 直接相关测试：
+  - <repository-qualified test file>：<one plain-language sentence describing the changed behavior this test exercises>
+- 间接相关测试：
+  - <repository-qualified test file>：<one plain-language sentence describing the concrete import/reference chain and its limitation>
+- 可能相关测试：
+  - <repository-qualified test file>：<one plain-language sentence explaining why it is only a search clue>
+- 扫描 warning：<only when symlink/outside-repository/sensitive candidates were skipped>
 
 测试前质量证据矩阵
-| 质量关注点 | 本次具体改动 | 已有测试证明了什么 | 证据强度 | 还没有证明什么 | 建议 |
-|---|---|---|---|---|---|
-| <behavior/object focus> | <exact changed route/object/path> | <specific matching test case/assertion, or none found> | object-asserted/behavior-asserted/contract-asserted/none | <specific missing assertion/runtime evidence> | <none or one concrete add/strengthen target> |
-- 决策方式：evidence-only（不输出 high/medium/low、技术风险或整体风险）
-- 同模块但不对应本行 changed object/behavior 的测试不得进入“已有测试证明了什么”。
+| 检查内容 | 现有测试能说明什么 | 还缺什么 | 建议 |
+|---|---|---|---|
+| <plain behavior plus exact changed route/object/path> | <specific matching test case/assertion, or none found> | <specific missing assertion/runtime evidence> | <none or one concrete add/strengthen target> |
+- 同模块但不对应本行 changed object/behavior 的测试不得进入“现有测试能说明什么”。
 
 建议新增
-| 要补什么 | 建议放在哪里 | 用什么测 | 为什么要补 | 关键断言 |
-|---|---|---|---|---|
-| <plain behavior description plus exact object> | <suggested_test_target> | <pytest/Vitest+RTL/Playwright/CDP and layer> | <why no effective assertion exists> | <observable outcomes> |
+| 建议补什么 | 建议测试文件 | 测试方式 | 重点验证 |
+|---|---|---|---|
+| <plain behavior description plus exact object> | <suggested_test_target> | <pytest / Vitest / Vitest + React Testing Library / Playwright / CDP> | <observable outcomes> |
 - 无建议新增时：未发现需要新增的行为级测试。
 
 建议加强
-| 要加强什么 | 改哪个现有测试 | 当前没有证明什么 | 关键断言 |
+| 要加强什么 | 改哪个现有测试 | 当前还没验证什么 | 建议补充的断言 |
 |---|---|---|---|
 | <plain behavior description plus exact object> | <suggested_test_target; optionally mention other relevant tests> | <disabled, skipped, assertion-free, or not target-linked> | <observable outcomes> |
 - 无建议加强时：未发现需要加强的现有测试。
@@ -98,13 +99,17 @@ brief concise:
 - Keep direct, indirect, and possible relations in their own fields. Render the
   bounded `test_correspondence.public_summary`, not the raw module arrays. Cite
   the concrete import, call, reference, scenario, assertion, disabled state, or
-  explicit relation that produced each conclusion. An indirect entry must name
-  the test, changed object, and import/reference chain; otherwise omit it from
-  the default brief while retaining it in raw JSON. Group possible candidates
-  by changed behavior, show no more than three candidates per behavior, and
-  explain each candidate's filename/scenario/token match. Do not print raw
-  aggregate relation counts. Possible candidates remain search clues and never
-  count as proof that a changed behavior has an existing test.
+  explicit relation that produced each conclusion. For every displayed item,
+  print only the repository-qualified test file and its `public_explanation`
+  sentence. Do not render separate `对应` or `状态` fields and do
+  not print `assertion_status` or `evidence_level`. An indirect entry must name
+  the test, changed object, and import/reference chain in that sentence;
+  otherwise omit it from the default brief while retaining it in raw JSON.
+  Group possible candidates by changed behavior, show no more than three
+  candidates per behavior, and explain each candidate's
+  filename/scenario/token match. Do not print raw aggregate relation counts.
+  Possible candidates remain search clues and never count as proof that a
+  changed behavior has an existing test.
 - For Playwright/CDP evidence, distinguish actions and observations from active
   target-linked machine checks. A request check must consume that request's
   result; a page check must inspect the page/locator after the action; standalone
@@ -135,11 +140,12 @@ brief concise:
   or requirement-traced guidance in the default brief. Those fields remain in
   raw JSON for an explicitly requested Issue-matching diagnostic.
 - Render `测试前质量证据矩阵` from
-  `quality_evidence.brief_evidence_matrix`, using the four behavior-facing
-  columns in the template. Keep the generic diagnostic dimension rows in raw
-  JSON. Add requirement comparison only inside `需求与问题单`, not as an Issue
-  column in the technical matrix. Requirement review is a separate pass after
-  technical review. For each eligible item, report
+  `quality_evidence.brief_evidence_matrix`, using the four fixed public columns
+  in the template. Combine `quality_focus` and `changed_behavior` in
+  `检查内容`; do not split them into extra columns. Keep the generic diagnostic
+  dimension rows in raw JSON. Add requirement comparison only inside
+  `需求与问题单`, not as an Issue column in the technical matrix. Requirement
+  review is a separate pass after technical review. For each eligible item, report
   independent `scope`, `implementation`, and `test_status` values exactly as
   defined in `references/risk-model.md`; never replace them with one blanket
   verdict for several items. A positive implementation statement cites one
@@ -147,6 +153,11 @@ brief concise:
   test/assertion or explicitly states that no test was found. Keep adjacent and
   out-of-scope items outside the matrix. Report missing evidence explicitly;
   never translate it into a severity label.
+- Do not add a standalone evidence-strength column. Internal labels such as
+  `object-asserted`, `behavior-asserted`, `contract-asserted`, `none`, and
+  `static-browser-path` may guide selection, but the matrix must explain the
+  useful proof in plain language under `现有测试能说明什么`. Do not print
+  `evidence-only` or another decision-model label below the public matrix.
 - Keep `not-enabled` in raw JSON for requirement alignment when there is no
   authoritative Issue, but do not print it in the default brief. Omit
   `issue-clarity` and all requirement rows in that mode; the remaining matrix is
@@ -200,8 +211,14 @@ brief concise:
   or downgrades technical-regression guidance.
 - Render every add/strengthen item as an actionable behavior-level suggestion:
   use plain language first, then cite the exact changed object. Include
-  `suggested_test_target`, test layer, recommended framework, concrete gap, and
-  suggested observable assertions. For strengthen items, show only existing
+  `suggested_test_target`, `public_test_method`, the concrete gap, and suggested
+  observable assertions. The internal `test_layer`, `recommended_framework`,
+  and `alternative_frameworks` remain structured analysis metadata and must not
+  be printed in the default brief. `public_test_method` is restricted to real
+  tool names: `pytest`, `Vitest`, `Vitest + React Testing Library`,
+  `Playwright`, `CDP`, or `项目原生测试命令`. Never append internal values such
+  as `frontend-component`, `repository`, `service-unit`, `backend-route`, or
+  `browser-user-journey`. For strengthen items, show only existing
   tests whose path, case name, or exact reference chain matches the behavior;
   broad class/module imports stay out of the public suggestion. Group related private
   helpers in the same source file instead of printing one item per symbol.

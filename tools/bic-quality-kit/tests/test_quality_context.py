@@ -458,6 +458,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         )
         self.assertEqual(bar_guidance["recommended_framework"], "pytest")
         self.assertEqual(bar_guidance["test_layer"], "unit")
+        self.assertEqual(bar_guidance["public_test_method"], "pytest")
         self.assertTrue(bar_guidance["suggested_assertions"])
 
         agent_runtime = modules[("BIC-agent-service", "agent/runtime")]
@@ -557,15 +558,27 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("直接相关测试：", public_template)
         self.assertIn("间接相关测试：", public_template)
         self.assertIn("可能相关测试：", public_template)
-        self.assertIn("对应依据：", public_template)
+        self.assertNotIn("对应依据：", public_template)
         self.assertNotIn("\n测试缺口\n", public_template)
         self.assertIn("测试前质量证据矩阵", public_template)
         self.assertEqual(public_template.count("\n建议新增\n"), 1)
         self.assertEqual(public_template.count("\n建议加强\n"), 1)
-        self.assertIn("| 要补什么 | 建议放在哪里 | 用什么测 | 为什么要补 | 关键断言 |", public_template)
-        self.assertIn("| 要加强什么 | 改哪个现有测试 | 当前没有证明什么 | 关键断言 |", public_template)
-        self.assertIn("| 质量关注点 | 本次具体改动 | 已有测试证明了什么 | 还没有证明什么 |", public_template)
-        self.assertIn("决策方式：evidence-only", public_template)
+        self.assertIn("| 建议补什么 | 建议测试文件 | 测试方式 | 重点验证 |", public_template)
+        self.assertIn("| 要加强什么 | 改哪个现有测试 | 当前还没验证什么 | 建议补充的断言 |", public_template)
+        self.assertIn("| 检查内容 | 现有测试能说明什么 | 还缺什么 | 建议 |", public_template)
+        self.assertNotIn("决策方式：", public_template)
+        self.assertNotIn("证据强度", public_template)
+        for internal_label in (
+            "object-asserted",
+            "behavior-asserted",
+            "contract-asserted",
+            "static-browser-path",
+            "frontend-component",
+            "service-unit",
+            "backend-route",
+            "browser-user-journey",
+        ):
+            self.assertNotIn(internal_label, public_template)
         self.assertNotIn("| 技术风险项 |", public_template)
         ordered_headings = [
             "核心结论",
@@ -608,6 +621,24 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("one workspace-level Issue context", skill)
         self.assertIn("Never use repository count alone", skill)
         self.assertNotIn("Report risk separately for independent change streams", skill)
+
+    def test_public_test_methods_use_real_tool_names_only(self) -> None:
+        self.assertEqual(
+            TEST_RELATIONS_MODULE.public_test_method(
+                "frontend-component", "vitest",
+            ),
+            "Vitest + React Testing Library",
+        )
+        self.assertEqual(
+            TEST_RELATIONS_MODULE.public_test_method("repository", "pytest"),
+            "pytest",
+        )
+        self.assertEqual(
+            TEST_RELATIONS_MODULE.public_test_method(
+                "browser-user-journey", "playwright",
+            ),
+            "Playwright",
+        )
 
     def test_skill_discovery_metadata_and_sop_entry_are_consistent(self) -> None:
         self.assertTrue(OPENAI_YAML.is_file())
@@ -849,7 +880,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertTrue(all(
             {
                 "quality_focus", "changed_behavior",
-                "existing_test_evidence", "open_evidence",
+                "existing_test_evidence", "open_evidence", "recommendation",
             } == set(item)
             for item in evidence["brief_evidence_matrix"]
         ))
@@ -3114,7 +3145,8 @@ raise SystemExit(2)
         evidence = matrix[0]["existing_test_evidence"]
         self.assertTrue(any("test_session_route_dto_contract.py" in item for item in evidence))
         self.assertFalse(any("test_materials_route.py" in item for item in evidence))
-        self.assertEqual(matrix[0]["evidence_strength"], ["contract-asserted"])
+        self.assertFalse(any("contract-asserted" in item for item in evidence))
+        self.assertNotIn("evidence_strength", matrix[0])
         self.assertEqual(
             matrix[0]["recommendation"],
             [
@@ -3191,6 +3223,13 @@ raise SystemExit(2)
             "possibly_related_tests": [possible],
         }])
         self.assertTrue(direct_and_possible["directly_related_tests"])
+        public_direct = direct_and_possible["directly_related_tests"][0]
+        self.assertEqual(
+            public_direct["public_explanation"],
+            "Exercises delete_feedback; matching case: test_feedback_button.",
+        )
+        self.assertNotIn("assertion_status", public_direct)
+        self.assertNotIn("evidence_level", public_direct)
         self.assertEqual(
             direct_and_possible["possibly_related_test_groups"],
             [],
@@ -4021,9 +4060,11 @@ test('creates experiment', async ({ request }) => {
             )
             self.assertEqual(route_guidance["action"], "add")
             self.assertEqual(route_guidance["recommended_framework"], "pytest")
+            self.assertEqual(route_guidance["public_test_method"], "pytest")
             browser_guidance = correspondence["browser_test_guidance"][0]
             self.assertEqual(browser_guidance["action"], "strengthen")
             self.assertEqual(browser_guidance["recommended_framework"], "playwright")
+            self.assertEqual(browser_guidance["public_test_method"], "Playwright")
             self.assertEqual(browser_guidance["alternative_frameworks"], [])
             self.assertEqual(browser_guidance["test_repo"], "portal")
             self.assertEqual(
