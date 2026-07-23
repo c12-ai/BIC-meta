@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any, Iterable
 
 from content_safety import REDACTED_PATH, is_sensitive_path
@@ -14,13 +15,6 @@ RELATION_FIELDS = (
     ("indirect", "indirectly_related_tests"),
     ("possible", "possibly_related_tests"),
 )
-RECOMMENDATION_FIELDS = (
-    ("add", "add_tests"),
-    ("strengthen", "strengthen_tests"),
-    ("no-obvious-gap", "no_obvious_test_gaps"),
-)
-
-
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
@@ -55,9 +49,10 @@ def _recommendation_identity(
     repo: str,
     module: str,
     category: str,
-    recommendation: str,
+    recommendation: Any,
 ) -> str:
-    return ":".join((repo, module, category, _digest(recommendation)))
+    serialized = json.dumps(recommendation, sort_keys=True, ensure_ascii=False)
+    return ":".join((repo, module, category, _digest(serialized)))
 
 
 def _journey_identity(path: dict[str, Any]) -> str:
@@ -92,11 +87,15 @@ def build_technical_scope(
                 _relation_identity(repo, module_scope, strength, relation)
                 for relation in module.get(field, [])
             )
-        for category, field in RECOMMENDATION_FIELDS:
-            recommendation_ids.extend(
-                _recommendation_identity(repo, module_scope, category, str(item))
-                for item in module.get(field, [])
-            )
+    recommendation_ids.extend(
+        _recommendation_identity(
+            str(item.get("repo") or "-"),
+            str(item.get("module_scope") or "-"),
+            str(item.get("action") or "guidance"),
+            item,
+        )
+        for item in correspondence.get("test_guidance", [])
+    )
 
     journey_graph = correspondence.get("user_journey_graph", {})
     journey_ids = [

@@ -111,4 +111,4 @@ Load only the SOP that matches the current work.
 |---|---|---|
 | `prd` | Updating, creating, relocating, splitting, merging, or reviewing Production PRD / Project PRD content; deciding whether requirements belong at root or child-repo level | `@.claude/skills/prd/SKILL.md` |
 | `bump-version` | Drake asks to bump, release, or cut a package version | `@.claude/skills/bump-version/SKILL.md` |
-| `bic-quality-guan-ping-ce` | Reviewing current BIC changes for affected repositories/modules, Issue alignment, test correspondence, missing tests, or pre-test risk | `@tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md` |
+| `bic-quality-guan-ping-ce` | Reviewing current BIC changes for affected repositories/modules, Issue alignment, test correspondence, missing tests, or a pre-test quality evidence matrix | `@tools/bic-quality-kit/skill/bic-quality-guan-ping-ce/SKILL.md` |

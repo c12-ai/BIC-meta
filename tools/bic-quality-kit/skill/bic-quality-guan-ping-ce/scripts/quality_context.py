@@ -26,7 +26,7 @@ from symbol_extraction import extract_changed_symbols
 from diff_hunks import attach_canonical_hunks
 from execution_manifest import build_execution_manifest
 from issue_context import collect_issue_context
-from risk_assessment import assess_pretest_risk
+from risk_assessment import assess_pretest_evidence
 from scope_fusion import (
     build_requirement_scope,
     build_technical_scope,
@@ -609,7 +609,7 @@ def assess_quality(
     payload = suggest_scope(
         base_ref, worktree_only, issue_ref, issue_file,
     )
-    payload["risk_assessment"] = assess_pretest_risk(
+    payload["quality_evidence"] = assess_pretest_evidence(
         payload["context"],
         payload["scope"],
         payload["test_correspondence"],
@@ -622,7 +622,7 @@ def assess_quality(
         payload["test_inventory"],
     )
     # The raw inventory is an internal/diagnostic artifact. The Agent-facing
-    # assessment only needs the derived correspondence and risk contracts.
+    # assessment only needs the derived correspondence and evidence contracts.
     payload.pop("test_inventory", None)
     issue = payload["context"]["issue_context"]
     alignment_enabled = bool(issue.get("requirement_alignment_enabled", False))

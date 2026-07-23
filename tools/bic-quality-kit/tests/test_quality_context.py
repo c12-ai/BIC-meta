@@ -437,7 +437,13 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertTrue(any(item["path"].endswith("app/tests/test_relative.py") for item in agent_api["directly_related_tests"]))
         self.assertTrue(any("function feature" in reason for reason in agent_api["no_obvious_test_gaps"]))
         self.assertTrue(any("function foo" in reason for reason in agent_api["no_obvious_test_gaps"]))
-        self.assertTrue(any("function bar" in reason for reason in agent_api["add_tests"]))
+        bar_guidance = next(
+            item for item in agent_api["test_guidance"]
+            if item["action"] == "add" and "bar" in item["symbols"]
+        )
+        self.assertEqual(bar_guidance["recommended_framework"], "pytest")
+        self.assertEqual(bar_guidance["test_layer"], "unit")
+        self.assertTrue(bar_guidance["suggested_assertions"])
 
         agent_runtime = modules[("BIC-agent-service", "agent/runtime")]
         self.assertEqual(
@@ -453,7 +459,12 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             "worker.go" in item["path"] and item["kind"] == "function" and item["name"] == "inference.Work"
             for item in model_inference["changed_symbols"]
         ))
-        self.assertTrue(any("function inference.Work" in reason and "worker.go" in reason for reason in model_inference["add_tests"]))
+        work_guidance = next(
+            item for item in model_inference["test_guidance"]
+            if "inference.Work" in item["symbols"]
+        )
+        self.assertEqual(work_guidance["path"], "BIC-model-service/app/inference/worker.go")
+        self.assertEqual(work_guidance["action"], "add")
         other_inference = modules[("BIC-other-model", "app/inference")]
         self.assertTrue(any("engine" in reason for reason in other_inference["add_tests"]))
 
@@ -474,7 +485,11 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         guidance = meta_tooling["add_tests"] + meta_tooling["strengthen_tests"]
         self.assertFalse(any("SKILL.md" in item for item in guidance))
         self.assertFalse(any("references/test-analysis-rules.md" in item for item in guidance))
-        self.assertTrue(any("config/runtime.yaml" in item for item in guidance))
+        self.assertFalse(any("config/runtime.yaml" in item for item in guidance))
+        self.assertTrue(any(
+            item["path"].endswith("config/runtime.yaml")
+            for item in meta_tooling["diagnostic_test_guidance"]
+        ))
         self.assertTrue(any("scripts/test_assets.py" in item for item in guidance))
         self.assertTrue(any("scripts/test_relations.py" in item for item in guidance))
         non_testable_paths = {item["path"] for item in meta_tooling["non_testable_changes"]}
@@ -512,7 +527,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("多仓事实：", public_template)
         self.assertIn("需求对齐：", public_template)
         self.assertIn("测试判断：", public_template)
-        self.assertIn("风险结论：", public_template)
+        self.assertIn("证据结论：", public_template)
         self.assertIn("是否多仓发生改动：", public_template)
         self.assertIn("模块映射", public_template)
         self.assertIn("需求对齐（仅当 requirement_alignment_enabled=true 时出现）", public_template)
@@ -528,7 +543,9 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertIn("可能相关测试：", public_template)
         self.assertIn("对应依据：", public_template)
         self.assertIn("测试缺口", public_template)
-        self.assertIn("测试前风险矩阵", public_template)
+        self.assertIn("测试前质量证据矩阵", public_template)
+        self.assertIn("决策方式：evidence-only", public_template)
+        self.assertNotIn("| 技术风险项 |", public_template)
         for english_heading in (
             "BIC Quality Brief",
             "Change Set",
@@ -592,7 +609,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             line for line in instructions.splitlines()
             if line.startswith(f"| `{skill_name}` |")
         )
-        for trigger_term in ("test correspondence", "missing tests", "risk"):
+        for trigger_term in ("test correspondence", "missing tests", "evidence"):
             self.assertIn(trigger_term, skill_text.lower())
             self.assertIn(trigger_term, sop_row.lower())
 
@@ -656,10 +673,8 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         self.assertIn("From the frozen assessment snapshot", skill)
         self.assertIn("Do not recollect Issue metadata", skill)
-        self.assertIn(
-            "Treat `risk_assessment.technical_risk` from the frozen assessment snapshot",
-            skill,
-        )
+        self.assertIn("Read `quality_evidence` from the frozen snapshot", skill)
+        self.assertIn("must not contain `technical_risk`", skill)
         self.assertIn("`thematic-candidate`, even when unique", skill)
         self.assertIn("`requirement_alignment_enabled` and `acceptance_items_eligible` are both true", skill)
         self.assertNotIn("--source-pr", skill)
@@ -676,7 +691,7 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
 
         self.assertLess(
             skill.index("**1B. Freeze the technical scope.**"),
-            skill.index("7. Treat `risk_assessment.technical_risk`"),
+            skill.index("7. Read `quality_evidence`"),
         )
         for value in (
             "`scope`: `in-scope`, `adjacent`, `out-of-scope`, or `cannot-determine`",
@@ -701,19 +716,20 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             deliverables,
         )
 
-    def test_issue_aware_assessment_generates_pretest_risk_matrix(self) -> None:
+    def test_issue_aware_assessment_generates_pretest_quality_evidence(self) -> None:
         without_issue = self.analyze("assess")
         self.assertFalse(without_issue["context"]["issue_context"]["resolved"])
+        self.assertNotIn("risk_assessment", without_issue)
+        evidence = without_issue["quality_evidence"]
+        self.assertEqual(evidence["decision_model"], "evidence-only")
+        for removed in ("overall_risk", "technical_risk", "risk_floor", "risk_matrix"):
+            self.assertNotIn(removed, evidence)
         self.assertEqual(
-            without_issue["risk_assessment"]["overall_risk"],
-            without_issue["risk_assessment"]["technical_risk"],
-        )
-        self.assertEqual(
-            without_issue["risk_assessment"]["requirement_alignment"],
+            evidence["requirement_alignment"],
             "not-enabled",
         )
         self.assertEqual(
-            without_issue["risk_assessment"]["assessment_completeness"],
+            evidence["assessment_completeness"],
             {
                 "overall": "complete-for-technical-pretest",
                 "technical_scope": "assessed",
@@ -726,13 +742,13 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(without_issue["default_report"]["mode"], "technical-only")
         self.assertFalse(without_issue["default_report"]["show_issue_candidate_diagnostics"])
         self.assertNotIn(
-            "issue-clarity",
-            {item["dimension"] for item in without_issue["risk_assessment"]["risk_matrix"]},
+            "requirement-definition",
+            {item["dimension"] for item in evidence["quality_evidence_matrix"]},
         )
 
         assessed = self.analyze("assess", "--issue-file", str(self.issue_file))
         issue = assessed["context"]["issue_context"]
-        risk = assessed["risk_assessment"]
+        evidence = assessed["quality_evidence"]
         self.assertNotIn("test_inventory", assessed)
         self.assertIn("test_correspondence", assessed)
         self.assertEqual(assessed["test_execution_manifest"]["execution_status"], "not-run")
@@ -744,10 +760,10 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
         self.assertEqual(issue["requirement_alignment_origin"], "explicit")
         self.assertEqual(assessed["default_report"]["mode"], "requirement-aligned")
         self.assertTrue(assessed["default_report"]["show_acceptance_alignment"])
-        self.assertEqual(risk["assessment_stage"], "pre-test")
-        self.assertEqual(risk["overall_risk"], "high")
-        self.assertEqual(risk["technical_risk"], "high")
-        self.assertEqual(risk["requirement_alignment"], "pending-review")
+        self.assertEqual(evidence["assessment_stage"], "pre-test")
+        self.assertEqual(evidence["decision_model"], "evidence-only")
+        self.assertEqual(evidence["requirement_alignment"], "pending-review")
+        self.assertTrue(evidence["open_evidence_items"])
         self.assertEqual(
             assessed["technical_scope"],
             without_issue["technical_scope"],
@@ -763,16 +779,26 @@ print(json.dumps(module.recommend_tests(payload['context'], payload['scope'], pa
             set(assessed["scope_fusion"]["technical_test_candidate_ids"])
             <= set(assessed["scope_fusion"]["effective_test_candidate_ids"])
         )
-        dimensions = {item["dimension"] for item in risk["risk_matrix"]}
+        dimensions = {
+            item["dimension"] for item in evidence["quality_evidence_matrix"]
+        }
         self.assertEqual(
             dimensions,
             {
-                "issue-clarity", "impact-breadth", "contract-and-state-boundary",
+                "requirement-definition", "impact-breadth", "contract-and-state-boundary",
                 "test-evidence", "browser-user-journey-evidence", "change-attribution",
             },
         )
-        self.assertTrue(risk["requires_semantic_issue_alignment"])
-        self.assertTrue(all("reason" in item for item in risk["risk_matrix"]))
+        self.assertTrue(evidence["requires_semantic_issue_alignment"])
+        self.assertTrue(all(
+            {"finding", "issue_evidence", "diff_evidence", "test_evidence", "open_evidence"}
+            <= set(item)
+            for item in evidence["quality_evidence_matrix"]
+        ))
+        self.assertTrue(all(
+            "risk_level" not in item
+            for item in evidence["quality_evidence_matrix"]
+        ))
 
     def test_analyzed_content_is_untrusted_data_not_workflow_instruction(self) -> None:
         skill_text = SKILL_FILE.read_text(encoding="utf-8")
@@ -2000,7 +2026,12 @@ raise SystemExit(2)
         self.assertTrue(any("helper_behavior" in item for item in module["no_obvious_test_gaps"]))
         self.assertTrue(any("dependent_behavior" in item for item in module["no_obvious_test_gaps"]))
         self.assertTrue(any("unrelated_behavior" in item for item in module["add_tests"]))
-        self.assertTrue(any("function main" in item for item in module["add_tests"]))
+        main_guidance = next(
+            item for item in module["test_guidance"]
+            if item["action"] == "add" and "main" in item["symbols"]
+        )
+        self.assertEqual(main_guidance["recommended_framework"], "pytest")
+        self.assertTrue(main_guidance["suggested_assertions"])
 
     def test_unrelated_assertion_does_not_clear_dynamic_target_gap(self) -> None:
         workspace = Path(self.temp.name) / "dynamic-unrelated-assertion"
@@ -2384,6 +2415,85 @@ raise SystemExit(2)
         modules = {(item["repo"], item["module_scope"]): item for item in explicit_object_relation["modules"]}
         self.assertFalse(modules[("repo-b", module)]["add_tests"])
         self.assertTrue(any("module-scope b" in reason for reason in modules[("repo-b", module)]["no_obvious_test_gaps"]))
+
+    def test_guidance_is_behavior_grouped_typed_and_file_noise_is_diagnostic(self) -> None:
+        workspace = Path(self.temp.name) / "grouped-guidance"
+        write(workspace / "app/runtime.py", "def _prepare(): ...\ndef _commit(): ...\n")
+        write(workspace / "config/runtime.json", "{}\n")
+        scope = {
+            "changed_files": [
+                {"repo": "BIC-meta", "path": "app/runtime.py", "change_types": ["modified"]},
+                {"repo": "BIC-meta", "path": "config/runtime.json", "change_types": ["modified"]},
+            ],
+            "file_mappings": [
+                {
+                    "repo": "BIC-meta",
+                    "path": "app/runtime.py",
+                    "mapping": {"module_scope": "meta/tooling"},
+                },
+                {
+                    "repo": "BIC-meta",
+                    "path": "config/runtime.json",
+                    "mapping": {"module_scope": "meta/tooling"},
+                },
+            ],
+        }
+        symbols = [
+            {
+                "repo": "BIC-meta",
+                "path": "app/runtime.py",
+                "symbols": [
+                    {"name": "_prepare", "kind": "function"},
+                    {"name": "_commit", "kind": "function"},
+                    {"name": "__all__", "kind": "module-scope"},
+                ],
+            },
+            {
+                "repo": "BIC-meta",
+                "path": "config/runtime.json",
+                "symbols": [{"name": "runtime.json", "kind": "changed-file"}],
+            },
+        ]
+        correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+            workspace, scope, symbols, [], [],
+        )
+        module = correspondence["modules"][0]
+        self.assertEqual(len(module["test_guidance"]), 1)
+        guidance = module["test_guidance"][0]
+        self.assertEqual(guidance["action"], "add")
+        self.assertEqual(guidance["symbols"], ["_commit", "_prepare"])
+        self.assertEqual(guidance["recommended_framework"], "pytest")
+        self.assertEqual(guidance["test_layer"], "unit")
+        self.assertTrue(guidance["suggested_assertions"])
+        diagnostics = {
+            (item["path"], item["symbol"])
+            for item in module["diagnostic_test_guidance"]
+        }
+        self.assertEqual(
+            diagnostics,
+            {
+                ("app/runtime.py", "__all__"),
+                ("config/runtime.json", "runtime.json"),
+            },
+        )
+        capped = TEST_RELATIONS_MODULE.grouped_guidance(
+            "strengthen",
+            "BIC-meta",
+            "meta/tooling",
+            "app/runtime.py",
+            [{"name": "_prepare", "kind": "function"}],
+            [
+                {
+                    "path": f"tests/test_runtime_{index}.py",
+                    "assertions": ["assert result"],
+                }
+                for index in range(7)
+            ],
+            [],
+        )
+        self.assertEqual(capped["existing_test_count"], 7)
+        self.assertEqual(len(capped["existing_tests"]), 5)
+        self.assertEqual(capped["existing_test_overflow"], 2)
 
 
 class BrowserEvidenceAndManifestTest(unittest.TestCase):
@@ -3204,7 +3314,55 @@ test('creates experiment', async ({ request }) => {
             self.assertEqual(possible["related_symbols"], ["create_experiment"])
             self.assertEqual(possible["browser_evidence"]["framework"], "playwright")
             self.assertTrue(possible["browser_evidence"]["has_machine_check"])
-            self.assertTrue(any("Strengthen tests for route create_experiment" in item for item in module["strengthen_tests"]))
+            route_guidance = next(
+                item for item in module["test_guidance"]
+                if "create_experiment" in item["symbols"]
+            )
+            self.assertEqual(route_guidance["action"], "add")
+            self.assertEqual(route_guidance["recommended_framework"], "pytest")
+            browser_guidance = correspondence["browser_test_guidance"][0]
+            self.assertEqual(browser_guidance["action"], "strengthen")
+            self.assertEqual(browser_guidance["recommended_framework"], "playwright")
+            self.assertEqual(browser_guidance["alternative_frameworks"], [])
+
+    def test_streaming_route_guidance_uses_playwright_with_optional_cdp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            write(workspace / "backend/app/routes.py", "# stream route\n")
+            correspondence = TEST_RELATIONS_MODULE.analyze_test_relations(
+                workspace,
+                {
+                    "file_mappings": [{
+                        "repo": "backend",
+                        "path": "backend/app/routes.py",
+                        "mapping": {"module_scope": "agent/sse"},
+                    }],
+                    "changed_files": [{
+                        "repo": "backend",
+                        "path": "backend/app/routes.py",
+                        "change_types": ["modified"],
+                    }],
+                },
+                [{
+                    "repo": "backend",
+                    "path": "backend/app/routes.py",
+                    "change_types": ["modified"],
+                    "symbols": [{
+                        "name": "stream_events",
+                        "kind": "route",
+                        "route_method": "GET",
+                        "route_path": "/sessions/{id}/stream",
+                    }],
+                }],
+                [],
+                [],
+            )
+            guidance = correspondence["browser_test_guidance"][0]
+            self.assertEqual(guidance["action"], "add")
+            self.assertEqual(guidance["recommended_framework"], "playwright")
+            self.assertEqual(guidance["alternative_frameworks"], ["cdp"])
+            self.assertEqual(guidance["test_layer"], "browser-user-journey")
+            self.assertTrue(guidance["suggested_assertions"])
 
     def test_dynamic_frontend_url_template_bridges_prefixed_backend_route(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -10,7 +10,7 @@ BIC 质量简报
 - 多仓事实：<single/multi-repository only; repository count is not business-chain evidence>
 - 需求对齐：<authoritative Issue and origin, or “未启用；本次仅评估技术范围”>
 - 测试判断：<strongest existing test evidence and the key behavior gaps>
-- 风险结论：<workspace-level pre-test risk; do not invent per-stream attribution>
+- 证据结论：<strongest established fact and most important open evidence; no severity label>
 
 变更集
 - 比较基线：
@@ -42,21 +42,19 @@ BIC 质量简报
 - 对应依据：
 - 扫描 warning：<skipped symlink/outside-repository/sensitive candidates, if any>
 
-测试前风险矩阵
-| 技术风险项 | Diff 依据 | 测试依据 | 等级 | 判断 |
-|---|---|---|---|---|
-| <technical dimension> | <changed file/object> | <test fact or missing evidence> | high/medium/low | <reason> |
-- 需求验收风险：<仅在需求对齐启用时，逐验收项补充；否则整项不出现>
-- 技术风险：
+测试前质量证据矩阵
+| 检查面 | 发现 | Issue 依据 | Diff 依据 | 测试依据 | 未闭合证据 |
+|---|---|---|---|---|---|
+| <quality dimension> | <static finding> | <authoritative requirement fact or not-enabled> | <changed file/object> | <test fact or missing evidence> | <runtime/human evidence still needed> |
+- 决策方式：evidence-only（不输出 high/medium/low、技术风险或整体风险）
 - 需求对齐：<pending-review/insufficient-definition；技术模式下写 not-enabled>
 - 评估完整度：<technical scope, requirement scope, and test execution status>
-- 整体已知风险：<must not be lower than technical risk>
 - 评估阶段：真正测试前（pre-test）
 
 测试缺口
-- 需求验收测试（requirement-traced）：<仅在需求对齐启用时出现>
-- 技术回归测试（technical-regression）：
-- 探索性风险测试（exploratory）：
+- 需求验收测试（requirement-traced）：<仅在需求对齐启用时出现；列行为、测试层、框架、断言>
+- 技术回归测试（technical-regression）：<列 add/strengthen、目标行为、测试层、推荐框架、已有弱证据、建议断言>
+- 探索性测试（exploratory）：<列无法静态闭合的旅程或运行时行为及合适测试层>
 - 暂未发现明显缺口：
 
 第二阶段测试执行交接（本阶段不执行）
@@ -81,7 +79,7 @@ brief concise:
   core modules, report multi-repository change only as a workspace fact, and do
   not infer one business/contract chain from repository count. Summarize the
   requirement-alignment mode, strongest existing test evidence, key gaps, and
-  workspace-level pre-test risk. If changes appear unrelated, state that
+  the most important open evidence. If changes appear unrelated, state that
   business-flow attribution is unresolved rather than inventing streams or
   assigning global counts to them.
 - Do not print `mapping_source`; it is raw diagnostic metadata. If the module is
@@ -119,7 +117,7 @@ brief concise:
   hydration details, Issue lookup warnings, acceptance placeholders, divergence,
   or requirement-traced guidance in the default brief. Those fields remain in
   raw JSON for an explicitly requested Issue-matching diagnostic.
-- Start `测试前风险矩阵` with the deterministic rows from
+- Start `测试前质量证据矩阵` with the evidence-only rows from
   `assess-risk-matrix.sh`. Add one Issue-alignment row per eligible, in-scope
   acceptance item using semantic reading of Issue, Diff, and tests. Requirement
   review is a separate pass after technical review. For each item, report
@@ -128,13 +126,12 @@ brief concise:
   verdict for several items. A positive implementation statement cites one
   exact changed file/object/route/journey. Every in-scope item cites one exact
   test/assertion or explicitly states that no test was found. Keep adjacent and
-  out-of-scope items outside the matrix. Missing Diff or test evidence may raise
-  the risk; never lower the deterministic risk floor.
+  out-of-scope items outside the matrix. Report missing evidence explicitly;
+  never translate it into a severity label.
 - Use `not-enabled` for requirement alignment when there is no authoritative
   Issue. Omit `issue-clarity` and all requirement rows in that mode; the remaining
-  matrix is a complete technical pre-test assessment. Preserve the technical
-  risk derived from Diff/test facts. This is not a claim about executed
-  verification or residual release risk.
+  matrix is a complete technical pre-test assessment. This is not a claim about
+  executed verification or residual release risk.
 - Collect open Issue candidates only from repositories identified by the Diff.
   Treat an explicit Issue override as authoritative. Auto-detect the current PR
   when available, but do not treat historical PR URLs supplied in conversation
@@ -170,7 +167,7 @@ brief concise:
   not inherit authority. Leave requirement alignment `not-enabled` without
   authoritative provenance; do not
   infer identity from repository membership, a general keyword, or filename
-  similarity alone, and do not erase technical risk.
+  similarity alone.
 - Report Issue-to-Diff divergence only when the eligible item evidence supports
   it. Preserve technical objects and recommendations that an Issue does not
   mention. If attribution is incomplete, use `cannot-determine` instead of
@@ -179,8 +176,18 @@ brief concise:
   `exploratory`. The effective guidance is their union. A single asset may carry
   multiple labels but is described once; Issue alignment never removes or
   downgrades technical-regression guidance.
+- Render every add/strengthen item as an actionable behavior-level suggestion:
+  include action, target behavior, test layer, recommended framework, existing
+  weak evidence, and suggested observable assertions. Group related private
+  helpers in the same source file instead of printing one item per symbol.
+  Show no more than five weak test paths in one guidance item and report the
+  total/overflow count; keep the full path set in raw correspondence evidence.
+  Backend behavior normally uses pytest; frontend unit/component behavior uses
+  Vitest and React Testing Library; browser user journeys use Playwright; CDP is
+  suggested only for protocol-level evidence such as streaming/network/console
+  diagnostics, not as the default UI test layer.
 - Do not include the raw `test_inventory` in the final `assess` payload or
-  brief. Use derived test correspondence and risk evidence. Raw inventory
+  brief. Use derived test correspondence and quality evidence. Raw inventory
   remains available through the standalone inventory/suggest diagnostics.
 - Summarize the emitted `test_execution_manifest` without executing it. State
   its change fingerprint, required/optional candidates, unresolved commands,
@@ -192,6 +199,7 @@ brief concise:
 - Do not recommend tests for pure documentation or planning records unless the
   repository defines an executable documentation contract.
 - Do not call an acceptance item satisfied, passed, complete, or verified: no
-  test was executed. Do not emit confidence, priority, evidence-type, coverage-percentage,
-  `mapping_source`, or a next-step recommendation. State the static-analysis
-  limitation once, at the end.
+  test was executed. Do not emit confidence, priority, evidence-type,
+  coverage-percentage, severity, `technical_risk`, `overall_risk`,
+  `risk_floor`, `mapping_source`, or a general next-step recommendation. State
+  the static-analysis limitation once, at the end.

@@ -132,16 +132,51 @@ scan-only nodes.
 
 Keep correspondence facts separate from the need to add tests:
 
-- Recommend a new test when a changed object has no active direct or indirect
-  test with an assertion.
-- Recommend strengthening a test when an object-specific relation is
-  assertion-free, skipped, xfailed, todo, or based only on a matching file.
+- Recommend a new test when changed behavior has no active direct or safe
+  indirect test with a target-linked assertion.
+- Recommend strengthening a test only when a concrete object-specific relation
+  is assertion-free, skipped, xfailed, todo, or has an assertion that does not
+  consume the changed behavior's result.
 - State that no obvious static gap was found when an active direct,
   safe-one-hop, or explicitly object-mapped test contains an assertion for the
   changed object or behavior.
 
-Broad module/scenario candidates remain useful search context but do not clear
-an object-level gap.
+Broad module/scenario candidates, file-only objects, `__all__`, and possible
+relations remain diagnostic search context. They neither clear an object-level
+gap nor create a standalone strengthening recommendation.
+
+Group guidance by source file and target behavior. Several related private
+helpers in one file should produce one recommendation, with their symbols
+listed as evidence, rather than one line per declaration. Every structured item
+contains:
+
+- `action`: `add` or `strengthen`;
+- `target_behavior`;
+- `test_layer`;
+- `recommended_framework` and any `alternative_frameworks`;
+- `existing_tests` and concrete `evidence_gaps`;
+- `suggested_assertions` describing observable outcomes.
+
+Keep guidance concise: show at most five existing weak test paths together with
+`existing_test_count` and `existing_test_overflow`. The complete untruncated
+relation evidence remains available in the direct/indirect correspondence
+fields.
+
+Choose the test layer from the behavior under change:
+
+- backend route/service/repository behavior: pytest;
+- frontend store/hook/API-client behavior: Vitest, optionally React Testing
+  Library when component integration matters;
+- frontend component behavior: Vitest plus React Testing Library;
+- a user-visible frontend-to-backend journey: Playwright;
+- protocol-level browser/network/console/streaming diagnostics: CDP, usually as
+  an alternative or companion to Playwright rather than the default UI test.
+
+For changed backend routes, emit separate browser-journey guidance. Strengthen a
+completed static path when its browser scenario lacks a target-linked machine
+check; add a Playwright journey when no completed static path exists. Suggested
+assertions should cover the triggering action/request, the user-visible result,
+and an important failure or reload/state transition.
 
 Do not generate add/strengthen guidance for documentation, Skill/reference, or
 planning-only paths. An existing concrete relation may still describe an
@@ -159,7 +194,7 @@ a general next-step recommendation field. Do not recommend tests for
 documentation or planning files without an executable documentation contract.
 
 These outcomes are not risk, priority, confidence, pass/fail, or proof of
-runtime coverage. Describe the concrete missing object or scenario in natural
+runtime coverage. Describe the concrete behavior and assertion in natural
 language.
 
 ## Phase 2 handoff

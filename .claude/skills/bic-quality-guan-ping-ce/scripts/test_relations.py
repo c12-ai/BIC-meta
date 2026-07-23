@@ -25,6 +25,7 @@ TOKEN_STOPWORDS = {
 NON_SOURCE_TEST_MODULES = {"portal/tests", "agent/tests", "meta/docs", "meta/test-config"}
 DOCUMENTATION_SUFFIXES = {".adoc", ".md", ".mdx", ".rst"}
 DOCUMENTATION_DIRECTORIES = {"docs", "references"}
+FILE_ONLY_GUIDANCE_KINDS = {"file", "changed-file"}
 JOURNEY_SOURCE_SUFFIXES = {".js", ".jsx", ".ts", ".tsx"}
 JOURNEY_SCAN_EXCLUDES = {
     ".git", ".agents", ".claude", ".trellis", ".venv", "node_modules",
@@ -34,6 +35,7 @@ MAX_JOURNEY_EDGES = 2000
 MAX_JOURNEY_PATHS = 40
 MAX_JOURNEY_PATH_DEPTH = 7
 MAX_JOURNEY_OUTPUT_NODES = MAX_JOURNEY_EDGES * 2 + MAX_JOURNEY_PATHS
+MAX_GUIDANCE_EXISTING_TESTS = 5
 
 
 def guidance_applicability(path: str, module_scope: str) -> tuple[bool, str | None]:
@@ -46,6 +48,224 @@ def guidance_applicability(path: str, module_scope: str) -> tuple[bool, str | No
     if {part.lower() for part in parsed.parts} & DOCUMENTATION_DIRECTORIES:
         return False, "documentation/reference path"
     return True, None
+
+
+def guidance_profile(
+    repo: str,
+    module_scope: str,
+    path: str,
+    symbols: list[dict[str, Any]],
+) -> tuple[str, str, list[str]]:
+    """Choose a concrete test layer/framework without pretending it is universal."""
+    kinds = {str(symbol.get("kind") or "") for symbol in symbols}
+    lowered = path.lower()
+    if "route" in kinds:
+        return "backend-route", "pytest", []
+    if "component" in kinds:
+        return "frontend-component", "vitest", ["react-testing-library"]
+    if kinds & {"api-client", "store-or-action", "hook"}:
+        return "frontend-unit-integration", "vitest", ["react-testing-library"]
+    if "/repositories/" in lowered or "database" in module_scope:
+        return "repository", "pytest", []
+    if any(token in lowered for token in ("/session/", "/service", "/runtime/", "/core/")):
+        return "service-unit", "pytest", []
+    if Path(path).suffix.lower() in {".js", ".jsx", ".ts", ".tsx"}:
+        return "frontend-unit", "vitest", []
+    if Path(path).suffix.lower() == ".py" or repo.endswith("-service"):
+        return "unit", "pytest", []
+    return "executable-contract", "project-native", []
+
+
+def suggested_assertions(
+    path: str,
+    symbols: list[dict[str, Any]],
+) -> list[str]:
+    """Return behavior-facing assertions for one grouped recommendation."""
+    kinds = {str(symbol.get("kind") or "") for symbol in symbols}
+    lowered = path.lower()
+    routes = [
+        f"{symbol.get('route_method', '')} {symbol.get('route_path', '')}".strip()
+        for symbol in symbols
+        if symbol.get("kind") == "route" and symbol.get("route_path")
+    ]
+    if routes:
+        return [
+            f"assert the request method/path and response contract for {', '.join(routes)}",
+            "assert the intended state mutation or downstream call",
+            "assert not-found, authorization, and downstream-failure behavior where applicable",
+        ]
+    if "component" in kinds:
+        return [
+            "assert the user-visible state after the changed interaction",
+            "assert failure/disabled state instead of only rendering or clicking",
+            "assert sibling state is not changed unintentionally",
+        ]
+    if kinds & {"api-client"}:
+        return [
+            "assert request method, path, payload, and response mapping",
+            "assert empty/error responses are handled explicitly",
+        ]
+    if kinds & {"store-or-action", "hook"}:
+        return [
+            "assert the intended state transition",
+            "assert rollback/error behavior and unaffected sibling state",
+        ]
+    if "/repositories/" in lowered:
+        return [
+            "assert the persisted/query result for the changed key",
+            "assert missing-row and idempotent behavior",
+        ]
+    if any(token in lowered for token in ("observability", "trace", "runtime")):
+        return [
+            "assert emitted metadata/attributes and lifecycle calls",
+            "assert cleanup and failure behavior",
+        ]
+    return [
+        "assert the changed return value or state transition",
+        "assert the relevant failure or boundary case",
+    ]
+
+
+def relation_weakness(relation: dict[str, Any]) -> str:
+    """Describe a concrete test defect, not mere structural proximity."""
+    if relation.get("disabled_tests"):
+        return "the related test is skipped, disabled, todo, or xfailed"
+    browser = relation.get("browser_evidence")
+    if browser and not browser.get("has_machine_check"):
+        return "the browser scenario has actions/observations but no target-linked machine check"
+    if relation.get("assertions"):
+        return "assertions exist but are not linked to the changed object's result or state"
+    return "the related test has no active assertion"
+
+
+def grouped_guidance(
+    action: str,
+    repo: str,
+    module_scope: str,
+    path: str,
+    symbols: list[dict[str, Any]],
+    weak_relations: list[dict[str, Any]],
+    missing_relation_symbols: list[str],
+) -> dict[str, Any]:
+    layer, framework, alternatives = guidance_profile(repo, module_scope, path, symbols)
+    symbol_names = sorted({str(symbol.get("name") or "") for symbol in symbols if symbol.get("name")})
+    route = next((symbol for symbol in symbols if symbol.get("kind") == "route"), None)
+    if route:
+        behavior = (
+            f"{route.get('route_method', '')} {route.get('route_path', '')}".strip()
+            or route.get("name")
+        )
+    else:
+        behavior = f"{Path(path).stem.replace('_', ' ')} behavior"
+    all_existing_tests = sorted({
+        str(relation.get("path"))
+        for relation in weak_relations
+        if relation.get("path")
+    })
+    evidence_gaps = sorted({
+        relation_weakness(relation)
+        for relation in weak_relations
+    })
+    if missing_relation_symbols:
+        evidence_gaps.append(
+            "no object-specific test relation was found for: "
+            + ", ".join(sorted(set(missing_relation_symbols)))
+        )
+    if action == "add":
+        evidence_gaps = ["no active direct or safe-indirect test asserts this changed behavior"]
+    return {
+        "action": action,
+        "repo": repo,
+        "module_scope": module_scope,
+        "path": path,
+        "symbols": symbol_names,
+        "target_behavior": behavior,
+        "test_layer": layer,
+        "recommended_framework": framework,
+        "alternative_frameworks": alternatives,
+        "existing_test_count": len(all_existing_tests),
+        "existing_tests": all_existing_tests[:MAX_GUIDANCE_EXISTING_TESTS],
+        "existing_test_overflow": max(
+            0, len(all_existing_tests) - MAX_GUIDANCE_EXISTING_TESTS
+        ),
+        "evidence_gaps": evidence_gaps,
+        "suggested_assertions": suggested_assertions(path, symbols),
+    }
+
+
+def guidance_summary(item: dict[str, Any]) -> str:
+    verb = "Add" if item["action"] == "add" else "Strengthen"
+    symbols = ", ".join(item.get("symbols") or []) or item["target_behavior"]
+    return (
+        f"{verb} {item['recommended_framework']} {item['test_layer']} tests for "
+        f"{item['target_behavior']} in {item['path']} covering: {symbols}."
+    )
+
+
+def browser_journey_guidance(
+    changed_symbols: list[dict[str, Any]],
+    journey_graph: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Recommend browser evidence separately from object-level unit guidance."""
+    completed_by_anchor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for path in journey_graph.get("paths", []):
+        completed_by_anchor[str(path.get("anchor") or "")].append(path)
+    guidance: list[dict[str, Any]] = []
+    for source in changed_symbols:
+        for symbol in source.get("symbols", []):
+            if symbol.get("kind") != "route" or not symbol.get("route_path"):
+                continue
+            anchor = (
+                f"changed:{source.get('repo')}:{source.get('path')}:{symbol.get('name')}"
+            )
+            completed = completed_by_anchor.get(anchor, [])
+            scenarios = sorted({
+                str(path.get("scenario"))
+                for path in completed
+                if path.get("scenario")
+            })
+            action = "strengthen" if completed else "add"
+            method_path = (
+                f"{symbol.get('route_method', '')} {symbol.get('route_path', '')}".strip()
+            )
+            protocol_terms = {
+                token.lower()
+                for token in re.findall(
+                    r"[A-Za-z]+",
+                    f"{symbol.get('name', '')} {symbol.get('route_path', '')}",
+                )
+            }
+            alternatives = (
+                ["cdp"]
+                if protocol_terms & {"sse", "stream", "streaming", "websocket", "console"}
+                else []
+            )
+            guidance.append({
+                "action": action,
+                "repo": source.get("repo"),
+                "module_scope": "cross-stack-user-journey",
+                "path": source.get("path"),
+                "symbols": [symbol.get("name")],
+                "target_behavior": f"end-to-end user behavior for {method_path}",
+                "test_layer": "browser-user-journey",
+                "recommended_framework": "playwright",
+                "alternative_frameworks": alternatives,
+                "existing_tests": scenarios,
+                "evidence_gaps": [
+                    (
+                        "a static browser path exists, but its machine check is not tied to "
+                        "the changed route's user-visible outcome"
+                    )
+                    if completed else
+                    "no completed static path reaches a browser scenario"
+                ],
+                "suggested_assertions": [
+                    f"assert the browser issues {method_path} and consumes its result",
+                    "assert the user-visible success state after the action",
+                    "assert failure state and persistence after reload when applicable",
+                ],
+            })
+    return guidance
 
 
 def repo_local(path: str, repo: str) -> str:
@@ -1629,8 +1849,8 @@ def analyze_test_relations(
                     [],
                 ))
 
-        add_tests: list[str] = []
-        strengthen_tests: list[str] = []
+        guidance_groups: dict[str, dict[str, Any]] = {}
+        diagnostic_test_guidance: list[dict[str, Any]] = []
         no_gaps: list[str] = []
         non_testable_changes: dict[str, str] = {}
         for symbol in flattened_symbols:
@@ -1667,13 +1887,6 @@ def analyze_test_relations(
                 and name in relation["assertion_linked_symbols"]
                 for relation in indirect_for_object
             )
-            possible_for_object = any(
-                symbol["path"] in relation["related_files"]
-                for relation in possible
-            )
-            needs_strengthening = bool(
-                direct_for_object or indirect_for_object or possible_for_object
-            )
             if "added" in symbol.get("change_types", []):
                 observation = "declared in an added file"
             elif symbol["kind"] == "module-scope":
@@ -1683,10 +1896,62 @@ def analyze_test_relations(
             subject = f"{symbol['kind']} {name} in {symbol['path']} ({observation})"
             if active_direct or active_indirect:
                 no_gaps.append(f"No obvious static gap for {subject}: an active object-related test contains an assertion.")
-            elif needs_strengthening:
-                strengthen_tests.append(f"Strengthen tests for {subject}: related evidence is only structural/scenario-based, disabled, or has no assertion.")
+                continue
+            if symbol["kind"] in FILE_ONLY_GUIDANCE_KINDS or name == "__all__":
+                diagnostic_test_guidance.append({
+                    "path": symbol["path"],
+                    "symbol": name,
+                    "reason": (
+                        "file-level attribution is diagnostic-only"
+                        if symbol["kind"] in FILE_ONLY_GUIDANCE_KINDS
+                        else "export-list changes do not receive standalone test guidance"
+                    ),
+                })
+                continue
+            weak_relations = [
+                relation
+                for relation in [*direct_for_object, *indirect_for_object]
+                if not relation.get("has_active_test_with_assertion")
+            ]
+            group = guidance_groups.setdefault(
+                symbol["path"],
+                {
+                    "action": "add",
+                    "path": symbol["path"],
+                    "symbols": [],
+                    "weak_relations": [],
+                    "missing_relation_symbols": [],
+                },
+            )
+            group["symbols"].append(symbol)
+            group["weak_relations"].extend(weak_relations)
+            if weak_relations:
+                group["action"] = "strengthen"
             else:
-                add_tests.append(f"Add a test for {subject}: no related test was found by imports, identifiers, configured relations, filename, or module structure.")
+                group["missing_relation_symbols"].append(name)
+
+        test_guidance = [
+            grouped_guidance(
+                group["action"],
+                repo,
+                module,
+                group["path"],
+                group["symbols"],
+                group["weak_relations"],
+                group["missing_relation_symbols"],
+            )
+            for _key, group in sorted(guidance_groups.items())
+        ]
+        add_tests = [
+            guidance_summary(item)
+            for item in test_guidance
+            if item["action"] == "add"
+        ]
+        strengthen_tests = [
+            guidance_summary(item)
+            for item in test_guidance
+            if item["action"] == "strengthen"
+        ]
 
         module_results.append({
             **module_ref(key),
@@ -1704,6 +1969,8 @@ def analyze_test_relations(
             "possibly_related_tests": possible,
             "add_tests": add_tests,
             "strengthen_tests": strengthen_tests,
+            "test_guidance": test_guidance,
+            "diagnostic_test_guidance": diagnostic_test_guidance,
             "no_obvious_test_gaps": no_gaps,
             "non_testable_changes": [
                 {"path": path, "reason": reason}
@@ -1714,8 +1981,16 @@ def analyze_test_relations(
     journey_graph = build_user_journey_graph(
         workspace_root, scope, changed_symbols, discovered_assets,
     )
+    browser_guidance = browser_journey_guidance(changed_symbols, journey_graph)
+    all_guidance = [
+        item
+        for module in module_results
+        for item in module.get("test_guidance", [])
+    ] + browser_guidance
     return {
         "modules": module_results,
         "user_journey_graph": journey_graph,
+        "test_guidance": all_guidance,
+        "browser_test_guidance": browser_guidance,
         "analysis_note": "Static correspondence only. Tests were not executed, and assertions do not prove passing behavior or complete coverage.",
     }

@@ -3,12 +3,12 @@ name: bic-quality-guan-ping-ce
 description: >-
   Use when asked to perform BIC quality review, Guan/Ping/Ce analysis, current
   diff module analysis, test correspondence analysis, test scope recommendation,
-  issue-aware diff risk assessment, risk matrix generation, or missing tests
+  issue-aware diff quality assessment, evidence matrix generation, or missing tests
   review. This skill performs read-only analysis only: it inspects complete
   local branch/worktree changes, maps affected repositories and modules, scans
   their GitHub Issues, maps diff hunks to multi-language declarations, relates
   backend, Playwright, and CDP evidence to changed behavior, and returns a
-  structured `BIC 质量简报` with a pre-test risk matrix and a non-executing
+  structured `BIC 质量简报` with a pre-test quality evidence matrix and a non-executing
   Phase 2 test manifest.
 ---
 
@@ -30,8 +30,8 @@ Do:
   an explicit Issue as an override. Enable requirement alignment only for an
   explicit Issue or one unique linked/closing Issue from an auto-detected current
   PR. Keep an ordinary keyword/module match as a diagnostic thematic candidate;
-  it is not the change's requirement source, its acceptance items are not risk
-  inputs, and it stays out of the default brief.
+  it is not the change's requirement source, its acceptance items are not
+  requirement-alignment inputs, and it stays out of the default brief.
 - Identify the changed repository for every file, map its module when supported,
   and preserve unmapped files without inventing semantics.
 - Explain which existing tests directly, indirectly, or possibly correspond to
@@ -40,8 +40,9 @@ Do:
   browser actions and observations separate from machine-checkable assertions;
   screenshots or clicks alone do not establish a passing user journey.
 - Identify tests to add or strengthen by static source inspection.
-- Generate an evidence-backed pre-test Risk Matrix that preserves technical
-  risk independently from requirement alignment.
+- Generate an evidence-backed pre-test Quality Evidence Matrix. Do not assign
+  high/medium/low, an overall risk, or a release verdict; the reader decides
+  risk from the cited Diff, test, browser, and open-evidence facts.
 - Output one structured `BIC 质量简报`.
 - Emit a fingerprint-bound `test_execution_manifest` for a separately
   authorized Phase 2. It remains `not-run`; Phase 1 never executes its commands.
@@ -147,7 +148,7 @@ If the user asks to execute tests, state that this skill only provides read-only
      parent candidate.
    - **1D. Freeze the fused snapshot and scan state.** Preserve the returned
      `context`, `scope`, `technical_scope`, `requirement_scope`, `scope_fusion`,
-     `issue_context`, `test_correspondence`, and `risk_assessment`, plus
+     `issue_context`, `test_correspondence`, and `quality_evidence`, plus
      all comparison, scan, hydration, deadline, and query warnings. Use these
      same values through steps 3–7. A later standalone diagnostic may expose raw
      details when explicitly needed, but it must not replace or silently merge
@@ -158,7 +159,7 @@ If the user asks to execute tests, state that this skill only provides read-only
    - `references/workspace-map.md` for repository map.
    - `references/scope-taxonomy.md` for scope taxonomy meaning.
    - `references/test-analysis-rules.md` for changed-object and test correspondence rules.
-   - `references/risk-model.md` for Issue alignment and pre-test risk rules.
+   - `references/risk-model.md` for Issue alignment and pre-test evidence rules.
    - `references/deliverables.md` for output format.
 3. From the frozen assessment snapshot, read
    `issue_context.requirement_alignment_enabled` as the only default-report
@@ -205,7 +206,7 @@ If the user asks to execute tests, state that this skill only provides read-only
    `(repo, module_scope)`: `relates_modules` applies only to the entry's own
    repository, while `relates_repository_modules` is the only allowed explicit
    cross-repository declaration. Use the full inventory internally, but keep it
-   out of the final `assess` JSON after correspondence and risk are derived. Run
+   out of the final `assess` JSON after correspondence and evidence are derived. Run
    `scripts/inspect-test-inventory.sh` or the `suggest` diagnostic only when raw
    test-asset details are needed.
    Parse Playwright tests and CDP scenarios without running them. Record browser
@@ -214,18 +215,26 @@ If the user asks to execute tests, state that this skill only provides read-only
    bounded `user_journey_graph` completed and partial paths; its import/literal
    edges are static evidence and always keep `clears_object_gap: false`. Browser steps
    without such a check remain correspondence only and require strengthening.
-6. Keep relation facts separate from add-test guidance. Report direct and safe
+6. Keep relation facts separate from test guidance. Report direct and safe
    indirect relations, possible candidates, tests to add, tests to strengthen,
    and modules with no obvious static gap. Possible candidates are search clues,
-   not proof of coverage. Do not attach confidence, risk, priority,
-   evidence-type, or coverage-percentage labels to individual test relations or
-   missing-test items; risk levels belong only in the Risk Matrix.
-7. Treat `risk_assessment.technical_risk` from the frozen assessment snapshot as
-   the deterministic risk floor; do not run the wrapper again. Keep
+   not proof of coverage. Generate add/strengthen guidance only for a concrete
+   behavior-level gap: group related changed objects in the same source file,
+   name the target behavior, state `test_layer`, recommend a framework, list
+   existing weak evidence, and suggest observable assertions. Do not turn a
+   file-only object, `__all__`, broad module match, or possible relation into a
+   standalone “strengthen” item. Backend behavior normally maps to pytest,
+   frontend unit/component behavior to Vitest/React Testing Library, user
+   journeys to Playwright, and protocol-level browser diagnostics to CDP.
+   Do not attach confidence, risk, priority, evidence-type, or
+   coverage-percentage labels to individual relations or guidance.
+7. Read `quality_evidence` from the frozen snapshot; do not run the wrapper
+   again. It is evidence-only and must not contain `technical_risk`,
+   `overall_risk`, `risk_floor`, or high/medium/low labels. Keep
    `requirement_alignment` separate. Missing, thematic, reference-hint, or
    ambiguous Issue context sets requirement alignment to `not-enabled`; this is
    a complete technical-only pre-test assessment, not a partial requirement
-   assessment. It cannot erase or lower technical risk. Run requirement
+   assessment. Run requirement
    verification as a separate pass after technical review only when
    `requirement_alignment_enabled` and `acceptance_items_eligible` are both true.
    For every eligible acceptance item,
@@ -239,9 +248,9 @@ If the user asks to execute tests, state that this skill only provides read-only
    implementation claim and one exact test/assertion or explicit missing-test
    statement for every `in-scope` item. Never group several items under one
    blanket verdict. Do not say `satisfied`, `passed`, or `complete`: this phase
-   has static evidence only. Add risk rows only for `in-scope` items; report
-   adjacent and out-of-scope items as context so an umbrella Issue cannot
-   inflate this change's risk matrix. If an item has no concrete comparison
+   has static evidence only. Add requirement evidence rows only for `in-scope`
+   items; report adjacent and out-of-scope items as context so an umbrella Issue
+   cannot distort this change's evidence matrix. If an item has no concrete comparison
    evidence, use `cannot-determine`/`cannot-verify` rather than guessing. An ordinary
    `thematic-candidate`, even when unique and semantically similar, remains
    background context, receives no acceptance-item comparison, and keeps
@@ -252,12 +261,12 @@ If the user asks to execute tests, state that this skill only provides read-only
    `narrow-issue-broad-diff` when concrete technical objects have no mapped
    acceptance item, `broad-issue-narrow-diff` when an in-scope item has
    `static-evidence-missing`, or `cannot-determine` when the evidence does not
-   support either direction. These divergence labels may raise requirement
-   risk but never filter technical scope. Group missing-test guidance as
+   support either direction. These divergence labels describe unresolved scope
+   evidence but never filter technical scope. Group missing-test guidance as
    `requirement-traced`, `technical-regression`, or `exploratory`; the effective
    guidance is their union, and existing technical guidance must remain present.
-   Never lower the risk floor or infer alignment from keyword overlap alone.
-   This matrix describes pre-test verification risk, not residual risk.
+   Never infer alignment from keyword overlap alone. This matrix describes
+   pre-test evidence and open questions, not a release-risk verdict.
 8. Preserve `test_execution_manifest` from the frozen snapshot. It contains
    affected repository heads/bases and change fingerprints, required direct and
    indirect candidates, optional possible candidates, selected cases, command
@@ -277,15 +286,15 @@ paths, imports/references, scenarios, assertions, disabled state, or explicit
 repository-qualified relations. Start with the concise `核心结论` required by the
 template; it must summarize rather than add evidence, labels, or recommendations.
 The current analyzer emits one workspace-level Issue context, test
-correspondence, and pre-test risk assessment. Do not invent business change
-streams or distribute global test counts and risk rows among inferred streams.
+correspondence, and pre-test quality evidence assessment. Do not invent business
+change streams or distribute global test counts and evidence rows among inferred streams.
 If the workspace appears to contain unrelated changes, state that business-flow
 attribution is unresolved and report repository/module facts without claiming a
-shared chain or per-stream risk. State the selected base once. State once at the
+shared chain or per-stream verdict. State the selected base once. State once at the
 end that tests were not executed and static correspondence does not prove
 pass/fail. The Phase 2 manifest is a handoff contract, not a recommendation or
 execution result. Do not add a next-step recommendation field beyond the
 missing-test guidance defined by the template. If no authoritative Issue is
 available, use the technical-only report mode: show the one-line requirement
-alignment notice, preserve the known technical risk, and omit Issue candidate
-diagnostics and requirement-facing rows from the default brief.
+alignment notice and omit Issue candidate diagnostics and requirement-facing
+rows from the default brief.
